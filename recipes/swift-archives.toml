@@ -1,0 +1,21 @@
+[recipe]
+id = "swift-archives"
+name = "Xcode Archives"
+description = "Xcode archives of iOS/macOS apps"
+category = "swift"
+safety_level = "cautious"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/Library/Developer/Xcode/Archives/**"
+min_age_days = 90
+
+[action]
+type = "trash"
+prompt = "Move {size} of Xcode archives to Trash?"
+group = true
+
+[test]
+should_match = ["~/Library/Developer/Xcode/Archives/2026-01-01/App.xcarchive"]
+should_not_match = ["~/Library/Developer/Xcode/DerivedData"]

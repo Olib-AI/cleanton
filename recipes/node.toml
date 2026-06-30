@@ -1,0 +1,28 @@
+[recipe]
+id = "node-modules"
+name = "Node Dependencies"
+description = "node_modules directories with local package.json evidence"
+category = "node"
+icon = "fa-node-js"
+safety_level = "safe"
+enabled = true
+priority = 80
+
+[match]
+directory_name = "node_modules"
+parent_must_contain = ["package.json"]
+min_size_mb = 10
+
+[match.exclude]
+paths = []
+names = [".cache"]
+
+[action]
+type = "trash"
+prompt = "Move {size} of Node dependencies to Trash?"
+group = true
+
+[test]
+should_match = ["projects/web/node_modules"]
+should_not_match = ["projects/web/src", "loose/node_modules"]
+

@@ -1,0 +1,22 @@
+[recipe]
+id = "apps-orphaned-preferences"
+name = "Orphaned Preferences"
+description = "Orphaned Application plist files"
+category = "apps"
+safety_level = "cautious"
+# Superseded by engine-side orphan detection (orphans.rs)
+enabled = false
+priority = 50
+
+[match]
+path_glob = "~/Library/Preferences/com.orphaned.app.plist"
+min_age_days = 60
+
+[action]
+type = "trash"
+prompt = "Move {size} of orphaned preferences to Trash?"
+group = true
+
+[test]
+should_match = ["~/Library/Preferences/com.orphaned.app.plist"]
+should_not_match = ["~/Library/Preferences/com.apple.Xcode.plist"]

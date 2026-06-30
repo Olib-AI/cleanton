@@ -1,0 +1,23 @@
+[package]
+name = "cleanton-services"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+cleanton-common.workspace = true
+serde.workspace = true
+plist = "1"
+tokio = { version = "1", features = ["process", "macros", "rt", "sync"] }
+serde_json.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+

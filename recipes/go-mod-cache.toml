@@ -1,0 +1,21 @@
+[recipe]
+id = "go-mod-cache"
+name = "Go Module Cache"
+description = "Go module cache directory"
+category = "go"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/go/pkg/mod/cache/**"
+min_age_days = 30
+
+[action]
+type = "trash"
+prompt = "Move {size} of Go module cache to Trash?"
+group = true
+
+[test]
+should_match = ["~/go/pkg/mod/cache/download/github.com/foo/@v/v1.0.0.zip"]
+should_not_match = ["~/go/pkg/mod/foo"]

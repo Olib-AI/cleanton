@@ -1,0 +1,22 @@
+[recipe]
+id = "apps-orphaned-support"
+name = "Orphaned Application Support"
+description = "Orphaned Library Application Support folders"
+category = "apps"
+safety_level = "aggressive"
+# Superseded by engine-side orphan detection (orphans.rs)
+enabled = false
+priority = 50
+
+[match]
+path_glob = "~/Library/Application Support/OrphanedApp/**"
+min_age_days = 30
+
+[action]
+type = "trash"
+prompt = "Move {size} of orphaned app support to Trash?"
+group = true
+
+[test]
+should_match = ["~/Library/Application Support/OrphanedApp/data"]
+should_not_match = ["~/Library/Application Support/Xcode"]

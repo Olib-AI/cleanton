@@ -1,0 +1,21 @@
+[recipe]
+id = "node-next-cache"
+name = "Next.js Build Cache"
+description = "Next.js cache directories"
+category = "node"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+directory_name = ".next"
+parent_must_contain = ["package.json"]
+
+[action]
+type = "trash"
+prompt = "Move {size} of Next.js cache to Trash?"
+group = true
+
+[test]
+should_match = ["projects/app/.next"]
+should_not_match = ["projects/app/src", "loose/.next"]

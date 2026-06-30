@@ -1,0 +1,21 @@
+[recipe]
+id = "node-framework-caches"
+name = "Node Framework Caches"
+description = "Vite, Astro, SvelteKit, and Nuxt build caches"
+category = "node"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+directory_name = ".vite"
+parent_must_contain = ["package.json"]
+
+[action]
+type = "trash"
+prompt = "Move {size} of framework caches to Trash?"
+group = true
+
+[test]
+should_match = ["projects/app/.vite"]
+should_not_match = ["projects/app/src", "loose/.vite"]

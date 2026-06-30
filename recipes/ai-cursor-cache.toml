@@ -1,0 +1,23 @@
+[recipe]
+id = "ai-cursor-cache"
+name = "Cursor Cache"
+# Only the Electron Cache subtree. Never the User/ subtree (settings,
+# keybindings, snippets) or globalStorage (auth/session). Regenerated on next
+# launch.
+description = "Cursor editor Cache (regenerated on next launch)"
+category = "ai-tools"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/Library/Application Support/Cursor/Cache/**"
+
+[action]
+type = "trash"
+prompt = "Move {size} of Cursor cache to Trash?"
+group = true
+
+[test]
+should_match = ["~/Library/Application Support/Cursor/Cache/foo"]
+should_not_match = ["~/Library/Application Support/Cursor/User", "~/Library/Application Support/Cursor/User/globalStorage/storage.json"]

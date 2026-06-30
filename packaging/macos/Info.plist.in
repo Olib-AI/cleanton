@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>Cleanton</string>
+	<key>CFBundleExecutable</key>
+	<string>@APP_EXECUTABLE@</string>
+	<key>CFBundleIconFile</key>
+	<string>@ICON_FILE@</string>
+	<key>CFBundleIconName</key>
+	<string>Cleanton</string>
+	<key>CFBundleIdentifier</key>
+	<string>@BUNDLE_IDENTIFIER@</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>Cleanton</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>@APP_VERSION@</string>
+	<key>CFBundleVersion</key>
+	<string>@APP_VERSION@</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.utilities</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>@MIN_SYSTEM_VERSION@</string>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSSupportsAutomaticTermination</key>
+	<true/>
+	<key>NSSupportsSuddenTermination</key>
+	<true/>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>Cleanton scans your Desktop to find reclaimable developer caches and build artifacts. It never deletes without your explicit confirmation.</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>Cleanton scans your Documents to find reclaimable developer caches and build artifacts. It never deletes without your explicit confirmation.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>Cleanton scans your Downloads to find reclaimable developer caches and build artifacts. It never deletes without your explicit confirmation.</string>
+	<key>NSRemovableVolumesUsageDescription</key>
+	<string>Cleanton can scan removable volumes to report reclaimable space. It never deletes without your explicit confirmation.</string>
+	<key>NSNetworkVolumesUsageDescription</key>
+	<string>Cleanton can scan network volumes to report reclaimable space. It never deletes without your explicit confirmation.</string>
+</dict>
+</plist>

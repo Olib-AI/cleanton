@@ -1,0 +1,83 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/cleanton-app",
+    "crates/cleanton-cli",
+    "crates/cleanton-common",
+    "crates/cleanton-engine",
+    "crates/cleanton-ml",
+    "crates/cleanton-packages",
+    "crates/cleanton-recipes",
+    "crates/cleanton-scanner",
+    "crates/cleanton-services",
+    "crates/cleanton-ui",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96.0"
+license = "MIT OR Apache-2.0"
+authors = ["Olib AI"]
+repository = "https://github.com/Olib-AI/cleanton"
+
+[workspace.dependencies]
+cleanton-common = { path = "crates/cleanton-common" }
+cleanton-engine = { path = "crates/cleanton-engine" }
+cleanton-ml = { path = "crates/cleanton-ml" }
+cleanton-packages = { path = "crates/cleanton-packages" }
+cleanton-recipes = { path = "crates/cleanton-recipes" }
+cleanton-scanner = { path = "crates/cleanton-scanner" }
+cleanton-services = { path = "crates/cleanton-services" }
+cleanton-ui = { path = "crates/cleanton-ui" }
+
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+clap = { version = "4.5", features = ["derive", "env"] }
+bollard = { version = "0.20", features = ["buildkit", "chrono"] }
+directories = "6"
+glob = "0.3"
+humansize = "2"
+jwalk = "0.8"
+ignore = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
+toml = "0.9"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+trash = "5"
+unicode-normalization = "0.1"
+walkdir = "2"
+ratatui = "0.30"
+crossterm = "0.29"
+tui-big-text = "0.8"
+slint = "1.17"
+slint-build = "1.17"
+tempfile = "3"
+
+[workspace.lints.rust]
+# `deny` (not `forbid`): the sole audited FFI module
+# `crates/cleanton-scanner/src/capacity_ffi.rs` carries a documented
+# `#![allow(unsafe_code)]` for the required macOS `statfs`/`pathconf` syscalls,
+# with a `// SAFETY:` comment on every `unsafe` block. `forbid` cannot be
+# locally overridden, so `deny` + that single audited allow is the policy.
+unsafe_code = "deny"
+missing_debug_implementations = "warn"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+struct_excessive_bools = "allow"
+# Destructive-tool hardening — denied, not warned (tests exempt via clippy.toml /
+# scoped cfg(test) allows). No silent panics or bounds-panics in a deleter.
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
+todo = "deny"
+unimplemented = "deny"

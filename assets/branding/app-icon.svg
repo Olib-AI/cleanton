@@ -1,0 +1,62 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="tile" x1="180" y1="140" x2="880" y2="900" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#22335A"/>
+      <stop offset="0.5" stop-color="#141D33"/>
+      <stop offset="1" stop-color="#0A0E1C"/>
+    </linearGradient>
+    <radialGradient id="coreGlow" cx="0.5" cy="0.46" r="0.5">
+      <stop offset="0" stop-color="#17E0C4" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#17E0C4" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="sheen" cx="0.34" cy="0.18" r="0.7">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="ring" x1="300" y1="320" x2="724" y2="704" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3D74D8"/>
+      <stop offset="1" stop-color="#1C2E66"/>
+    </linearGradient>
+    <linearGradient id="clean" x1="300" y1="520" x2="640" y2="320" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3FE0CE"/>
+      <stop offset="1" stop-color="#19B6F0"/>
+    </linearGradient>
+    <clipPath id="tileClip"><rect x="100" y="100" width="824" height="824" rx="190" ry="190"/></clipPath>
+  </defs>
+
+
+  <g clip-path="url(#tileClip)">
+    <rect x="100" y="100" width="824" height="824" fill="url(#tile)"/>
+    <rect x="100" y="100" width="824" height="824" fill="url(#sheen)"/>
+    <circle cx="512" cy="500" r="240" fill="url(#coreGlow)"/>
+
+    <!-- the disk: a full usage ring -->
+    <circle cx="512" cy="500" r="200" fill="none" stroke="url(#ring)" stroke-width="112"/>
+    <circle cx="512" cy="500" r="256" fill="none" stroke="#9DC4FF" stroke-opacity="0.18" stroke-width="2"/>
+    <circle cx="512" cy="500" r="144" fill="none" stroke="#000000" stroke-opacity="0.22" stroke-width="2"/>
+
+    <!-- the reclaimed slice (what Cleanton frees), luminous — swept along the "/" diagonal -->
+    <g transform="rotate(34 512 500)">
+      <path d="M306.8 517.9 A 200 200 0 0 1 612 327.4" fill="none" stroke="url(#clean)"
+            stroke-width="112" stroke-linecap="round"/>
+      <path d="M306.8 517.9 A 200 200 0 0 1 612 327.4" fill="none" stroke="#EAFFFB"
+            stroke-width="14" stroke-linecap="round" opacity="0.45"/>
+    </g>
+
+    <!-- center mark: reclaimed / verified clean -->
+    <path d="M455 500 l34 38 74 -90" fill="none" stroke="#EAFBFF" stroke-width="28"
+          stroke-linecap="round" stroke-linejoin="round" opacity="0.95"/>
+
+    <!-- data-bits dissolving off the leading edge of the reclaimed slice (top-right) -->
+    <g>
+      <rect x="690" y="262" width="40" height="40" rx="10" fill="#7FE9E0" transform="rotate(20 710 282)" opacity="0.95"/>
+      <rect x="744" y="222" width="30" height="30" rx="8" fill="#9DF0E6" transform="rotate(-14 759 237)" opacity="0.9"/>
+      <rect x="712" y="190" width="22" height="22" rx="6" fill="#CFF6FF" transform="rotate(26 723 201)" opacity="0.85"/>
+      <path d="M790 176 l12 30 30 12 -30 12 -12 30 -12 -30 -30 -12 30 -12 z" fill="#EAFBFF" opacity="0.95"/>
+      <path d="M760 296 l8 19 19 8 -19 8 -8 19 -8 -19 -19 -8 19 -8 z" fill="#C7F2FF" opacity="0.8"/>
+      <circle cx="826" cy="242" r="6" fill="#EAFBFF" opacity="0.85"/>
+    </g>
+  </g>
+
+  <rect x="101.5" y="101.5" width="821" height="821" rx="188.5" ry="188.5" fill="none" stroke="#FFFFFF" stroke-opacity="0.16" stroke-width="3"/>
+</svg>

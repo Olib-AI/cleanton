@@ -1,0 +1,21 @@
+[recipe]
+id = "swift-xcode-device-logs"
+name = "Xcode Device Logs"
+description = "Old iOS, watchOS, and tvOS device logs collected by Xcode"
+category = "swift"
+safety_level = "cautious"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/Library/Developer/Xcode/iOS Device Logs/**"
+min_age_days = 30
+
+[action]
+type = "trash"
+prompt = "Move {size} of old Xcode device logs to Trash?"
+group = true
+
+[test]
+should_match = ["~/Library/Developer/Xcode/iOS Device Logs/iPhone/2026-01-01.log"]
+should_not_match = ["~/Library/Developer/Xcode/iOS DeviceSupport/17.0/Symbols"]

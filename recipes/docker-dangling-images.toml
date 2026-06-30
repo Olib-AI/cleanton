@@ -1,0 +1,20 @@
+[recipe]
+id = "docker-dangling-images"
+name = "Docker Dangling Images"
+description = "Docker images with no tag. Disabled for filesystem planning; use cleanton docker commands for API-backed cleanup."
+category = "docker"
+safety_level = "safe"
+enabled = false
+priority = 50
+
+[match]
+path_glob = "**/docker-dummy-dangling-images/**"
+
+[action]
+type = "trash"
+prompt = "Delete dangling Docker images?"
+group = true
+
+[test]
+should_match = ["projects/docker-dummy-dangling-images/img"]
+should_not_match = ["projects/src"]

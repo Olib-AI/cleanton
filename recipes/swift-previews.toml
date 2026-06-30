@@ -1,0 +1,20 @@
+[recipe]
+id = "swift-previews"
+name = "SwiftUI Previews"
+description = "SwiftUI preview build products"
+category = "swift"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/Library/Developer/Xcode/UserData/Previews/**"
+
+[action]
+type = "trash"
+prompt = "Move {size} of SwiftUI Previews cache to Trash?"
+group = true
+
+[test]
+should_match = ["~/Library/Developer/Xcode/UserData/Previews/Product/foo"]
+should_not_match = ["~/Library/Developer/Xcode/DerivedData"]

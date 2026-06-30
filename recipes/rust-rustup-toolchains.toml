@@ -1,0 +1,21 @@
+[recipe]
+id = "rust-rustup-toolchains"
+name = "Rustup Toolchains"
+description = "Unused rustup toolchains"
+category = "rust"
+safety_level = "cautious"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/.rustup/toolchains/**"
+min_age_days = 90
+
+[action]
+type = "trash"
+prompt = "Move {size} of old rustup toolchains to Trash?"
+group = true
+
+[test]
+should_match = ["~/.rustup/toolchains/stable-x86_64-apple-darwin"]
+should_not_match = ["~/.rustup/settings.toml"]

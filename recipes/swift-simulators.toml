@@ -1,0 +1,21 @@
+[recipe]
+id = "swift-simulators"
+name = "Simulator Devices"
+description = "iOS/watchOS/tvOS Simulator Devices runtime data"
+category = "swift"
+safety_level = "cautious"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/Library/Developer/CoreSimulator/Devices/**"
+min_age_days = 60
+
+[action]
+type = "trash"
+prompt = "Move {size} of Simulator device data to Trash?"
+group = true
+
+[test]
+should_match = ["~/Library/Developer/CoreSimulator/Devices/device-id/data"]
+should_not_match = ["~/Library/Developer/Xcode"]

@@ -1,0 +1,22 @@
+[recipe]
+id = "ml-wandb"
+name = "Weights & Biases Local Data"
+description = "Local run data for Weights & Biases"
+category = "ml"
+safety_level = "cautious"
+enabled = true
+priority = 50
+
+[match]
+directory_name = "wandb"
+parent_must_contain = ["train.py"]
+min_age_days = 7
+
+[action]
+type = "trash"
+prompt = "Move {size} of W&B logs to Trash?"
+group = true
+
+[test]
+should_match = ["projects/ml/wandb"]
+should_not_match = ["projects/ml/src", "loose/wandb"]

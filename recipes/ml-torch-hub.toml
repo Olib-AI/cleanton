@@ -1,0 +1,21 @@
+[recipe]
+id = "ml-torch-hub"
+name = "PyTorch Hub Cache"
+description = "Downloaded PyTorch model weights and checkpoints"
+category = "ml"
+safety_level = "cautious"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/.cache/torch/hub/**"
+min_age_days = 30
+
+[action]
+type = "trash"
+prompt = "Move {size} of PyTorch Hub cache to Trash?"
+group = true
+
+[test]
+should_match = ["~/.cache/torch/hub/checkpoints/resnet.pth"]
+should_not_match = ["~/.cache/other"]

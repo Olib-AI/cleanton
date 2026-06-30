@@ -1,0 +1,21 @@
+[recipe]
+id = "system-time-machine-local-snapshots"
+name = "Time Machine Local Snapshots"
+description = "APFS Time Machine local snapshots; requires tmutil thinning, not filesystem deletion"
+category = "system"
+safety_level = "aggressive"
+enabled = true
+priority = 20
+
+[match]
+path_glob = "**/com.apple.TimeMachine.localsnapshots/**"
+min_age_days = 7
+
+[action]
+type = "archive"
+prompt = "Review Time Machine local snapshots for tmutil thinning?"
+group = true
+
+[test]
+should_match = ["Volumes/com.apple.TimeMachine.localsnapshots/Backups.backupdb/local-snapshot"]
+should_not_match = ["projects/app/target/debug"]

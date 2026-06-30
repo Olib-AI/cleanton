@@ -1,0 +1,21 @@
+[recipe]
+id = "node-pnpm-store"
+name = "pnpm Global Store"
+description = "Global pnpm store for dependencies"
+category = "node"
+safety_level = "cautious"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/Library/pnpm/store/**"
+min_size_mb = 200
+
+[action]
+type = "trash"
+prompt = "Move {size} of pnpm global store to Trash?"
+group = true
+
+[test]
+should_match = ["~/Library/pnpm/store/v3/files/foo"]
+should_not_match = ["~/.cargo"]

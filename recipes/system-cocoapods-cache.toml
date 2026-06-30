@@ -1,0 +1,21 @@
+[recipe]
+id = "system-cocoapods-cache"
+name = "CocoaPods Cache"
+description = "Global CocoaPods download cache"
+category = "system"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/Library/Caches/CocoaPods/**"
+min_age_days = 30
+
+[action]
+type = "trash"
+prompt = "Move {size} of CocoaPods cache to Trash?"
+group = true
+
+[test]
+should_match = ["~/Library/Caches/CocoaPods/Pods/Release/AFNetworking"]
+should_not_match = ["~/Library/Caches/Yarn"]

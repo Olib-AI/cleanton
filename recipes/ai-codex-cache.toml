@@ -1,0 +1,27 @@
+[recipe]
+id = "ai-codex-cache"
+name = "Codex CLI Cache"
+# Only the dedicated ~/.codex-cache dir. The active ~/.codex dir (auth.json,
+# config.toml, sessions/, history/) is never matched. Auth/config/session
+# basenames are also excluded as defense-in-depth.
+description = "OpenAI Codex CLI cache and logs (never ~/.codex auth/config/sessions)"
+category = "ai-tools"
+safety_level = "cautious"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/.codex-cache/**"
+min_age_days = 14
+
+[match.exclude]
+names = ["auth.json", "config.toml", "config.json", ".credentials.json", "credentials.json"]
+
+[action]
+type = "trash"
+prompt = "Move {size} of Codex cache to Trash?"
+group = true
+
+[test]
+should_match = ["~/.codex-cache/log.txt"]
+should_not_match = ["~/.codex/auth.json", "~/.codex/config.toml", "~/.codex/sessions/2026/rollout.jsonl"]

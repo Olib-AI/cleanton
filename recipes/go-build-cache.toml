@@ -1,0 +1,20 @@
+[recipe]
+id = "go-build-cache"
+name = "Go Build Cache"
+description = "Go build cache directory"
+category = "go"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/Library/Caches/go-build/**"
+
+[action]
+type = "trash"
+prompt = "Move {size} of Go build cache to Trash?"
+group = true
+
+[test]
+should_match = ["~/Library/Caches/go-build/00/0000000000000000000000000000000000000000-d"]
+should_not_match = ["~/Library/Caches/Yarn"]

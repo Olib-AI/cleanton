@@ -1,0 +1,21 @@
+[recipe]
+id = "ml-triton-cache"
+name = "vLLM Triton Kernel Cache"
+description = "GPU kernel compilation cache for Triton"
+category = "ml"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/.triton/cache/**"
+min_size_mb = 100
+
+[action]
+type = "trash"
+prompt = "Move {size} of Triton cache to Trash?"
+group = true
+
+[test]
+should_match = ["~/.triton/cache/foo/bar.bin"]
+should_not_match = ["~/.triton/config"]

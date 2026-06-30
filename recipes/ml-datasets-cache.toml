@@ -1,0 +1,21 @@
+[recipe]
+id = "ml-datasets-cache"
+name = "Cached Datasets"
+description = "Hugging Face and PyTorch cached datasets"
+category = "ml"
+safety_level = "cautious"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/.cache/huggingface/datasets/**"
+min_age_days = 30
+
+[action]
+type = "trash"
+prompt = "Move {size} of HF datasets cache to Trash?"
+group = true
+
+[test]
+should_match = ["~/.cache/huggingface/datasets/imdb/plain_text/cache.arrow"]
+should_not_match = ["~/.cache/other"]

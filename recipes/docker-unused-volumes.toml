@@ -1,0 +1,20 @@
+[recipe]
+id = "docker-unused-volumes"
+name = "Docker Unused Volumes"
+description = "Docker volumes not attached to any container. Disabled for filesystem planning; use cleanton docker commands for API-backed cleanup."
+category = "docker"
+safety_level = "aggressive"
+enabled = false
+priority = 50
+
+[match]
+path_glob = "**/docker-dummy-unused-volumes/**"
+
+[action]
+type = "trash"
+prompt = "Delete unused Docker volumes?"
+group = true
+
+[test]
+should_match = ["projects/docker-dummy-unused-volumes/volume"]
+should_not_match = ["projects/src"]
