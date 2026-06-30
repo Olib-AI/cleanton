@@ -1,0 +1,51 @@
+name: Bug report
+description: Something went wrong, or Cleanton removed or flagged the wrong thing
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. For anything involving data loss or a security
+        concern, please email security@olib.ai instead of filing here.
+  - type: input
+    id: version
+    attributes:
+      label: Cleanton version
+      description: From the app About screen, or `cleanton --version`.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: "macOS 15.5 (arm64)"
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where did it happen?
+      options:
+        - The app
+        - The command-line tool
+        - Both
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you expect, and what did Cleanton do instead? If a scan result was wrong, name the category and recipe.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Set scan root to ...
+        2. Run a scan
+        3. ...
+    validations:
+      required: true

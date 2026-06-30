@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cleanton, a native macOS disk cleaner for developers</title>
+
+    <link rel="icon" type="image/png" sizes="64x64" href="assets/favicon-64.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png" />
+    <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
+
+    <meta name="description" content="Cleanton is a native macOS disk cleaner for developers. Reclaim space from build caches, dependency folders, Docker, and model caches. Review every item before removal. Files go to the Trash by default." />
+    <meta name="author" content="Olib AI" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Cleanton, a native macOS disk cleaner for developers" />
+    <meta property="og:description" content="Reclaim disk space from build caches and developer junk. Review everything first. Files go to the Trash by default, so a mistake is recoverable." />
+    <meta property="og:image" content="https://raw.githubusercontent.com/Olib-AI/cleanton/main/web/assets/icon-512.png" />
+    <meta property="og:url" content="https://olib-ai.github.io/cleanton/" />
+
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Cleanton, a native macOS disk cleaner for developers" />
+    <meta name="twitter:description" content="Reclaim disk space from build caches and developer junk. Review everything first." />
+    <meta name="twitter:image" content="https://raw.githubusercontent.com/Olib-AI/cleanton/main/web/assets/icon-512.png" />
+
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "Cleanton",
+      "applicationCategory": "DeveloperApplication",
+      "operatingSystem": "macOS",
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+      "publisher": { "@type": "Organization", "name": "Olib AI", "url": "https://www.olib.ai" }
+    }
+    </script>
+
+    <style>
+      :root {
+        --accent: #2f6feb;
+        --accent-dark: #1f57c4;
+        --teal: #16b3c7;
+        --bg: #f7f8fa;
+        --fg: #131720;
+        --fg-muted: #5b6573;
+        --card: #ffffff;
+        --border: #e4e7ec;
+        --code-bg: #11151c;
+        --code-fg: #e7edf5;
+        --warn-bg: #fff7ed;
+        --warn-border: #f4c27a;
+        --warn-fg: #7a4a12;
+      }
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+        font-size: 17px; line-height: 1.6; color: var(--fg); background: var(--bg);
+        -webkit-font-smoothing: antialiased;
+      }
+      a { color: var(--accent); text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      h1, h2, h3 { line-height: 1.2; margin: 0 0 .4em; letter-spacing: -0.02em; }
+      h1 { font-size: clamp(2.4rem, 6vw, 3.8rem); font-weight: 800; }
+      h2 { font-size: clamp(1.7rem, 3.5vw, 2.4rem); font-weight: 700; margin-top: 2.4em; }
+      h3 { font-size: 1.15rem; font-weight: 650; margin-top: 1.6em; }
+      .container { max-width: 1020px; margin: 0 auto; padding: 0 24px; }
+      code { background: rgba(47,111,235,.08); padding: 2px 6px; border-radius: 5px; font-family: "SF Mono", Menlo, monospace; font-size: .9em; }
+
+      .nav { position: sticky; top: 0; z-index: 10; background: rgba(247,248,250,.85); backdrop-filter: blur(10px); border-bottom: 1px solid var(--border); }
+      .nav-inner { display: flex; align-items: center; justify-content: space-between; padding: 12px 24px; max-width: 1020px; margin: 0 auto; }
+      .nav-brand { display: flex; align-items: center; gap: 10px; font-weight: 700; color: var(--fg); }
+      .nav-brand img { width: 30px; height: 30px; border-radius: 7px; }
+      .nav-links { display: flex; gap: 22px; align-items: center; }
+      .nav-links a { color: var(--fg-muted); font-size: 14px; }
+      .nav-links a:hover { color: var(--accent); text-decoration: none; }
+      .btn { display: inline-block; padding: 12px 22px; border-radius: 9px; font-weight: 600; font-size: 15px; transition: all .15s; }
+      .btn-primary { background: var(--accent); color: #fff !important; }
+      .btn-primary:hover { background: var(--accent-dark); color: #fff !important; text-decoration: none; transform: translateY(-1px); }
+      .btn-ghost { color: var(--fg); border: 1px solid var(--border); background: transparent; }
+      .btn-ghost:hover { border-color: var(--accent); color: var(--accent); text-decoration: none; }
+
+      .hero { padding: 76px 0 52px; text-align: center; }
+      .hero img.mark { width: 104px; height: 104px; border-radius: 24px; margin-bottom: 18px; box-shadow: 0 12px 40px rgba(19,23,32,.18); }
+      .hero p.lede { font-size: 1.25rem; color: var(--fg-muted); max-width: 600px; margin: 0 auto 28px; }
+      .hero .cta-row { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+      .hero-badges { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 26px; opacity: .9; }
+      .hero-badges img { height: 22px; }
+
+      .section { padding: 46px 0; }
+      .section.alt { background: #fff; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+
+      .warn { background: var(--warn-bg); border: 1px solid var(--warn-border); border-radius: 14px; padding: 24px 28px; margin: 8px 0; }
+      .warn h2 { margin-top: 0; color: var(--warn-fg); font-size: 1.4rem; display: flex; align-items: center; gap: 10px; }
+      .warn p { color: #6b4a1f; margin: 10px 0 0; }
+      .warn ul { color: #6b4a1f; margin: 12px 0 0; padding-left: 20px; }
+      .warn li { margin: 6px 0; }
+
+      .grid { display: grid; gap: 22px; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
+      .card { background: var(--card); border: 1px solid var(--border); border-radius: 13px; padding: 22px; transition: border-color .15s, transform .15s; }
+      .card:hover { border-color: var(--teal); transform: translateY(-2px); }
+      .card h3 { margin-top: 0; }
+      .card p { margin: 8px 0 0; color: var(--fg-muted); font-size: .95rem; }
+
+      pre.code { background: var(--code-bg); color: var(--code-fg); padding: 18px 22px; border-radius: 11px; font-family: "SF Mono", Menlo, monospace; font-size: 14px; line-height: 1.6; overflow-x: auto; margin: 16px 0; }
+      .code .c { color: #8b97a6; }
+      .code .k { color: #6fb3ff; }
+
+      footer { padding: 38px 0; border-top: 1px solid var(--border); margin-top: 50px; color: var(--fg-muted); font-size: .9rem; }
+      footer a { color: var(--fg-muted); }
+      .footer-row { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 14px; }
+
+      @media (max-width: 640px) { .nav-links a:not(.btn) { display: none; } }
+    </style>
+  </head>
+  <body>
+    <nav class="nav">
+      <div class="nav-inner">
+        <a class="nav-brand" href="#top">
+          <img src="assets/logo.png" alt="" />
+          <span>Cleanton</span>
+        </a>
+        <div class="nav-links">
+          <a href="#clean">What it cleans</a>
+          <a href="#safety">Safety</a>
+          <a href="#install">Install</a>
+          <a class="btn btn-primary" href="https://github.com/Olib-AI/cleanton/releases/latest">Download</a>
+        </div>
+      </div>
+    </nav>
+
+    <main>
+      <section class="hero" id="top">
+        <div class="container">
+          <img class="mark" src="assets/logo.png" alt="Cleanton icon" />
+          <h1>Reclaim your disk,<br/>without the guesswork</h1>
+          <p class="lede">Cleanton is a native macOS disk cleaner for developers. It finds the space your tools leave behind, shows you every item, and moves what you pick to the Trash.</p>
+          <div class="cta-row">
+            <a class="btn btn-primary" href="https://github.com/Olib-AI/cleanton/releases/latest">Download for macOS</a>
+            <a class="btn btn-ghost" href="https://github.com/Olib-AI/cleanton#install">Read the install guide</a>
+          </div>
+          <div class="hero-badges">
+            <img src="https://img.shields.io/github/v/release/Olib-AI/cleanton?label=release&color=2F6FEB&style=flat-square" alt="release" />
+            <img src="https://img.shields.io/badge/platform-macOS%20arm64-2F6FEB?style=flat-square" alt="platform" />
+            <img src="https://img.shields.io/badge/Apple-notarized-2F6FEB?style=flat-square" alt="notarized" />
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="clean">
+        <div class="container">
+          <h2>What it cleans</h2>
+          <p>Cleanton knows where developer tools hide their caches and artifacts, and groups what it finds so you can act fast.</p>
+          <div class="grid" style="margin-top: 24px;">
+            <div class="card">
+              <h3>Rust</h3>
+              <p>target directories, the Cargo registry cache, incremental builds, and sccache data.</p>
+            </div>
+            <div class="card">
+              <h3>Node</h3>
+              <p>node_modules across your projects, plus npm, Yarn, pnpm, Bun, Deno, framework, and deploy caches.</p>
+            </div>
+            <div class="card">
+              <h3>Swift</h3>
+              <p>Xcode DerivedData and Swift Package Manager caches.</p>
+            </div>
+            <div class="card">
+              <h3>Python</h3>
+              <p>virtual environments, pip and uv caches, and tool caches.</p>
+            </div>
+            <div class="card">
+              <h3>Docker</h3>
+              <p>dangling images, build cache, and unused volumes.</p>
+            </div>
+            <div class="card">
+              <h3>Machine learning</h3>
+              <p>model and checkpoint caches that quietly grow to many gigabytes.</p>
+            </div>
+          </div>
+          <h3 style="margin-top: 2.2em;">Two review tools that never delete on their own</h3>
+          <div class="grid" style="margin-top: 14px;">
+            <div class="card">
+              <h3>Suggestions</h3>
+              <p>Large folders worth a look, and large git repositories with a remote and no local changes that you could re-clone instead of storing. Surfaced for review, never removed for you.</p>
+            </div>
+            <div class="card">
+              <h3>Package management</h3>
+              <p>Review and clean npm, pip, Homebrew, and MacPorts packages, with dependency-aware removal and a warning when a package is used by one of your codebases.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section alt" id="safety">
+        <div class="container">
+          <div class="warn">
+            <h2>Cleanton removes files. Read this.</h2>
+            <p>You decide what goes, and you are responsible for the result. Cleanton is built to make that safe, but the final confirmation is yours.</p>
+            <ul>
+              <li>Removed items go to the <strong>Trash by default</strong>, so a mistake is recoverable until you empty it.</li>
+              <li>A single action can free a lot of data. Read the plan and its sizes before you run it.</li>
+              <li>Suggestions for large folders and re-clonable repositories are for review only. Cleanton never removes those automatically.</li>
+              <li>Back up anything you cannot lose. If you are unsure what an item is, skip it.</li>
+            </ul>
+          </div>
+          <div class="grid" style="margin-top: 28px;">
+            <div class="card">
+              <h3>Trash by default</h3>
+              <p>Permanent deletion is never the default. What Cleanton removes, you can restore.</p>
+            </div>
+            <div class="card">
+              <h3>Review before action</h3>
+              <p>Every scan shows the full list with per-item sizes. Nothing is removed until you confirm.</p>
+            </div>
+            <div class="card">
+              <h3>Signed and notarized</h3>
+              <p>The app is signed with the Olib AI Apple Developer ID and notarized by Apple, so it opens without a Gatekeeper override.</p>
+            </div>
+          </div>
+          <p style="margin-top: 20px;">Full detail in the <a href="https://github.com/Olib-AI/cleanton/blob/main/docs/safety.md">safety guide</a>.</p>
+        </div>
+      </section>
+
+      <section class="section" id="install">
+        <div class="container">
+          <h2>Install</h2>
+          <p>Cleanton is a macOS app for Apple Silicon. Download the app, or install the command-line tool with one command.</p>
+<pre class="code"><span class="c"># Command-line tool (macOS arm64):</span>
+<span class="k">curl</span> -fsSL https://raw.githubusercontent.com/Olib-AI/cleanton/main/scripts/install.sh | <span class="k">sh</span>
+
+<span class="c"># Then, after reviewing the plan, send removed items to the Trash:</span>
+<span class="k">cleanton</span> plan
+<span class="k">cleanton</span> plan --apply</pre>
+          <p>For the app, download <code>cleanton-app-macos-arm64.tar.gz</code> from the <a href="https://github.com/Olib-AI/cleanton/releases/latest">latest release</a> and move <code>Cleanton.app</code> to your Applications folder. The app is notarized and opens cleanly. The standalone command-line tool is quarantined by macOS on direct download; the installer script clears that for you, and the <a href="https://github.com/Olib-AI/cleanton/blob/main/docs/installation.md">install guide</a> covers the manual step.</p>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="container">
+        <div class="footer-row">
+          <div>Copyright 2026 Olib AI LLC. Cleanton is proprietary software, free to use.</div>
+          <div>
+            <a href="https://github.com/Olib-AI/cleanton">GitHub</a> ·
+            <a href="https://www.olib.ai">olib.ai</a> ·
+            <a href="mailto:hello@olib.ai">hello@olib.ai</a>
+          </div>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>
