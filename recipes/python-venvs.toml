@@ -1,0 +1,23 @@
+[recipe]
+id = "python-venvs"
+name = "Python Virtual Environments"
+description = "Python .venv or venv directories"
+category = "python"
+safety_level = "cautious"
+enabled = true
+priority = 50
+
+[match]
+directory_name = ".venv"
+parent_must_contain = ["pyproject.toml"]
+min_size_mb = 50
+min_age_days = 30
+
+[action]
+type = "trash"
+prompt = "Move {size} of Python virtual environments to Trash?"
+group = true
+
+[test]
+should_match = ["projects/app/.venv"]
+should_not_match = ["projects/app/src", "loose/.venv"]

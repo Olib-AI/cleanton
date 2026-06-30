@@ -1,0 +1,21 @@
+[recipe]
+id = "docker-stopped-containers"
+name = "Docker Stopped Containers"
+description = "Docker containers with exited status. Disabled for filesystem planning; use cleanton docker commands for API-backed cleanup."
+category = "docker"
+safety_level = "cautious"
+enabled = false
+priority = 50
+
+[match]
+path_glob = "**/docker-dummy-stopped-containers/**"
+min_age_days = 7
+
+[action]
+type = "trash"
+prompt = "Delete stopped Docker containers?"
+group = true
+
+[test]
+should_match = ["projects/docker-dummy-stopped-containers/container"]
+should_not_match = ["projects/src"]

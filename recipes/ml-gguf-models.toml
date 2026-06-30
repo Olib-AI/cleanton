@@ -1,0 +1,25 @@
+[recipe]
+id = "ml-gguf-models"
+name = "GGUF Model Weights"
+description = "Downloaded GGUF quantized model weights (re-downloadable)"
+category = "ml"
+safety_level = "cautious"
+enabled = true
+priority = 50
+
+# `.gguf` files are quantized model weights downloaded from registries
+# (llama.cpp / Ollama / LM Studio sideloads). They are large and re-downloadable.
+# Match anywhere above the size/age floors; reversible move to Trash.
+[match]
+path_glob = "**/*.gguf"
+min_size_mb = 500
+min_age_days = 7
+
+[action]
+type = "trash"
+prompt = "Move {size} of GGUF model weights to Trash?"
+group = true
+
+[test]
+should_match = ["projects/models/llama-3-8b-Q4_K_M.gguf"]
+should_not_match = ["projects/models/config.json"]

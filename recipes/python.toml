@@ -1,0 +1,26 @@
+[recipe]
+id = "python-bytecode"
+name = "Python Bytecode"
+description = "Python __pycache__ directories and bytecode files"
+category = "python"
+icon = "fa-python"
+safety_level = "safe"
+enabled = true
+priority = 70
+
+[match]
+path_glob = "**/__pycache__/**"
+
+[match.exclude]
+paths = []
+names = [".gitkeep"]
+
+[action]
+type = "trash"
+prompt = "Move {size} of Python bytecode to Trash?"
+group = true
+
+[test]
+should_match = ["projects/api/__pycache__/module.cpython-314.pyc"]
+should_not_match = ["projects/api/module.py"]
+

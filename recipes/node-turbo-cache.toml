@@ -1,0 +1,22 @@
+[recipe]
+id = "node-turbo-cache"
+name = "Turborepo Cache"
+description = "Turborepo local task cache directories"
+category = "node"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+directory_name = ".turbo"
+parent_must_contain = ["package.json"]
+min_size_mb = 10
+
+[action]
+type = "trash"
+prompt = "Move {size} of Turborepo cache to Trash?"
+group = true
+
+[test]
+should_match = ["projects/web/.turbo"]
+should_not_match = ["projects/web/src", "loose/.turbo"]

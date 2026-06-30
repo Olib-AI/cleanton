@@ -1,0 +1,22 @@
+[recipe]
+id = "ml-tensorboard"
+name = "TensorBoard Log Directories"
+description = "TensorBoard logs directory"
+category = "ml"
+safety_level = "cautious"
+enabled = true
+priority = 50
+
+[match]
+directory_name = "runs"
+parent_must_contain = ["train.py"]
+min_age_days = 14
+
+[action]
+type = "trash"
+prompt = "Move {size} of TensorBoard logs to Trash?"
+group = true
+
+[test]
+should_match = ["projects/ml/runs"]
+should_not_match = ["projects/ml/src", "loose/runs"]

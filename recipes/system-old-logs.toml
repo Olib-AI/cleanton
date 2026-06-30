@@ -1,0 +1,21 @@
+[recipe]
+id = "system-old-logs"
+name = "Old User Log Files"
+description = "Old development and system user log files"
+category = "system"
+safety_level = "cautious"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/Library/Logs/**"
+min_age_days = 30
+
+[action]
+type = "trash"
+prompt = "Move {size} of user logs to Trash?"
+group = true
+
+[test]
+should_match = ["~/Library/Logs/console.log"]
+should_not_match = ["projects/system.log"]

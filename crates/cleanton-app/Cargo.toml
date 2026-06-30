@@ -1,0 +1,34 @@
+[package]
+name = "cleanton-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+build = "build.rs"
+
+[dependencies]
+cleanton-common.workspace = true
+cleanton-engine.workspace = true
+cleanton-scanner.workspace = true
+cleanton-recipes.workspace = true
+cleanton-services.workspace = true
+cleanton-packages.workspace = true
+slint = { workspace = true, features = ["unstable-fontique-010"] }
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[build-dependencies]
+slint-build.workspace = true
+
+[dev-dependencies]
+# Used only by tests/icons.rs to verify every referenced FA glyph resolves in
+# the bundled OTFs (already in the dependency tree via slint).
+ttf-parser = "0.25"
+
+[lints.rust]
+unsafe_code = "allow"
+missing_debug_implementations = "allow"
+unused_must_use = "deny"

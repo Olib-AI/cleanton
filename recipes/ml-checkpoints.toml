@@ -1,0 +1,25 @@
+[recipe]
+id = "ml-checkpoints"
+name = "ML Model Checkpoints"
+description = "Large ML training checkpoint files (regenerable)"
+category = "ml"
+safety_level = "cautious"
+enabled = true
+priority = 50
+
+# `.ckpt` training checkpoints, anywhere, that are large and not recently
+# touched. Reversible move to Trash; protected user folders and credentials are
+# excluded by the matcher's safety floors.
+[match]
+path_glob = "**/*.ckpt"
+min_size_mb = 100
+min_age_days = 14
+
+[action]
+type = "trash"
+prompt = "Move {size} of training checkpoints to Trash?"
+group = true
+
+[test]
+should_match = ["projects/ml/epoch-10.ckpt"]
+should_not_match = ["projects/ml/train.py"]

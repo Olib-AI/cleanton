@@ -1,0 +1,32 @@
+[package]
+name = "cleanton-engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+cleanton-common.workspace = true
+cleanton-ml.workspace = true
+cleanton-recipes.workspace = true
+cleanton-scanner.workspace = true
+bollard.workspace = true
+chrono.workspace = true
+plist = "1"
+serde.workspace = true
+serde_json.workspace = true
+# `net`/`io-util`/`time` are needed for the raw `/system/df` fetch (UnixStream/
+# TcpStream + AsyncRead/Write + timeout); declared explicitly rather than relying
+# on transitive activation through bollard.
+tokio = { workspace = true, features = ["net", "io-util", "time"] }
+toml.workspace = true
+trash.workspace = true
+walkdir.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

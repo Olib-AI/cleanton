@@ -1,0 +1,21 @@
+[recipe]
+id = "ml-vllm-cache"
+name = "vLLM Model Cache"
+description = "vLLM model cache directory"
+category = "ml"
+safety_level = "cautious"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/.cache/vllm/**"
+min_size_mb = 1000
+
+[action]
+type = "trash"
+prompt = "Move {size} of vLLM model cache to Trash?"
+group = true
+
+[test]
+should_match = ["~/.cache/vllm/foo"]
+should_not_match = ["~/.cache/other"]

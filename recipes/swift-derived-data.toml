@@ -1,0 +1,21 @@
+[recipe]
+id = "swift-derived-data"
+name = "Xcode DerivedData"
+description = "Xcode DerivedData build products"
+category = "swift"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/Library/Developer/Xcode/DerivedData/**"
+min_size_mb = 50
+
+[action]
+type = "trash"
+prompt = "Move {size} of Xcode DerivedData to Trash?"
+group = true
+
+[test]
+should_match = ["~/Library/Developer/Xcode/DerivedData/MyApp-abc/Build/Products"]
+should_not_match = ["~/Library/Developer/Xcode/UserData"]

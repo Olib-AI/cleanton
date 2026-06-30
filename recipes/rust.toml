@@ -1,0 +1,28 @@
+[recipe]
+id = "rust-target-dirs"
+name = "Rust Build Artifacts"
+description = "Cargo target directories with local Cargo project evidence"
+category = "rust"
+icon = "fa-rust"
+safety_level = "safe"
+enabled = true
+priority = 90
+
+[match]
+directory_name = "target"
+parent_must_contain = ["Cargo.toml"]
+min_size_mb = 10
+
+[match.exclude]
+paths = ["**/target/release/*.app", "**/target/release/*.dmg"]
+names = [".gitkeep"]
+
+[action]
+type = "trash"
+prompt = "Move {size} of Rust build artifacts to Trash?"
+group = true
+
+[test]
+should_match = ["projects/my-app/target"]
+should_not_match = ["projects/my-app/src", "loose/target"]
+

@@ -1,0 +1,21 @@
+[recipe]
+id = "node-dist-build"
+name = "Node Build Output Directories"
+description = "Vite/dist output folders with package.json context"
+category = "node"
+safety_level = "cautious"
+enabled = true
+priority = 50
+
+[match]
+directory_name = "dist"
+parent_must_contain = ["package.json"]
+
+[action]
+type = "trash"
+prompt = "Move {size} of Node build output to Trash?"
+group = true
+
+[test]
+should_match = ["projects/app/dist"]
+should_not_match = ["projects/app/src", "loose/dist"]

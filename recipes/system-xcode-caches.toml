@@ -1,0 +1,20 @@
+[recipe]
+id = "system-xcode-caches"
+name = "Xcode Caches"
+description = "Xcode DT.Xcode caches"
+category = "system"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/Library/Caches/com.apple.dt.Xcode/**"
+
+[action]
+type = "trash"
+prompt = "Move {size} of Xcode caches to Trash?"
+group = true
+
+[test]
+should_match = ["~/Library/Caches/com.apple.dt.Xcode/downloads"]
+should_not_match = ["~/Library/Caches/Yarn"]

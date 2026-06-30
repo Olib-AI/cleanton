@@ -1,0 +1,27 @@
+[recipe]
+id = "ai-claude-code-worktrees"
+name = "Claude Code Worktrees"
+# Only the dedicated worktrees subtree. Credentials, settings, MCP config, and
+# memory live elsewhere under ~/.claude and are excluded by name and by the
+# engine's sensitive-basename floor.
+description = "Old temporary Git worktrees created by Claude Code"
+category = "ai-tools"
+safety_level = "cautious"
+enabled = true
+priority = 45
+
+[match]
+path_glob = "~/.claude/worktrees/**"
+min_age_days = 14
+
+[match.exclude]
+names = [".credentials.json", "settings.json", "settings.local.json", ".claude.json", "mcp.json", ".mcp.json"]
+
+[action]
+type = "trash"
+prompt = "Move {size} of old Claude Code worktrees to Trash?"
+group = true
+
+[test]
+should_match = ["~/.claude/worktrees/task-123/repo"]
+should_not_match = ["~/.claude/settings.json", "~/.claude/.credentials.json", "~/.claude/projects/web/transcript.jsonl"]

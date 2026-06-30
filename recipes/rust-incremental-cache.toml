@@ -1,0 +1,20 @@
+[recipe]
+id = "rust-incremental-cache"
+name = "Rust Incremental Compilation Cache"
+description = "Incremental compilation cache for Rust projects"
+category = "rust"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "**/target/*/incremental/**"
+
+[action]
+type = "trash"
+prompt = "Move {size} of Rust incremental compile cache to Trash?"
+group = true
+
+[test]
+should_match = ["projects/app/target/debug/incremental/foo"]
+should_not_match = ["projects/app/src/main.rs"]

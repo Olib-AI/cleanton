@@ -1,0 +1,93 @@
+// Cleanton design tokens
+
+struct CleantonPalette {
+    base: brush,
+    sidebar: brush,
+    surface: brush,
+    surface-elevated: brush,
+    text-primary: brush,
+    text-secondary: brush,
+    text-muted: brush,
+    accent: brush,
+    accent-strong: brush,
+    success: brush,
+    warning: brush,
+    danger: brush,
+    info: brush,
+    border: brush,
+    border-subtle: brush,
+    rust: brush,
+    swift: brush,
+    node: brush,
+    python: brush,
+    docker: brush,
+    ml: brush,
+}
+
+export global Theme {
+    in-out property <bool> dark-mode: false;
+
+    out property <CleantonPalette> palette: dark-mode ? {
+        base: #101214,
+        sidebar: #15181B,
+        surface: #1B1F23,
+        surface-elevated: #242A30,
+        text-primary: #F2F5F7,
+        text-secondary: #B7C0C8,
+        text-muted: #77828C,
+        accent: #0A84FF,
+        accent-strong: #0066CC,
+        success: #30D158,
+        warning: #FFD60A,
+        danger: #FF453A,
+        info: #64D2FF,
+        border: #30363D,
+        border-subtle: #252B31,
+        rust: #D08A5B,
+        swift: #F05138,
+        node: #6DAA45,
+        python: #4B8BBE,
+        docker: #1D9BF0,
+        ml: #00A896,
+    } : {
+        base: #F5F7F9,
+        sidebar: #FFFFFF,
+        surface: #FFFFFF,
+        surface-elevated: #EEF2F5,
+        text-primary: #182026,
+        text-secondary: #4D5A64,
+        text-muted: #7A8791,
+        accent: #007AFF,
+        accent-strong: #0057B8,
+        success: #248A3D,
+        warning: #B26A00,
+        danger: #D70015,
+        info: #0071A8,
+        border: #D6DEE5,
+        border-subtle: #E7ECF0,
+        rust: #B6673C,
+        swift: #D9482E,
+        node: #4F8F2F,
+        python: #2F6F9F,
+        docker: #0A7EC2,
+        ml: #008C72,
+    };
+
+    out property <length> font-size-xs: 11px;
+    out property <length> font-size-sm: 13px;
+    out property <length> font-size-md: 15px;
+    out property <length> font-size-lg: 20px;
+    out property <length> font-size-xl: 26px;
+
+    out property <length> spacing-xs: 4px;
+    out property <length> spacing-sm: 8px;
+    out property <length> spacing-md: 14px;
+    out property <length> spacing-lg: 20px;
+    out property <length> spacing-xl: 28px;
+
+    out property <length> radius-sm: 5px;
+    out property <length> radius-md: 8px;
+
+    out property <duration> anim-fast: 120ms;
+    out property <duration> anim-normal: 180ms;
+}

@@ -1,0 +1,22 @@
+[recipe]
+id = "apps-orphaned-caches"
+name = "Orphaned Application Caches"
+description = "Orphaned Library Caches"
+category = "apps"
+safety_level = "cautious"
+# Superseded by engine-side orphan detection (orphans.rs)
+enabled = false
+priority = 50
+
+[match]
+path_glob = "~/Library/Caches/com.orphaned.app/**"
+min_age_days = 30
+
+[action]
+type = "trash"
+prompt = "Move {size} of orphaned caches to Trash?"
+group = true
+
+[test]
+should_match = ["~/Library/Caches/com.orphaned.app/cache"]
+should_not_match = ["~/Library/Caches/com.apple.dt.Xcode"]

@@ -1,0 +1,21 @@
+[recipe]
+id = "ml-ollama-models"
+name = "Ollama Downloaded Models"
+description = "Ollama downloaded model weights"
+category = "ml"
+safety_level = "cautious"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/.ollama/models/**"
+min_size_mb = 500
+
+[action]
+type = "trash"
+prompt = "Move {size} of Ollama models to Trash?"
+group = true
+
+[test]
+should_match = ["~/.ollama/models/blobs/sha256-foo"]
+should_not_match = ["~/.ollama/config"]

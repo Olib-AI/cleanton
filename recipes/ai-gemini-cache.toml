@@ -1,0 +1,26 @@
+[recipe]
+id = "ai-gemini-cache"
+name = "Gemini / Antigravity Cache"
+# Only the dedicated cache subtree under ~/.gemini. Config, OAuth credentials,
+# and conversation history elsewhere under ~/.gemini are never matched.
+description = "Gemini and Antigravity cache files (never config/credentials/history)"
+category = "ai-tools"
+safety_level = "cautious"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/.gemini/cache/**"
+min_age_days = 14
+
+[match.exclude]
+names = ["oauth_creds.json", "settings.json", ".credentials.json", "credentials.json", "config.json"]
+
+[action]
+type = "trash"
+prompt = "Move {size} of Antigravity cache to Trash?"
+group = true
+
+[test]
+should_match = ["~/.gemini/cache/log.txt"]
+should_not_match = ["~/.gemini/oauth_creds.json", "~/.gemini/settings.json", "~/.gemini/history/session.json"]

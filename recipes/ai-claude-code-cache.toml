@@ -1,0 +1,34 @@
+[recipe]
+id = "ai-claude-code-cache"
+name = "Claude Code Cache"
+# Scoped to the regenerable Statsig feature-flag cache only. Never the whole
+# ~/.claude dir: that holds credentials, settings, MCP config, project
+# transcripts, and memory. Those are excluded below and by the engine's
+# sensitive-basename floor. Regenerated automatically on next launch.
+description = "Claude Code regenerable Statsig cache (never the whole ~/.claude dir)"
+category = "ai-tools"
+safety_level = "cautious"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/.claude/statsig/**"
+min_age_days = 7
+
+[match.exclude]
+paths = [
+    "~/.claude/projects/**",
+    "~/.claude/todos/**",
+    "~/.claude/history/**",
+    "~/.claude/sessions/**",
+]
+names = [".credentials.json", "settings.json", "settings.local.json", ".claude.json", "mcp.json", ".mcp.json", "CLAUDE.md"]
+
+[action]
+type = "trash"
+prompt = "Move {size} of Claude Code cache to Trash?"
+group = true
+
+[test]
+should_match = ["~/.claude/statsig/statsig.cached.evaluations.2"]
+should_not_match = ["~/.claude/.credentials.json", "~/.claude/settings.json", "~/.claude/projects/web/transcript.jsonl", "~/.claude/mcp.json"]

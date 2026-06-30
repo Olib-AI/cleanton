@@ -1,0 +1,21 @@
+[recipe]
+id = "rust-cargo-git"
+name = "Cargo Git Dependency Checkouts"
+description = "Git dependency checkouts for Cargo"
+category = "rust"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/.cargo/git/checkouts/**"
+min_age_days = 30
+
+[action]
+type = "trash"
+prompt = "Move {size} of Cargo git checkouts to Trash?"
+group = true
+
+[test]
+should_match = ["~/.cargo/git/checkouts/foo"]
+should_not_match = ["~/.cargo/registry"]

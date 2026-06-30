@@ -1,0 +1,21 @@
+[recipe]
+id = "system-homebrew-cache"
+name = "Homebrew Download Cache"
+description = "Cached Homebrew formula downloads"
+category = "system"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/Library/Caches/Homebrew/**"
+min_age_days = 30
+
+[action]
+type = "trash"
+prompt = "Move {size} of Homebrew cache to Trash?"
+group = true
+
+[test]
+should_match = ["~/Library/Caches/Homebrew/downloads/git-2.40.tar.gz"]
+should_not_match = ["~/Library/Caches/Yarn"]

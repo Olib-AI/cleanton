@@ -1,0 +1,62 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  macos-arm64:
+    name: macOS arm64 signed release
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@1.96.0
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Verify required Apple secrets
+        env:
+          APPLE_CERTIFICATE_B64: ${{ secrets.APPLE_CERTIFICATE_B64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          for var in APPLE_CERTIFICATE_B64 APPLE_CERTIFICATE_PASSWORD \
+                     APPLE_ID APPLE_APP_PASSWORD APPLE_TEAM_ID; do
+            if [[ -z "${!var}" ]]; then
+              echo "::error::secret $var is not set"
+              exit 1
+            fi
+          done
+
+      - name: Rust release gates
+        run: |
+          cargo fmt --check
+          cargo clippy --workspace --all-targets --all-features -- -D warnings
+          cargo test --workspace --all-features
+
+      - name: Build, sign, notarize, and staple
+        env:
+          APPLE_CERTIFICATE_B64: ${{ secrets.APPLE_CERTIFICATE_B64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: ./packaging/build-macos.sh --notarize
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            packaging/dist/cleanton-app-macos-arm64.tar.gz
+            packaging/dist/cleanton-cli-macos-arm64.tar.gz
+            packaging/dist/SHA256SUMS
+          fail_on_unmatched_files: true

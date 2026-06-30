@@ -1,0 +1,21 @@
+[recipe]
+id = "python-pixi-cache"
+name = "Pixi/Rattler Package Cache"
+description = "Pixi rattler package cache"
+category = "python"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/.cache/rattler/**"
+min_size_mb = 100
+
+[action]
+type = "trash"
+prompt = "Move {size} of Pixi/rattler package cache to Trash?"
+group = true
+
+[test]
+should_match = ["~/.cache/rattler/pkgs/foo"]
+should_not_match = ["~/.cache/other"]

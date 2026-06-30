@@ -1,0 +1,24 @@
+[recipe]
+id = "ai-copilot-cache"
+name = "GitHub Copilot Cache"
+# Only Copilot's own Caches dir. Tabnine (~/Library/Caches/co.tabnine.*) is a
+# different vendor and out of scope. Editor auth/session state lives under
+# Application Support, never under Caches.
+description = "GitHub Copilot editor caches"
+category = "ai-tools"
+safety_level = "cautious"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/Library/Caches/github-copilot/**"
+min_age_days = 7
+
+[action]
+type = "trash"
+prompt = "Move {size} of GitHub Copilot cache to Trash?"
+group = true
+
+[test]
+should_match = ["~/Library/Caches/github-copilot/completions/foo"]
+should_not_match = ["~/Library/Caches/Tabnine", "~/Library/Caches/co.tabnine.tabnine"]

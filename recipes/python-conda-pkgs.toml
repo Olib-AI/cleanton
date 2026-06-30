@@ -1,0 +1,21 @@
+[recipe]
+id = "python-conda-pkgs"
+name = "Conda Packages"
+description = "Conda package cache directory"
+category = "python"
+safety_level = "cautious"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/.conda/pkgs/**"
+min_age_days = 30
+
+[action]
+type = "trash"
+prompt = "Move {size} of Conda packages to Trash?"
+group = true
+
+[test]
+should_match = ["~/.conda/pkgs/python-3.10-foo"]
+should_not_match = ["~/.conda/envs"]

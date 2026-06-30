@@ -1,0 +1,26 @@
+[recipe]
+id = "ml-safetensors-cache"
+name = "Hugging Face Model Cache"
+description = "Downloaded Hugging Face model caches (re-downloadable)"
+category = "ml"
+safety_level = "cautious"
+enabled = true
+priority = 50
+
+# The Hugging Face hub stores each model as `hub/models--ORG--NAME/`, where the
+# real weights live in `blobs/<sha>` (no extension) and `snapshots/<rev>/*` are
+# 0-byte symlinks into those blobs. Matching the `*.safetensors` symlinks (the
+# old rule) reclaimed 0 bytes. Match the whole per-model directory instead so the
+# aggregated blob size is captured and the model is trashed as one unit.
+[match]
+path_glob = "~/.cache/huggingface/hub/models--*"
+min_size_mb = 50
+
+[action]
+type = "trash"
+prompt = "Move {size} of cached Hugging Face models to Trash?"
+group = true
+
+[test]
+should_match = ["~/.cache/huggingface/hub/models--BAAI--bge-small-en-v1.5"]
+should_not_match = ["~/.cache/huggingface/hub/version.txt"]

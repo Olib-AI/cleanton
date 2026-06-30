@@ -1,0 +1,11 @@
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+
+disallowed-methods = [
+    { path = "std::fs::remove_file", reason = "filesystem deletion must be isolated behind cleanton-engine executor safety checks" },
+    { path = "std::fs::remove_dir", reason = "filesystem deletion must be isolated behind cleanton-engine executor safety checks" },
+    { path = "std::fs::remove_dir_all", reason = "filesystem deletion must be isolated behind cleanton-engine executor safety checks" },
+    { path = "std::process::Command::new", reason = "subprocess execution is restricted to service/executor adapters with explicit safety review" },
+]
+

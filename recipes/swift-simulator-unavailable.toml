@@ -1,0 +1,20 @@
+[recipe]
+id = "swift-simulator-unavailable"
+name = "Unavailable Simulators"
+description = "Unavailable Xcode Simulator runtimes"
+category = "swift"
+safety_level = "cautious"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/Library/Developer/CoreSimulator/Devices/*/unavailable/**"
+
+[action]
+type = "trash"
+prompt = "Move {size} of unavailable simulators to Trash?"
+group = true
+
+[test]
+should_match = ["~/Library/Developer/CoreSimulator/Devices/dev-id/unavailable/runtime"]
+should_not_match = ["~/Library/Developer/CoreSimulator/Devices/dev-id/data"]

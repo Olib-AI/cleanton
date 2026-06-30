@@ -1,0 +1,21 @@
+[recipe]
+id = "node-yarn-classic-cache"
+name = "Yarn v1 Cache"
+description = "Yarn classic global cache"
+category = "node"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/Library/Caches/Yarn/**"
+min_age_days = 30
+
+[action]
+type = "trash"
+prompt = "Move {size} of Yarn classic cache to Trash?"
+group = true
+
+[test]
+should_match = ["~/Library/Caches/Yarn/v6/npm-foo"]
+should_not_match = ["~/Library/Caches/Homebrew"]

@@ -1,0 +1,26 @@
+[recipe]
+id = "ai-codex-worktrees"
+name = "Codex Worktrees"
+# Only the dedicated worktrees subtree. Auth, config, sessions, and history live
+# elsewhere under ~/.codex and are never matched.
+description = "Old temporary Git worktrees created by Codex"
+category = "ai-tools"
+safety_level = "cautious"
+enabled = true
+priority = 45
+
+[match]
+path_glob = "~/.codex/worktrees/**"
+min_age_days = 14
+
+[match.exclude]
+names = ["auth.json", "config.toml", "config.json", ".credentials.json", "credentials.json"]
+
+[action]
+type = "trash"
+prompt = "Move {size} of old Codex worktrees to Trash?"
+group = true
+
+[test]
+should_match = ["~/.codex/worktrees/task-123/repo"]
+should_not_match = ["~/.codex/auth.json", "~/.codex/config.toml", "~/.codex/sessions/2026/rollout.jsonl"]

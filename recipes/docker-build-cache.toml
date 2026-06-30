@@ -1,0 +1,20 @@
+[recipe]
+id = "docker-build-cache"
+name = "Docker Build Cache"
+description = "Docker build cache layers. Disabled for filesystem planning; use cleanton docker commands for API-backed cleanup."
+category = "docker"
+safety_level = "safe"
+enabled = false
+priority = 50
+
+[match]
+path_glob = "**/docker-dummy-build-cache/**"
+
+[action]
+type = "trash"
+prompt = "Prune Docker build cache?"
+group = true
+
+[test]
+should_match = ["projects/docker-dummy-build-cache/layer"]
+should_not_match = ["projects/src"]

@@ -1,0 +1,21 @@
+[recipe]
+id = "system-crash-reports"
+name = "Old Crash Reports"
+description = "Old diagnostic crash reports"
+category = "system"
+safety_level = "cautious"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/Library/Logs/DiagnosticReports/**"
+min_age_days = 14
+
+[action]
+type = "trash"
+prompt = "Move {size} of crash reports to Trash?"
+group = true
+
+[test]
+should_match = ["~/Library/Logs/DiagnosticReports/App_2026-01-01.crash"]
+should_not_match = ["~/Library/Logs/console.log"]

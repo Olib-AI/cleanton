@@ -1,0 +1,25 @@
+[package]
+name = "cleanton-ml"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+cleanton-common.workspace = true
+serde.workspace = true
+serde_json = { workspace = true, optional = true }
+tract-onnx = { version = "0.21", optional = true }
+
+[dev-dependencies]
+serde_json.workspace = true
+tempfile.workspace = true
+
+[features]
+default = ["ml"]
+ml = ["dep:tract-onnx", "dep:serde_json"]
+
+[lints]
+workspace = true

@@ -1,0 +1,21 @@
+[recipe]
+id = "node-deploy-caches"
+name = "Node Deploy Caches"
+description = "Vercel, Netlify, and Wrangler deploy caches"
+category = "node"
+safety_level = "cautious"
+enabled = true
+priority = 50
+
+[match]
+directory_name = ".vercel"
+parent_must_contain = ["package.json"]
+
+[action]
+type = "trash"
+prompt = "Move {size} of deploy caches to Trash?"
+group = true
+
+[test]
+should_match = ["projects/app/.vercel"]
+should_not_match = ["projects/app/src", "loose/.vercel"]

@@ -1,0 +1,22 @@
+[recipe]
+id = "swift-build-dirs"
+name = "Swift Package Build Directories"
+description = "Swift Package Manager build directories"
+category = "swift"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+directory_name = ".build"
+parent_must_contain = ["Package.swift"]
+min_size_mb = 10
+
+[action]
+type = "trash"
+prompt = "Move {size} of Swift build directories to Trash?"
+group = true
+
+[test]
+should_match = ["projects/app/.build"]
+should_not_match = ["projects/app/src", "loose/.build"]
