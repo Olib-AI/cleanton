@@ -51,6 +51,17 @@ It also includes two review tools that never delete anything on their own:
 
 ---
 
+## Screenshots
+
+| | |
+|---|---|
+| **Dashboard.** Scan your home folder and see reclaimable space by category. | **Results.** Review every group and item, with sizes and a safety rating, then select what to remove. |
+| <img src="web/assets/screenshots/dashboard.png" alt="Cleanton Dashboard" width="420"/> | <img src="web/assets/screenshots/results.png" alt="Cleanton Results" width="420"/> |
+| **Packages.** Review npm, pip, Homebrew, and MacPorts packages, with dependency-aware removal and codebase-usage warnings. | **Services.** See launchd and Homebrew services, with system services locked as protected. |
+| <img src="web/assets/screenshots/packages.png" alt="Cleanton Packages" width="420"/> | <img src="web/assets/screenshots/services.png" alt="Cleanton Services" width="420"/> |
+
+---
+
 ## Install
 
 Cleanton is a macOS app for Apple Silicon (arm64).

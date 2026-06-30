@@ -107,6 +107,12 @@
       .code .c { color: #8b97a6; }
       .code .k { color: #6fb3ff; }
 
+      .shots { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); margin-top: 26px; }
+      .shot { background: var(--card); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+      .shot img { width: 100%; height: auto; display: block; border-bottom: 1px solid var(--border); }
+      .shot figcaption { padding: 12px 16px; font-size: .9rem; color: var(--fg-muted); margin: 0; }
+      .shot figcaption strong { color: var(--fg); }
+
       footer { padding: 38px 0; border-top: 1px solid var(--border); margin-top: 50px; color: var(--fg-muted); font-size: .9rem; }
       footer a { color: var(--fg-muted); }
       .footer-row { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 14px; }
@@ -122,6 +128,7 @@
           <span>Cleanton</span>
         </a>
         <div class="nav-links">
+          <a href="#screenshots">Screenshots</a>
           <a href="#clean">What it cleans</a>
           <a href="#safety">Safety</a>
           <a href="#install">Install</a>
@@ -144,6 +151,31 @@
             <img src="https://img.shields.io/github/v/release/Olib-AI/cleanton?label=release&color=2F6FEB&style=flat-square" alt="release" />
             <img src="https://img.shields.io/badge/platform-macOS%20arm64-2F6FEB?style=flat-square" alt="platform" />
             <img src="https://img.shields.io/badge/Apple-notarized-2F6FEB?style=flat-square" alt="notarized" />
+          </div>
+        </div>
+      </section>
+
+      <section class="section alt" id="screenshots">
+        <div class="container">
+          <h2>A look inside</h2>
+          <p>A native macOS app, plus a command-line tool that shares the same engine.</p>
+          <div class="shots">
+            <figure class="shot">
+              <img src="assets/screenshots/dashboard.png" alt="Cleanton Dashboard showing reclaimable space by category" loading="lazy" />
+              <figcaption><strong>Dashboard.</strong> Scan and see reclaimable space by category.</figcaption>
+            </figure>
+            <figure class="shot">
+              <img src="assets/screenshots/results.png" alt="Cleanton Results listing groups with sizes and safety ratings" loading="lazy" />
+              <figcaption><strong>Results.</strong> Review every item, then select what to remove.</figcaption>
+            </figure>
+            <figure class="shot">
+              <img src="assets/screenshots/packages.png" alt="Cleanton Packages screen for Homebrew, npm, pip, and MacPorts" loading="lazy" />
+              <figcaption><strong>Packages.</strong> Dependency-aware removal with codebase-usage warnings.</figcaption>
+            </figure>
+            <figure class="shot">
+              <img src="assets/screenshots/services.png" alt="Cleanton Services screen listing launchd and Homebrew services" loading="lazy" />
+              <figcaption><strong>Services.</strong> Manage launchd and Homebrew services, system ones locked.</figcaption>
+            </figure>
           </div>
         </div>
       </section>
