@@ -1,0 +1,21 @@
+[recipe]
+id = "jvm-ivy-cache"
+name = "Ivy Cache"
+description = "Apache Ivy / sbt dependency cache (re-downloaded on demand)"
+category = "jvm"
+safety_level = "cautious"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/.ivy2/cache/**"
+min_age_days = 60
+
+[action]
+type = "trash"
+prompt = "Move {size} of Ivy cache to Trash?"
+group = true
+
+[test]
+should_match = ["~/.ivy2/cache/org.example/lib/jars/lib-1.0.jar"]
+should_not_match = ["~/.ivy2/.credentials"]

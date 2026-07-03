@@ -46,14 +46,16 @@ export struct DockerRow {
     has-reclaimable: bool,
 }
 
-// A review-only suggestion row (duplicate set or large file/folder).
+// A review-only suggestion row (duplicate set, large file/folder, or screenshot).
 export struct SuggestionRow {
     title: string,
     detail: string,
     size: string,
     icon: string,
-    // First path, used for "Reveal in Finder".
+    // First/representative path, used for "Reveal in Finder" and the Trash action.
     path: string,
+    // Whether the two-step Trash affordance is offered for this row.
+    deletable: bool,
 }
 
 // One selectable manager in the Packages tab selector.
@@ -80,6 +82,28 @@ export struct PackageRow {
     used-by: string,
 }
 
+// An installed application (Applications tab).
+export struct AppListRow {
+    name: string,
+    version: string,
+    bundle-id: string,
+    path: string,
+    size: string,
+    protected: bool,
+    // Installed via a Homebrew cask; the uninstall also runs `brew uninstall`.
+    brew: bool,
+}
+
+// One reviewable leftover of an app uninstall.
+export struct LeftoverRow {
+    name: string,
+    path: string,
+    kind: string,
+    size: string,
+    admin: bool,
+    selected: bool,
+}
+
 export struct ServiceRow {
     id: string,
     name: string,
@@ -88,6 +112,11 @@ export struct ServiceRow {
     path: string,
     running: bool,
     protected-service: bool,
+    // Starts automatically at login/boot (launchd RunAtLoad or a brew service).
+    run-at-load: bool,
+    // The referenced executable is missing: the plist is a safe-to-remove
+    // leftover, so a "Remove" affordance is offered instead of "Disable".
+    orphaned: bool,
 }
 
 export global AppState {
@@ -130,6 +159,15 @@ export global AppState {
     in-out property <[SuggestionRow]> duplicate-rows;
     in-out property <int> large-item-count: 0;
     in-out property <[SuggestionRow]> large-item-rows;
+    in-out property <int> screenshot-count: 0;
+    in-out property <string> screenshot-reclaimable: "0 B";
+    in-out property <[SuggestionRow]> screenshot-rows;
+    in-out property <int> installer-count: 0;
+    in-out property <string> installer-reclaimable: "0 B";
+    in-out property <[SuggestionRow]> installer-rows;
+    // Path of the single suggestion whose two-step Trash action is armed
+    // (showing "Confirm"); empty means nothing is armed.
+    in-out property <string> suggestion-pending-delete-path;
 
     // ── Packages (Homebrew / npm / pip / MacPorts) ────────────────────────────
     in-out property <[PkgManagerTab]> package-tabs;
@@ -164,6 +202,12 @@ export global AppState {
     in-out property <float> docker-ratio: 0.0;
     in-out property <string> ml-size: "0 B";
     in-out property <float> ml-ratio: 0.0;
+    in-out property <string> jvm-size: "0 B";
+    in-out property <float> jvm-ratio: 0.0;
+    in-out property <string> aitools-size: "0 B";
+    in-out property <float> aitools-ratio: 0.0;
+    in-out property <string> other-size: "0 B";
+    in-out property <float> other-ratio: 0.0;
 
     in-out property <string> scan-root: "";
     in-out property <string> scan-files-count: "0";
@@ -206,9 +250,30 @@ export global AppState {
     // tiles always reflect the FULL discovered set, not the filtered subset).
     in-out property <string> service-filter;
     in-out property <bool> service-running-only: false;
+    // Hide macOS/Apple-managed protected services (they are locked anyway).
+    in-out property <bool> service-hide-protected: false;
+    // Show only login/startup items (services with RunAtLoad set).
+    in-out property <bool> service-startup-only: false;
     // Two-step Disable arming: holds the id of the single row whose destructive
     // action is currently armed (showing "Confirm"); empty means nothing armed.
     in-out property <string> service-pending-disable-id;
+    // Two-step Remove arming for orphaned startup items (missing executable).
+    in-out property <string> service-pending-remove-id;
+
+    // Applications tab state.
+    in-out property <[AppListRow]> app-rows;
+    in-out property <string> app-filter;
+    in-out property <bool> apps-loading: false;
+    in-out property <bool> apps-hide-system: false;
+    in-out property <string> apps-status: "";
+    in-out property <string> selected-app-path: "";
+    in-out property <string> selected-app-name: "";
+    in-out property <[LeftoverRow]> leftover-rows;
+    in-out property <string> leftover-total: "0 B";
+    in-out property <int> leftover-count: 0;
+    in-out property <bool> leftover-loading: false;
+    in-out property <bool> uninstall-pending: false;
+    in-out property <bool> uninstalling: false;
 
     // Typed, two-way-bound settings backing the interactive controls on the
     // Settings screen. Populated from CleantonConfig on startup and read back
@@ -221,6 +286,8 @@ export global AppState {
     in-out property <bool> setting-exclude-cloud: true;
     in-out property <bool> setting-exclude-volumes: true;
     in-out property <bool> setting-ml: false;
+    in-out property <int> setting-max-run-gb: 250;
+    in-out property <int> setting-max-action-gb: 100;
     in-out property <string> setting-save-status: "No changes saved yet.";
 
     // First-run Full Disk Access guidance. `fda-needs-attention` is set only
@@ -248,6 +315,10 @@ export global AppCallbacks {
     callback clean-docker();
     // Reveal a suggestion's path in Finder (review-only; never deletes).
     callback reveal-in-finder(string);
+    // Move a single suggestion path (duplicate copy, large item, or screenshot)
+    // to the Trash after explicit user confirmation. Reuses the engine executor
+    // and its protected-path / metadata revalidation guards.
+    callback delete-suggestion(string);
     // Packages tab: (re)load the inventory for the active manager.
     callback refresh-packages();
     // Switch the active manager (index into package-tabs) and load it.
@@ -269,6 +340,18 @@ export global AppCallbacks {
     // Safely disable a launchd/Homebrew service by id (protected services are
     // refused in the backend as defense in depth).
     callback disable-service(string);
+    // Enable (start at login/boot) a previously disabled service by id.
+    callback enable-service(string);
+    // Remove an orphaned startup item's leftover plist by id (backend only
+    // permits this when the referenced executable is missing).
+    callback remove-service(string);
+
+    // Applications tab: inventory, leftover review, and two-step uninstall.
+    callback refresh-apps();
+    callback apply-app-filter();
+    callback select-app(string);
+    callback toggle-leftover(int);
+    callback confirm-uninstall();
     callback request-empty-trash-confirmation();
     callback empty-trash();
     // Opens System Settings → Privacy & Security → Full Disk Access. Gated
@@ -384,6 +467,7 @@ export component AppWindow inherits Window {
                 SidebarItem { label: "Results"; icon-glyph: "\u{f0ae}"; active: AppState.active-screen == 1; clicked => { AppState.active-screen = 1; } }
                 SidebarItem { label: "Packages"; icon-glyph: "\u{f1b3}"; active: AppState.active-screen == 2; clicked => { AppState.active-screen = 2; AppCallbacks.refresh-packages(); } }
                 SidebarItem { label: "Services"; icon-glyph: "\u{f233}"; active: AppState.active-screen == 3; clicked => { AppState.active-screen = 3; AppCallbacks.refresh-services(); } }
+                SidebarItem { label: "Applications"; icon-glyph: "\u{e196}"; active: AppState.active-screen == 5; clicked => { AppState.active-screen = 5; AppCallbacks.refresh-apps(); } }
                 SidebarItem { label: "Settings"; icon-glyph: "\u{f013}"; active: AppState.active-screen == 4; clicked => { AppState.active-screen = 4; } }
 
                 Rectangle { vertical-stretch: 1; }
@@ -398,10 +482,13 @@ export component AppWindow inherits Window {
                     spacing: Theme.spacing-sm;
 
                     FaIcon {
-                        glyph: Theme.dark-mode ? "\u{f185}" : "\u{f186}";
+                        // Icon reflects the CURRENT theme, matching the label:
+                        // Light → sun, Dark → moon.
+                        glyph: Theme.dark-mode ? "\u{f186}" : "\u{f185}";
                         icon-color: Theme.palette.text-muted;
                         icon-size: Theme.font-size-sm;
                         width: 18px;
+                        vertical-alignment: center;
                     }
 
                     Text {
@@ -437,85 +524,6 @@ export component AppWindow inherits Window {
                 // Access is positively detected as missing. Purely informational
                 // — it guides the user and offers a button that opens the
                 // correct System Settings pane on explicit click.
-                if AppState.fda-needs-attention: Panel {
-                    VerticalLayout {
-                        padding: Theme.spacing-lg;
-                        spacing: Theme.spacing-md;
-
-                        HorizontalLayout {
-                            spacing: Theme.spacing-sm;
-                            FaIcon { glyph: "\u{f023}"; icon-color: Theme.palette.accent; icon-size: Theme.font-size-md; width: 22px; }
-                            Text {
-                                text: "Unlock a complete scan with Full Disk Access";
-                                color: Theme.palette.text-primary;
-                                font-size: Theme.font-size-md;
-                                font-weight: 700;
-                                vertical-alignment: center;
-                                horizontal-stretch: 1;
-                            }
-                        }
-
-                        Text {
-                            text: AppState.fda-lead;
-                            color: Theme.palette.text-secondary;
-                            font-size: Theme.font-size-sm;
-                            wrap: word-wrap;
-                        }
-
-                        VerticalLayout {
-                            spacing: Theme.spacing-sm;
-                            for step[i] in AppState.fda-steps: HorizontalLayout {
-                                spacing: Theme.spacing-sm;
-                                alignment: start;
-                                Rectangle {
-                                    width: 20px;
-                                    height: 20px;
-                                    border-radius: 10px;
-                                    background: Theme.palette.accent;
-                                    Text {
-                                        text: "\{i + 1}";
-                                        color: #FFFFFF;
-                                        font-size: Theme.font-size-xs;
-                                        font-weight: 700;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                    }
-                                }
-                                Text {
-                                    text: step;
-                                    color: Theme.palette.text-primary;
-                                    font-size: Theme.font-size-sm;
-                                    wrap: word-wrap;
-                                    horizontal-stretch: 1;
-                                    vertical-alignment: center;
-                                }
-                            }
-                        }
-
-                        Text {
-                            text: AppState.fda-note;
-                            color: Theme.palette.text-muted;
-                            font-size: Theme.font-size-xs;
-                            wrap: word-wrap;
-                        }
-
-                        HorizontalLayout {
-                            spacing: Theme.spacing-md;
-                            ActionButton {
-                                label: "Open Full Disk Access settings";
-                                icon-glyph: "\u{f013}";
-                                clicked => { AppCallbacks.open-fda-settings(); }
-                            }
-                            ActionButton {
-                                label: "Dismiss";
-                                primary: false;
-                                clicked => { AppCallbacks.dismiss-fda(); }
-                            }
-                            Rectangle { horizontal-stretch: 1; }
-                        }
-                    }
-                }
-
                 HorizontalLayout {
                     spacing: Theme.spacing-md;
 
@@ -543,90 +551,217 @@ export component AppWindow inherits Window {
                     }
                 }
 
-                HorizontalLayout {
-                    spacing: Theme.spacing-md;
+                // Everything below the header scrolls: on short windows the
+                // tiles and panels keep their natural size instead of being
+                // compressed until text clips.
+                ScrollView {
+                    vertical-stretch: 1;
 
-                    MetricTile { label: "Reclaimable"; value: AppState.total-reclaimable; detail: AppState.result-mode; icon-glyph: "\u{f2ed}"; accent-color: Theme.palette.success; ratio: AppState.plan-action-count > 0 ? 1.0 : 0.0; }
-                    MetricTile { label: "Recipe groups"; value: AppState.plan-action-count; detail: AppState.plan-file-count + " files in " + AppState.plan-action-count + " groups"; icon-glyph: "\u{f0ae}"; accent-color: Theme.palette.accent; ratio: AppState.plan-action-count > 0 ? 1.0 : 0.0; }
-                    MetricTile { label: "Scanned"; value: AppState.scan-bytes; detail: AppState.scan-files-count + " files, " + AppState.scan-warning-count + " warnings"; icon-glyph: "\u{f07b}"; accent-color: Theme.palette.info; ratio: AppState.scan-progress; }
-                }
-
-                Panel {
                     VerticalLayout {
-                        padding: Theme.spacing-lg;
-                        spacing: Theme.spacing-md;
+                        spacing: Theme.spacing-lg;
 
-                        HorizontalLayout {
-                            Text { text: "Cleanable Categories"; color: Theme.palette.text-primary; font-size: Theme.font-size-lg; font-weight: 700; horizontal-stretch: 1; }
-                            Text { text: AppState.scan-status; color: Theme.palette.text-muted; font-size: Theme.font-size-sm; vertical-alignment: center; }
+                        if AppState.fda-needs-attention: Panel {
+                            VerticalLayout {
+                                padding: Theme.spacing-lg;
+                                spacing: Theme.spacing-md;
+
+                                HorizontalLayout {
+                                    spacing: Theme.spacing-sm;
+                                    FaIcon { glyph: "\u{f023}"; icon-color: Theme.palette.accent; icon-size: Theme.font-size-md; width: 22px; }
+                                    Text {
+                                        text: "Unlock a complete scan with Full Disk Access";
+                                        color: Theme.palette.text-primary;
+                                        font-size: Theme.font-size-md;
+                                        font-weight: 700;
+                                        vertical-alignment: center;
+                                        horizontal-stretch: 1;
+                                    }
+                                }
+
+                                Text {
+                                    text: AppState.fda-lead;
+                                    color: Theme.palette.text-secondary;
+                                    font-size: Theme.font-size-sm;
+                                    wrap: word-wrap;
+                                }
+
+                                VerticalLayout {
+                                    spacing: Theme.spacing-sm;
+                                    for step[i] in AppState.fda-steps: HorizontalLayout {
+                                        spacing: Theme.spacing-sm;
+                                        alignment: start;
+                                        Rectangle {
+                                            width: 20px;
+                                            height: 20px;
+                                            border-radius: 10px;
+                                            background: Theme.palette.accent;
+                                            Text {
+                                                text: "\{i + 1}";
+                                                color: #FFFFFF;
+                                                font-size: Theme.font-size-xs;
+                                                font-weight: 700;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                        Text {
+                                            text: step;
+                                            color: Theme.palette.text-primary;
+                                            font-size: Theme.font-size-sm;
+                                            wrap: word-wrap;
+                                            horizontal-stretch: 1;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+
+                                Text {
+                                    text: AppState.fda-note;
+                                    color: Theme.palette.text-muted;
+                                    font-size: Theme.font-size-xs;
+                                    wrap: word-wrap;
+                                }
+
+                                HorizontalLayout {
+                                    spacing: Theme.spacing-md;
+                                    ActionButton {
+                                        label: "Open Full Disk Access settings";
+                                        icon-glyph: "\u{f013}";
+                                        clicked => { AppCallbacks.open-fda-settings(); }
+                                    }
+                                    ActionButton {
+                                        label: "Dismiss";
+                                        primary: false;
+                                        clicked => { AppCallbacks.dismiss-fda(); }
+                                    }
+                                    Rectangle { horizontal-stretch: 1; }
+                                }
+                            }
                         }
+
 
                         HorizontalLayout {
                             spacing: Theme.spacing-md;
-                            MetricTile { label: "Rust"; value: AppState.rust-size; detail: "target directories"; icon-glyph: "\u{e07a}"; brand-icon: true; accent-color: Theme.palette.rust; ratio: AppState.rust-ratio; }
-                            MetricTile { label: "Swift"; value: AppState.swift-size; detail: "DerivedData"; icon-glyph: "\u{f8e1}"; brand-icon: true; accent-color: Theme.palette.swift; ratio: AppState.swift-ratio; }
-                            MetricTile { label: "Node"; value: AppState.node-size; detail: "node_modules"; icon-glyph: "\u{f3d3}"; brand-icon: true; accent-color: Theme.palette.node; ratio: AppState.node-ratio; }
+
+                            MetricTile { label: "Reclaimable"; value: AppState.total-reclaimable; detail: AppState.result-mode; icon-glyph: "\u{f2ed}"; accent-color: Theme.palette.success; ratio: AppState.plan-action-count > 0 ? 1.0 : 0.0; }
+                            MetricTile { label: "Recipe groups"; value: AppState.plan-action-count; detail: AppState.plan-file-count + " files in " + AppState.plan-action-count + " groups"; icon-glyph: "\u{f0ae}"; accent-color: Theme.palette.accent; ratio: AppState.plan-action-count > 0 ? 1.0 : 0.0; }
+                            MetricTile { label: "Scanned"; value: AppState.scan-bytes; detail: AppState.scan-files-count + " files, " + AppState.scan-warning-count + " warnings"; icon-glyph: "\u{f07b}"; accent-color: Theme.palette.info; ratio: AppState.scan-progress; }
                         }
 
-                        HorizontalLayout {
-                            spacing: Theme.spacing-md;
-                            MetricTile { label: "Python"; value: AppState.python-size; detail: "virtualenvs and caches"; icon-glyph: "\u{f3e2}"; brand-icon: true; accent-color: Theme.palette.python; ratio: AppState.python-ratio; }
-                            MetricTile { label: "Docker"; value: AppState.docker-size; detail: "images and volumes"; icon-glyph: "\u{f395}"; brand-icon: true; accent-color: Theme.palette.docker; ratio: AppState.docker-ratio; }
-                            MetricTile { label: "ML / AI"; value: AppState.ml-size; detail: "models and checkpoints"; icon-glyph: "\u{e1ec}"; accent-color: Theme.palette.ml; ratio: AppState.ml-ratio; }
+                        Panel {
+                            VerticalLayout {
+                                padding: Theme.spacing-lg;
+                                spacing: Theme.spacing-md;
+
+                                HorizontalLayout {
+                                    Text { text: "Cleanable Categories"; color: Theme.palette.text-primary; font-size: Theme.font-size-lg; font-weight: 700; horizontal-stretch: 1; }
+                                    Text { text: AppState.scan-status; color: Theme.palette.text-muted; font-size: Theme.font-size-sm; vertical-alignment: center; }
+                                    // Carousel paging: one "page" is three tiles.
+                                    Rectangle {
+                                        width: 28px;
+                                        height: 28px;
+                                        border-radius: Theme.radius-sm;
+                                        background: prev-touch.has-hover ? Theme.palette.surface-elevated : transparent;
+                                        FaIcon { glyph: "\u{f053}"; icon-color: Theme.palette.text-secondary; icon-size: Theme.font-size-sm; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
+                                        prev-touch := TouchArea {
+                                            clicked => { category-carousel.viewport-x = min(category-carousel.viewport-x + 3 * 224px, 0); }
+                                        }
+                                    }
+                                    Rectangle {
+                                        width: 28px;
+                                        height: 28px;
+                                        border-radius: Theme.radius-sm;
+                                        background: next-touch.has-hover ? Theme.palette.surface-elevated : transparent;
+                                        FaIcon { glyph: "\u{f054}"; icon-color: Theme.palette.text-secondary; icon-size: Theme.font-size-sm; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
+                                        next-touch := TouchArea {
+                                            clicked => { category-carousel.viewport-x = max(category-carousel.viewport-x - 3 * 224px, min(category-carousel.width - category-carousel.viewport-width, 0)); }
+                                        }
+                                    }
+                                }
+
+                                // Carousel: one horizontally scrollable row of
+                                // full-size tiles (trackpad-swipeable; chevrons in
+                                // the header page by three). Fixed tile width keeps
+                                // every card readable at any window size.
+                                // Flickable, not ScrollView: swipes like a
+                                // carousel but draws no scrollbar over the cards;
+                                // the header chevrons are the paging affordance.
+                                category-carousel := Flickable {
+                                    // Height matches the fixed tile height, and
+                                    // viewport-height is pinned to it so the
+                                    // carousel only ever scrolls horizontally
+                                    // (tiles are 116px tall — see MetricTile).
+                                    height: 116px;
+                                    viewport-height: self.height;
+
+                                    HorizontalLayout {
+                                        spacing: Theme.spacing-md;
+                                        alignment: start;
+                                        MetricTile { width: 210px; label: "Rust"; value: AppState.rust-size; detail: "target directories"; icon-glyph: "\u{e07a}"; brand-icon: true; accent-color: Theme.palette.rust; ratio: AppState.rust-ratio; }
+                                        MetricTile { width: 210px; label: "Swift"; value: AppState.swift-size; detail: "DerivedData"; icon-glyph: "\u{f8e1}"; brand-icon: true; accent-color: Theme.palette.swift; ratio: AppState.swift-ratio; }
+                                        MetricTile { width: 210px; label: "Node"; value: AppState.node-size; detail: "node_modules"; icon-glyph: "\u{f3d3}"; brand-icon: true; accent-color: Theme.palette.node; ratio: AppState.node-ratio; }
+                                        MetricTile { width: 210px; label: "Python"; value: AppState.python-size; detail: "virtualenvs and caches"; icon-glyph: "\u{f3e2}"; brand-icon: true; accent-color: Theme.palette.python; ratio: AppState.python-ratio; }
+                                        MetricTile { width: 210px; label: "Docker"; value: AppState.docker-size; detail: "images and volumes"; icon-glyph: "\u{f395}"; brand-icon: true; accent-color: Theme.palette.docker; ratio: AppState.docker-ratio; }
+                                        MetricTile { width: 210px; label: "ML / AI"; value: AppState.ml-size; detail: "models and checkpoints"; icon-glyph: "\u{e1ec}"; accent-color: Theme.palette.ml; ratio: AppState.ml-ratio; }
+                                        MetricTile { width: 210px; label: "JVM / Android"; value: AppState.jvm-size; detail: "Gradle and IDE caches"; icon-glyph: "\u{f17b}"; brand-icon: true; accent-color: Theme.palette.jvm; ratio: AppState.jvm-ratio; }
+                                        MetricTile { width: 210px; label: "AI Tools"; value: AppState.aitools-size; detail: "agent caches and worktrees"; icon-glyph: "\u{f544}"; accent-color: Theme.palette.ai-tools; ratio: AppState.aitools-ratio; }
+                                        MetricTile { width: 210px; label: "Other"; value: AppState.other-size; detail: "system, apps, more languages"; icon-glyph: "\u{f0c7}"; accent-color: Theme.palette.other; ratio: AppState.other-ratio; }
+                                    }
+                                }
+                            }
+                        }
+
+                        Panel {
+                            VerticalLayout {
+                                padding: Theme.spacing-lg;
+                                spacing: Theme.spacing-md;
+
+                                HorizontalLayout {
+                                    spacing: Theme.spacing-sm;
+                                    FaIcon { glyph: "\u{f0a0}"; icon-color: Theme.palette.info; icon-size: Theme.font-size-md; width: 22px; vertical-alignment: center; }
+                                    Text { text: "Disk Capacity"; color: Theme.palette.text-primary; font-size: Theme.font-size-lg; font-weight: 700; horizontal-stretch: 1; vertical-alignment: center; }
+                                    Text { text: AppState.capacity-ready ? "" : "Unavailable"; color: Theme.palette.warning; font-size: Theme.font-size-sm; vertical-alignment: center; }
+                                }
+
+                                HorizontalLayout {
+                                    spacing: Theme.spacing-xl;
+                                    VerticalLayout { spacing: Theme.spacing-xs; Text { text: "Total"; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; } Text { text: AppState.disk-total; color: Theme.palette.text-primary; font-size: Theme.font-size-lg; font-weight: 700; } }
+                                    VerticalLayout { spacing: Theme.spacing-xs; Text { text: "Used"; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; } Text { text: AppState.disk-used; color: Theme.palette.text-primary; font-size: Theme.font-size-lg; font-weight: 700; } }
+                                    VerticalLayout { spacing: Theme.spacing-xs; Text { text: "Available (approx)"; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; } Text { text: AppState.disk-available; color: Theme.palette.success; font-size: Theme.font-size-lg; font-weight: 700; } }
+                                    VerticalLayout { spacing: Theme.spacing-xs; Text { text: "Purgeable (est)"; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; } Text { text: AppState.disk-purgeable; color: Theme.palette.text-secondary; font-size: Theme.font-size-lg; font-weight: 700; } }
+                                    Rectangle { horizontal-stretch: 1; }
+                                }
+
+                                ProgressBar { progress: AppState.disk-used-ratio; }
+
+                                Text { text: "Disk usage history (used bytes per recorded sample)"; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; }
+
+                                Rectangle {
+                                    height: 48px;
+
+                                    if AppState.usage-history-ready: HorizontalLayout {
+                                        alignment: start;
+                                        spacing: 1px;
+                                        for h in AppState.usage-history: SparkBar { value: h; }
+                                    }
+
+                                    if !AppState.usage-history-ready: Text {
+                                        text: "Collecting usage history… (need ≥2 samples)";
+                                        color: Theme.palette.text-muted;
+                                        font-size: Theme.font-size-sm;
+                                        vertical-alignment: center;
+                                    }
+                                }
+
+                                if AppState.snapshot-note != "": HorizontalLayout {
+                                    spacing: Theme.spacing-sm;
+                                    FaIcon { glyph: "\u{f05a}"; icon-color: Theme.palette.text-muted; icon-size: Theme.font-size-sm; width: 16px; }
+                                    Text { text: AppState.snapshot-note; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; vertical-alignment: center; wrap: word-wrap; horizontal-stretch: 1; }
+                                }
+                            }
                         }
                     }
                 }
-
-                Panel {
-                    VerticalLayout {
-                        padding: Theme.spacing-lg;
-                        spacing: Theme.spacing-md;
-
-                        HorizontalLayout {
-                            FaIcon { glyph: "\u{f0a0}"; icon-color: Theme.palette.info; icon-size: Theme.font-size-md; width: 22px; }
-                            Text { text: "Disk Capacity"; color: Theme.palette.text-primary; font-size: Theme.font-size-lg; font-weight: 700; horizontal-stretch: 1; }
-                            Text { text: AppState.capacity-ready ? "" : "Unavailable"; color: Theme.palette.warning; font-size: Theme.font-size-sm; vertical-alignment: center; }
-                        }
-
-                        HorizontalLayout {
-                            spacing: Theme.spacing-xl;
-                            VerticalLayout { spacing: Theme.spacing-xs; Text { text: "Total"; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; } Text { text: AppState.disk-total; color: Theme.palette.text-primary; font-size: Theme.font-size-lg; font-weight: 700; } }
-                            VerticalLayout { spacing: Theme.spacing-xs; Text { text: "Used"; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; } Text { text: AppState.disk-used; color: Theme.palette.text-primary; font-size: Theme.font-size-lg; font-weight: 700; } }
-                            VerticalLayout { spacing: Theme.spacing-xs; Text { text: "Available (approx)"; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; } Text { text: AppState.disk-available; color: Theme.palette.success; font-size: Theme.font-size-lg; font-weight: 700; } }
-                            VerticalLayout { spacing: Theme.spacing-xs; Text { text: "Purgeable (est)"; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; } Text { text: AppState.disk-purgeable; color: Theme.palette.text-secondary; font-size: Theme.font-size-lg; font-weight: 700; } }
-                            Rectangle { horizontal-stretch: 1; }
-                        }
-
-                        ProgressBar { progress: AppState.disk-used-ratio; }
-
-                        Text { text: "Disk usage history (used bytes per recorded sample)"; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; }
-
-                        Rectangle {
-                            height: 48px;
-
-                            if AppState.usage-history-ready: HorizontalLayout {
-                                alignment: start;
-                                spacing: 1px;
-                                for h in AppState.usage-history: SparkBar { value: h; }
-                            }
-
-                            if !AppState.usage-history-ready: Text {
-                                text: "Collecting usage history… (need ≥2 samples)";
-                                color: Theme.palette.text-muted;
-                                font-size: Theme.font-size-sm;
-                                vertical-alignment: center;
-                            }
-                        }
-
-                        if AppState.snapshot-note != "": HorizontalLayout {
-                            spacing: Theme.spacing-sm;
-                            FaIcon { glyph: "\u{f05a}"; icon-color: Theme.palette.text-muted; icon-size: Theme.font-size-sm; width: 16px; }
-                            Text { text: AppState.snapshot-note; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; vertical-alignment: center; wrap: word-wrap; horizontal-stretch: 1; }
-                        }
-                    }
-                }
-
-                Rectangle { vertical-stretch: 1; }
             }
 
             if AppState.active-screen == 1: VerticalLayout {
@@ -739,7 +874,10 @@ export component AppWindow inherits Window {
                                 // must not contribute gaps. Rows carry their own height.
                                 spacing: 0px;
 
-                                HorizontalLayout {
+                                // Column header only makes sense with rows below
+                                // it; hiding it when empty stops the "dangling
+                                // header + gap + message" broken look.
+                                if AppState.plan-action-count > 0: HorizontalLayout {
                                     padding-left: Theme.spacing-md;
                                     padding-right: Theme.spacing-md;
                                     padding-top: Theme.spacing-xs;
@@ -762,10 +900,11 @@ export component AppWindow inherits Window {
                                     Text { text: "SAFETY"; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; font-weight: 700; min-width: RowColumns.safety-col; horizontal-alignment: center; vertical-alignment: center; }
                                 }
 
-                                Rectangle { height: 1px; background: Theme.palette.border-subtle; }
+                                if AppState.plan-action-count > 0: Rectangle { height: 1px; background: Theme.palette.border-subtle; }
 
                                 if AppState.plan-action-count == 0: VerticalLayout {
-                                    height: 132px;
+                                    min-height: 220px;
+                                    vertical-stretch: 1;
                                     alignment: center;
                                     spacing: Theme.spacing-sm;
 
@@ -873,7 +1012,7 @@ export component AppWindow inherits Window {
                         }
 
                         // ── Suggestions (review only — never auto-cleaned) ───
-                        if AppState.duplicate-count > 0 || AppState.large-item-count > 0: Panel {
+                        if AppState.duplicate-count > 0 || AppState.large-item-count > 0 || AppState.screenshot-count > 0 || AppState.installer-count > 0: Panel {
                             VerticalLayout {
                                 padding: Theme.spacing-sm;
                                 spacing: 2px;
@@ -889,7 +1028,7 @@ export component AppWindow inherits Window {
                                         horizontal-stretch: 1;
                                         spacing: 2px;
                                         Text { text: "Suggestions"; color: Theme.palette.text-primary; font-size: Theme.font-size-sm; font-weight: 700; }
-                                        Text { text: "Review only — not part of the cleanup plan. Click a row to reveal it in Finder."; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; wrap: word-wrap; }
+                                        Text { text: "Review only — not part of the cleanup plan. Click a row to reveal it in Finder, or use Trash to move a single item to the Trash."; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; wrap: word-wrap; }
                                     }
                                 }
 
@@ -906,7 +1045,56 @@ export component AppWindow inherits Window {
                                     detail: s.detail;
                                     size: s.size;
                                     icon-glyph: s.icon;
+                                    deletable: s.deletable;
+                                    armed-delete: s.deletable && s.path != "" && s.path == AppState.suggestion-pending-delete-path;
                                     reveal => { AppCallbacks.reveal-in-finder(s.path); }
+                                    arm-delete => { AppState.suggestion-pending-delete-path = s.path; }
+                                    confirm-delete => {
+                                        AppCallbacks.delete-suggestion(s.path);
+                                        AppState.suggestion-pending-delete-path = "";
+                                    }
+                                }
+
+                                if AppState.screenshot-count > 0: Text {
+                                    text: "Screenshots & recordings — " + AppState.screenshot-reclaimable + " across " + AppState.screenshot-count + " files";
+                                    color: Theme.palette.text-secondary;
+                                    font-size: Theme.font-size-xs;
+                                    font-weight: 700;
+                                }
+                                for s in AppState.screenshot-rows: SuggestionListRow {
+                                    title: s.title;
+                                    detail: s.detail;
+                                    size: s.size;
+                                    icon-glyph: s.icon;
+                                    deletable: s.deletable;
+                                    armed-delete: s.deletable && s.path != "" && s.path == AppState.suggestion-pending-delete-path;
+                                    reveal => { AppCallbacks.reveal-in-finder(s.path); }
+                                    arm-delete => { AppState.suggestion-pending-delete-path = s.path; }
+                                    confirm-delete => {
+                                        AppCallbacks.delete-suggestion(s.path);
+                                        AppState.suggestion-pending-delete-path = "";
+                                    }
+                                }
+
+                                if AppState.installer-count > 0: Text {
+                                    text: "Old installers in Downloads — " + AppState.installer-reclaimable + " across " + AppState.installer-count + " files (re-downloadable)";
+                                    color: Theme.palette.text-secondary;
+                                    font-size: Theme.font-size-xs;
+                                    font-weight: 700;
+                                }
+                                for s in AppState.installer-rows: SuggestionListRow {
+                                    title: s.title;
+                                    detail: s.detail;
+                                    size: s.size;
+                                    icon-glyph: s.icon;
+                                    deletable: s.deletable;
+                                    armed-delete: s.deletable && s.path != "" && s.path == AppState.suggestion-pending-delete-path;
+                                    reveal => { AppCallbacks.reveal-in-finder(s.path); }
+                                    arm-delete => { AppState.suggestion-pending-delete-path = s.path; }
+                                    confirm-delete => {
+                                        AppCallbacks.delete-suggestion(s.path);
+                                        AppState.suggestion-pending-delete-path = "";
+                                    }
                                 }
 
                                 if AppState.large-item-count > 0: Text {
@@ -920,7 +1108,14 @@ export component AppWindow inherits Window {
                                     detail: s.detail;
                                     size: s.size;
                                     icon-glyph: s.icon;
+                                    deletable: s.deletable;
+                                    armed-delete: s.deletable && s.path != "" && s.path == AppState.suggestion-pending-delete-path;
                                     reveal => { AppCallbacks.reveal-in-finder(s.path); }
+                                    arm-delete => { AppState.suggestion-pending-delete-path = s.path; }
+                                    confirm-delete => {
+                                        AppCallbacks.delete-suggestion(s.path);
+                                        AppState.suggestion-pending-delete-path = "";
+                                    }
                                 }
                             }
                         }
@@ -1082,7 +1277,7 @@ export component AppWindow inherits Window {
                         padding: Theme.spacing-sm;
                         spacing: 0px;
 
-                        HorizontalLayout {
+                        if AppState.package-count > 0: HorizontalLayout {
                             padding-left: Theme.spacing-md;
                             padding-right: Theme.spacing-md;
                             padding-top: Theme.spacing-xs;
@@ -1103,10 +1298,11 @@ export component AppWindow inherits Window {
                             Text { text: "SIZE"; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; font-weight: 700; min-width: RowColumns.size-col; horizontal-alignment: right; vertical-alignment: center; }
                         }
 
-                        Rectangle { height: 1px; background: Theme.palette.border-subtle; }
+                        if AppState.package-count > 0: Rectangle { height: 1px; background: Theme.palette.border-subtle; }
 
                         if AppState.package-count == 0: VerticalLayout {
-                            height: 160px;
+                            min-height: 220px;
+                            vertical-stretch: 1;
                             alignment: center;
                             spacing: Theme.spacing-sm;
                             FaIcon { glyph: AppState.package-loading ? "\u{f110}" : "\u{f1b3}"; icon-color: Theme.palette.text-muted; icon-size: Theme.font-size-xl; }
@@ -1174,8 +1370,42 @@ export component AppWindow inherits Window {
                         edited => { AppCallbacks.apply-service-filter(); }
                     }
 
+                    // Each label+toggle pair hugs together (alignment: start
+                    // stops the pair from being stretched apart), so a toggle
+                    // can never read as belonging to the neighbouring label.
                     HorizontalLayout {
-                        spacing: Theme.spacing-sm;
+                        spacing: Theme.spacing-xs;
+                        alignment: start;
+                        Text {
+                            text: "Startup only";
+                            color: Theme.palette.text-secondary;
+                            font-size: Theme.font-size-sm;
+                            vertical-alignment: center;
+                        }
+                        Toggle {
+                            checked <=> AppState.service-startup-only;
+                            toggled => { AppCallbacks.apply-service-filter(); }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        spacing: Theme.spacing-xs;
+                        alignment: start;
+                        Text {
+                            text: "Hide protected";
+                            color: Theme.palette.text-secondary;
+                            font-size: Theme.font-size-sm;
+                            vertical-alignment: center;
+                        }
+                        Toggle {
+                            checked <=> AppState.service-hide-protected;
+                            toggled => { AppCallbacks.apply-service-filter(); }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        spacing: Theme.spacing-xs;
+                        alignment: start;
                         Text {
                             text: "Running only";
                             color: Theme.palette.text-secondary;
@@ -1200,7 +1430,9 @@ export component AppWindow inherits Window {
 
                                 // Column header (muted, uppercase) + divider, with
                                 // comfortable top padding so the first row breathes.
-                                HorizontalLayout {
+                                // Hidden when empty so the empty/loading state reads
+                                // as one clean centered block, not a stray header.
+                                if AppState.service-count > 0: HorizontalLayout {
                                     padding-left: Theme.spacing-md;
                                     padding-right: Theme.spacing-md;
                                     padding-top: Theme.spacing-sm;
@@ -1208,15 +1440,16 @@ export component AppWindow inherits Window {
                                     spacing: Theme.spacing-md;
                                     Rectangle { width: 14px; }
                                     Text { text: "NAME"; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; font-weight: 700; horizontal-stretch: 1; }
-                                    Text { text: "TYPE"; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; font-weight: 700; min-width: 72px; horizontal-alignment: center; }
-                                    Text { text: "STATUS"; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; font-weight: 700; min-width: 92px; horizontal-alignment: center; }
+                                    Text { text: "TYPE"; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; font-weight: 700; min-width: 104px; horizontal-alignment: center; }
+                                    Text { text: "STATUS"; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; font-weight: 700; min-width: 104px; horizontal-alignment: center; }
                                     Text { text: "ACTION"; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; font-weight: 700; min-width: 100px; horizontal-alignment: right; }
                                 }
 
-                                Rectangle { height: 1px; background: Theme.palette.border-subtle; }
+                                if AppState.service-count > 0: Rectangle { height: 1px; background: Theme.palette.border-subtle; }
 
                                 if AppState.service-count == 0: VerticalLayout {
-                                    height: 132px;
+                                    min-height: 220px;
+                                    vertical-stretch: 1;
                                     alignment: center;
                                     spacing: Theme.spacing-sm;
 
@@ -1248,12 +1481,292 @@ export component AppWindow inherits Window {
                                     path: service.path;
                                     running: service.running;
                                     protected-service: service.protected-service;
+                                    run-at-load: service.run-at-load;
+                                    orphaned: service.orphaned;
                                     pending-disable-id: AppState.service-pending-disable-id;
-                                    arm-disable(sid) => { AppState.service-pending-disable-id = sid; }
+                                    pending-remove-id: AppState.service-pending-remove-id;
+                                    arm-disable(sid) => {
+                                        AppState.service-pending-disable-id = sid;
+                                        AppState.service-pending-remove-id = "";
+                                    }
                                     confirm-disable(sid) => {
                                         AppCallbacks.disable-service(sid);
                                         AppState.service-pending-disable-id = "";
                                     }
+                                    arm-remove(sid) => {
+                                        AppState.service-pending-remove-id = sid;
+                                        AppState.service-pending-disable-id = "";
+                                    }
+                                    confirm-remove(sid) => {
+                                        AppCallbacks.remove-service(sid);
+                                        AppState.service-pending-remove-id = "";
+                                    }
+                                    enable(sid) => { AppCallbacks.enable-service(sid); }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if AppState.active-screen == 5: VerticalLayout {
+                padding: Theme.spacing-xl;
+                spacing: Theme.spacing-lg;
+
+                HorizontalLayout {
+                    spacing: Theme.spacing-md;
+
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        spacing: Theme.spacing-xs;
+                        Text { text: "Applications"; color: Theme.palette.text-primary; font-size: Theme.font-size-xl; font-weight: 700; }
+                        Text { text: AppState.apps-status; color: Theme.palette.text-secondary; font-size: Theme.font-size-sm; overflow: elide; }
+                    }
+
+                    ActionButton {
+                        label: AppState.apps-loading ? "Loading…" : "Refresh";
+                        icon-glyph: "\u{f021}";
+                        enabled: !AppState.apps-loading;
+                        clicked => { AppCallbacks.refresh-apps(); }
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: Theme.spacing-md;
+                    vertical-stretch: 1;
+
+                    // ── Left: installed applications ───────────────────────
+                    Panel {
+                        horizontal-stretch: 5;
+                        // The list holds full app names + version/bundle id; give
+                        // it a solid floor so names never truncate to "Activ…".
+                        min-width: 380px;
+
+                        VerticalLayout {
+                            padding: Theme.spacing-sm;
+                            spacing: Theme.spacing-sm;
+
+                            LineEdit {
+                                placeholder-text: "Filter by name or bundle id…";
+                                text <=> AppState.app-filter;
+                                edited => { AppCallbacks.apply-app-filter(); }
+                            }
+
+                            HorizontalLayout {
+                                spacing: Theme.spacing-xs;
+                                alignment: start;
+                                Text {
+                                    text: "Hide system apps";
+                                    color: Theme.palette.text-secondary;
+                                    font-size: Theme.font-size-sm;
+                                    vertical-alignment: center;
+                                }
+                                Toggle {
+                                    checked <=> AppState.apps-hide-system;
+                                    toggled => { AppCallbacks.apply-app-filter(); }
+                                }
+                            }
+
+                            ScrollView {
+                                vertical-stretch: 1;
+
+                                VerticalLayout {
+                                    spacing: 2px;
+                                    for a in AppState.app-rows: Rectangle {
+                                        height: 44px;
+                                        border-radius: Theme.radius-sm;
+                                        background: a.path == AppState.selected-app-path
+                                            ? Theme.palette.accent.with-alpha(0.14)
+                                            : (app-row-touch.has-hover ? Theme.palette.surface-elevated : transparent);
+
+                                        app-row-touch := TouchArea {
+                                            mouse-cursor: pointer;
+                                            clicked => { AppCallbacks.select-app(a.path); }
+                                        }
+
+                                        HorizontalLayout {
+                                            padding-left: Theme.spacing-sm;
+                                            padding-right: Theme.spacing-sm;
+                                            spacing: Theme.spacing-sm;
+
+                                            VerticalLayout {
+                                                horizontal-stretch: 1;
+                                                alignment: center;
+                                                spacing: 1px;
+                                                HorizontalLayout {
+                                                    spacing: Theme.spacing-xs;
+                                                    alignment: start;
+                                                    Text { text: a.name; color: Theme.palette.text-primary; font-size: Theme.font-size-sm; font-weight: 600; overflow: elide; vertical-alignment: center; }
+                                                    if a.brew: Badge {
+                                                        label: "brew";
+                                                        badge-color: Theme.palette.warning;
+                                                        min-width: 42px;
+                                                    }
+                                                }
+                                                Text { text: a.version == "" ? a.bundle-id : a.version + " — " + a.bundle-id; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; overflow: elide; }
+                                            }
+
+                                            Rectangle {
+                                                width: 16px;
+                                                FaIcon {
+                                                    glyph: "\u{f023}";
+                                                    icon-color: Theme.palette.text-muted;
+                                                    icon-size: Theme.font-size-xs;
+                                                    visible: a.protected;
+                                                    y: (parent.height - self.height) / 2;
+                                                }
+                                            }
+
+                                            Text {
+                                                text: a.size;
+                                                color: Theme.palette.text-secondary;
+                                                font-size: Theme.font-size-xs;
+                                                vertical-alignment: center;
+                                                width: 64px;
+                                                horizontal-alignment: right;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // ── Right: leftover review + uninstall ─────────────────
+                    Panel {
+                        horizontal-stretch: 6;
+
+                        VerticalLayout {
+                            padding: Theme.spacing-md;
+                            spacing: Theme.spacing-sm;
+
+                            if AppState.selected-app-name == "": VerticalLayout {
+                                vertical-stretch: 1;
+                                alignment: center;
+                                Text {
+                                    text: "Select an application to review everything it would leave behind — support files, caches, preferences, launch items, containers, and helpers.";
+                                    color: Theme.palette.text-muted;
+                                    font-size: Theme.font-size-sm;
+                                    wrap: word-wrap;
+                                    horizontal-alignment: center;
+                                }
+                            }
+
+                            if AppState.selected-app-name != "": VerticalLayout {
+                                vertical-stretch: 1;
+                                spacing: Theme.spacing-sm;
+
+                                HorizontalLayout {
+                                    spacing: Theme.spacing-sm;
+                                    Text { text: "Uninstall " + AppState.selected-app-name; color: Theme.palette.text-primary; font-size: Theme.font-size-lg; font-weight: 700; horizontal-stretch: 1; overflow: elide; }
+                                    Text { text: AppState.leftover-loading ? "Scanning leftovers…" : AppState.leftover-total + " across " + AppState.leftover-count + " items"; color: Theme.palette.text-secondary; font-size: Theme.font-size-sm; vertical-alignment: center; }
+                                }
+
+                                Text {
+                                    text: "Review what gets moved to the Trash. Locked items need admin rights: once the app is gone they show up as orphaned on the Services tab and can be removed there.";
+                                    color: Theme.palette.text-muted;
+                                    font-size: Theme.font-size-xs;
+                                    wrap: word-wrap;
+                                }
+
+                                Rectangle { height: 1px; background: Theme.palette.border-subtle; }
+
+                                ScrollView {
+                                    vertical-stretch: 1;
+
+                                    VerticalLayout {
+                                        spacing: 2px;
+                                        for row[i] in AppState.leftover-rows: Rectangle {
+                                            height: 40px;
+                                            border-radius: Theme.radius-sm;
+                                            background: leftover-touch.has-hover ? Theme.palette.surface-elevated : transparent;
+
+                                            leftover-touch := TouchArea {
+                                                mouse-cursor: row.admin ? default : pointer;
+                                                clicked => { AppCallbacks.toggle-leftover(i); }
+                                            }
+
+                                            HorizontalLayout {
+                                                padding-left: Theme.spacing-sm;
+                                                padding-right: Theme.spacing-sm;
+                                                spacing: Theme.spacing-sm;
+
+                                                Rectangle {
+                                                    width: 20px;
+                                                    Checkbox {
+                                                        checked: row.selected;
+                                                        enabled: !row.admin && !AppState.uninstalling;
+                                                        y: (parent.height - self.height) / 2;
+                                                        toggled => { AppCallbacks.toggle-leftover(i); }
+                                                    }
+                                                }
+
+                                                VerticalLayout {
+                                                    horizontal-stretch: 1;
+                                                    alignment: center;
+                                                    spacing: 1px;
+                                                    Text { text: row.name; color: Theme.palette.text-primary; font-size: Theme.font-size-sm; overflow: elide; }
+                                                    Text { text: row.path; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; overflow: elide; }
+                                                }
+
+                                                Text {
+                                                    text: row.kind;
+                                                    color: Theme.palette.text-secondary;
+                                                    font-size: Theme.font-size-xs;
+                                                    vertical-alignment: center;
+                                                }
+
+                                                Rectangle {
+                                                    width: 14px;
+                                                    FaIcon {
+                                                        glyph: "\u{f023}";
+                                                        icon-color: Theme.palette.warning;
+                                                        icon-size: Theme.font-size-xs;
+                                                        visible: row.admin;
+                                                        y: (parent.height - self.height) / 2;
+                                                    }
+                                                }
+
+                                                Text {
+                                                    text: row.size;
+                                                    color: Theme.palette.text-secondary;
+                                                    font-size: Theme.font-size-xs;
+                                                    vertical-alignment: center;
+                                                    width: 64px;
+                                                    horizontal-alignment: right;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                HorizontalLayout {
+                                    spacing: Theme.spacing-md;
+
+                                    if !AppState.uninstall-pending: ActionButton {
+                                        label: AppState.uninstalling ? "Uninstalling…" : "Uninstall…";
+                                        icon-glyph: "\u{f2ed}";
+                                        button-color: Theme.palette.danger;
+                                        enabled: AppState.leftover-count > 0 && !AppState.leftover-loading && !AppState.uninstalling;
+                                        clicked => { AppState.uninstall-pending = true; }
+                                    }
+
+                                    if AppState.uninstall-pending: ActionButton {
+                                        label: "Confirm: move to Trash";
+                                        icon-glyph: "\u{f00c}";
+                                        button-color: Theme.palette.danger;
+                                        enabled: !AppState.uninstalling;
+                                        clicked => { AppCallbacks.confirm-uninstall(); }
+                                    }
+
+                                    if AppState.uninstall-pending: ActionButton {
+                                        label: "Cancel";
+                                        primary: false;
+                                        enabled: !AppState.uninstalling;
+                                        clicked => { AppState.uninstall-pending = false; }
+                                    }
+
+                                    Rectangle { horizontal-stretch: 1; }
                                 }
                             }
                         }
@@ -1363,6 +1876,39 @@ export component AppWindow inherits Window {
                                     label: "ML classification";
                                     description: "Use the on-device model to score cleanup candidates.";
                                     Toggle { checked <=> AppState.setting-ml; }
+                                }
+                            }
+                        }
+
+                        // ── Safety limits ───────────────────────────────────
+                        Panel {
+                            VerticalLayout {
+                                padding: Theme.spacing-lg;
+                                spacing: Theme.spacing-md;
+
+                                SectionHeader { text: "SAFETY LIMITS"; }
+
+                                SettingsField {
+                                    label: "Max per cleanup (GB)";
+                                    description: "Refuse a single cleanup run larger than this. Raise it to reclaim big build caches at once.";
+                                    SpinBox {
+                                        width: 130px;
+                                        minimum: 1;
+                                        maximum: 100000;
+                                        value <=> AppState.setting-max-run-gb;
+                                    }
+                                }
+                                Divider {}
+
+                                SettingsField {
+                                    label: "Max per item (GB)";
+                                    description: "Refuse any single file or folder larger than this.";
+                                    SpinBox {
+                                        width: 130px;
+                                        minimum: 1;
+                                        maximum: 100000;
+                                        value <=> AppState.setting-max-action-gb;
+                                    }
                                 }
                             }
                         }

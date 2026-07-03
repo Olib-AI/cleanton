@@ -1,0 +1,24 @@
+[recipe]
+id = "jvm-gradle-build-dirs"
+name = "Gradle Build Outputs"
+# The any-of manifest proof covers Groovy and Kotlin DSL projects; a directory
+# merely named build with no Gradle manifest beside it is never matched.
+description = "build/ outputs of Gradle and Android projects (rebuilt by the next build)"
+category = "jvm"
+safety_level = "cautious"
+enabled = true
+priority = 50
+
+[match]
+directory_name = "build"
+parent_must_contain_any = ["build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts"]
+min_age_days = 14
+
+[action]
+type = "trash"
+prompt = "Move {size} of Gradle build outputs to Trash?"
+group = true
+
+[test]
+should_match = ["projects/android-app/app/build"]
+should_not_match = ["loose/build", "projects/android-app/app/src"]

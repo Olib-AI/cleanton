@@ -49,6 +49,11 @@ where
     let mut cmd = Command::new(program);
     cmd.args(args);
     cmd.stdin(std::process::Stdio::null());
+    // A Finder/launchd-launched `.app` inherits only a minimal PATH, so bare
+    // program names (`brew`, `npm`, `pip3`) and the tools they in turn invoke
+    // (npm → node, brew → git) fail to resolve. Hand the child a PATH augmented
+    // with the usual developer-tool locations so resolution matches a terminal.
+    cmd.env("PATH", cleanton_common::paths::augmented_path());
     cmd.kill_on_drop(true);
     match timeout(dur, cmd.output()).await {
         Ok(Ok(out)) => Some(CmdOutput {
@@ -64,8 +69,15 @@ where
 /// the same elevation path used by `cleanton-services`. The command runs as
 /// root via the GUI prompt; callers must NOT prefix `sudo`.
 pub(crate) async fn run_admin(program: &str, args: &[&str], dur: Duration) -> Option<CmdOutput> {
+    // `do shell script` runs under a bare `/bin/sh` whose PATH does not include
+    // the developer-tool locations, so resolve the program to an absolute path
+    // (falling back to the bare name) before quoting it into the script.
+    let resolved = which(program).map_or_else(
+        || program.to_owned(),
+        |path| path.to_string_lossy().into_owned(),
+    );
     let mut words = Vec::with_capacity(args.len().saturating_add(1));
-    words.push(shell_quote(program));
+    words.push(shell_quote(&resolved));
     for arg in args {
         words.push(shell_quote(arg));
     }
@@ -77,19 +89,10 @@ pub(crate) async fn run_admin(program: &str, args: &[&str], dur: Duration) -> Op
     run("osascript", ["-e", script.as_str()], dur).await
 }
 
-/// First executable match for `bin` on `PATH`, if any.
+/// First executable match for `bin`, searching the developer-tool-augmented
+/// `PATH` so a GUI-launched app finds the same binaries as the user's terminal.
 pub(crate) fn which(bin: &str) -> Option<PathBuf> {
-    let paths = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&paths) {
-        if dir.as_os_str().is_empty() {
-            continue;
-        }
-        let candidate = dir.join(bin);
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-    None
+    cleanton_common::paths::find_executable(bin)
 }
 
 fn shell_quote(value: &str) -> String {

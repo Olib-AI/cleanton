@@ -1,0 +1,24 @@
+[recipe]
+id = "vm-vagrant-boxes"
+name = "Vagrant Boxes"
+# Base box images only; live VM state belongs to the provider (VirtualBox,
+# VMware) and is not under boxes/.
+description = "Downloaded Vagrant base boxes (re-downloaded by vagrant up)"
+category = "vm"
+safety_level = "cautious"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/.vagrant.d/boxes/**"
+min_age_days = 60
+min_size_mb = 100
+
+[action]
+type = "trash"
+prompt = "Move {size} of Vagrant boxes to Trash?"
+group = true
+
+[test]
+should_match = ["~/.vagrant.d/boxes/ubuntu-VAGRANTSLASH-jammy64/20240101/virtualbox/box.ovf"]
+should_not_match = ["~/.vagrant.d/Vagrantfile"]

@@ -1,0 +1,23 @@
+[recipe]
+id = "apps-spotify-cache"
+name = "Spotify Cache"
+# Downloaded-for-offline music lives in PersistentCache/Storage under
+# Application Support and is never matched here.
+description = "Spotify streaming and browse cache (re-fetched while listening)"
+category = "apps"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/Library/Caches/com.spotify.client/**"
+min_age_days = 14
+
+[action]
+type = "trash"
+prompt = "Move {size} of Spotify cache to Trash?"
+group = true
+
+[test]
+should_match = ["~/Library/Caches/com.spotify.client/Data/ab/abcdef.file"]
+should_not_match = ["~/Library/Application Support/Spotify/prefs"]

@@ -9,7 +9,9 @@ priority = 50
 
 [match]
 directory_name = ".venv"
-parent_must_contain = ["pyproject.toml"]
+# Any recognized Python project manifest proves the venv belongs to a real
+# project (pip/uv/poetry projects without pyproject.toml were invisible before).
+parent_must_contain_any = ["pyproject.toml", "requirements.txt", "setup.py", "setup.cfg"]
 min_size_mb = 50
 min_age_days = 30
 

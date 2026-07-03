@@ -1,0 +1,23 @@
+[recipe]
+id = "vm-minikube-cache"
+name = "minikube Cache"
+# Only cache/; cluster state, certs, and profiles live elsewhere under
+# ~/.minikube and are never matched.
+description = "minikube image and ISO cache (re-downloaded by minikube start)"
+category = "vm"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/.minikube/cache/**"
+min_age_days = 30
+
+[action]
+type = "trash"
+prompt = "Move {size} of minikube cache to Trash?"
+group = true
+
+[test]
+should_match = ["~/.minikube/cache/iso/arm64/minikube-v1.33.0-arm64.iso"]
+should_not_match = ["~/.minikube/ca.crt"]

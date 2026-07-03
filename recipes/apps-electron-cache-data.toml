@@ -1,0 +1,24 @@
+[recipe]
+id = "apps-electron-cache-data"
+name = "App Web Caches"
+# Matches only the Cache/Cache_Data subtree that Chromium-based apps rebuild
+# automatically. Local Storage, Session Storage, and IndexedDB (logins,
+# drafts, app data) are different subtrees and never match.
+description = "Chromium disk caches of Electron apps like Slack, Discord, Teams (rebuilt in use)"
+category = "apps"
+safety_level = "cautious"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/Library/Application Support/*/Cache/Cache_Data/**"
+min_age_days = 7
+
+[action]
+type = "trash"
+prompt = "Move {size} of app web caches to Trash?"
+group = true
+
+[test]
+should_match = ["~/Library/Application Support/Slack/Cache/Cache_Data/f_000001"]
+should_not_match = ["~/Library/Application Support/Slack/Local Storage/leveldb/000003.log"]

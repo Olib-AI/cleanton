@@ -10,7 +10,12 @@ pub(crate) struct ReviewedCommand {
 /// Reviewed subprocess adapter for service inspection and launchd/brew mutations.
 #[allow(clippy::disallowed_methods)]
 fn service_command(program: &str) -> Command {
-    Command::new(program)
+    let mut command = Command::new(program);
+    // A Finder/launchd-launched `.app` inherits only a minimal PATH, so a bare
+    // `brew` (see `brew.rs`) would not resolve. Hand the child the augmented
+    // developer-tool PATH. System tools invoked here use absolute paths already.
+    command.env("PATH", cleanton_common::paths::augmented_path());
+    command
 }
 
 pub fn output<I, S>(program: &str, args: I) -> std::io::Result<Output>

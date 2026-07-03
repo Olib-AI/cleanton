@@ -1,0 +1,21 @@
+[recipe]
+id = "haskell-stack-work"
+name = "Haskell Stack Work Dirs"
+description = ".stack-work build outputs (rebuilt by the next stack build)"
+category = "haskell"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+directory_name = ".stack-work"
+parent_must_contain = ["stack.yaml"]
+
+[action]
+type = "trash"
+prompt = "Move {size} of Stack work directories to Trash?"
+group = true
+
+[test]
+should_match = ["projects/hs-app/.stack-work"]
+should_not_match = ["loose/.stack-work", "projects/hs-app/src"]

@@ -1,0 +1,21 @@
+[recipe]
+id = "go-golangci-lint-cache"
+name = "golangci-lint Cache"
+description = "golangci-lint analysis cache (rebuilt on the next lint run)"
+category = "go"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/Library/Caches/golangci-lint/**"
+min_age_days = 14
+
+[action]
+type = "trash"
+prompt = "Move {size} of golangci-lint cache to Trash?"
+group = true
+
+[test]
+should_match = ["~/Library/Caches/golangci-lint/abc123/analysis.bin"]
+should_not_match = ["~/Library/Caches/Yarn"]

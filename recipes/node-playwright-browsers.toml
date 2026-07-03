@@ -1,0 +1,22 @@
+[recipe]
+id = "node-playwright-browsers"
+name = "Playwright Browsers"
+description = "Playwright downloaded browser builds (re-downloaded by npx playwright install)"
+category = "node"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/Library/Caches/ms-playwright/**"
+min_age_days = 30
+min_size_mb = 50
+
+[action]
+type = "trash"
+prompt = "Move {size} of Playwright browsers to Trash?"
+group = true
+
+[test]
+should_match = ["~/Library/Caches/ms-playwright/chromium-1155/chrome-mac/Chromium.app-payload"]
+should_not_match = ["~/Library/Caches/Yarn"]

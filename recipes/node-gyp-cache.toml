@@ -1,0 +1,21 @@
+[recipe]
+id = "node-gyp-cache"
+name = "node-gyp Headers Cache"
+description = "node-gyp downloaded Node headers (re-downloaded on next native build)"
+category = "node"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/Library/Caches/node-gyp/**"
+min_age_days = 30
+
+[action]
+type = "trash"
+prompt = "Move {size} of node-gyp cache to Trash?"
+group = true
+
+[test]
+should_match = ["~/Library/Caches/node-gyp/22.5.0/include/node/node_api.h"]
+should_not_match = ["~/Library/Caches/Yarn"]

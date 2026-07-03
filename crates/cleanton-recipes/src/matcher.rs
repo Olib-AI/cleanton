@@ -153,13 +153,8 @@ pub(crate) fn recipe_matches_entry_full(
         }
     }
 
-    if let Some(markers) = &matcher.parent_must_contain {
-        let Some(parent) = entry.path.parent() else {
-            return false;
-        };
-        if !markers.iter().all(|marker| parent_contains(parent, marker)) {
-            return false;
-        }
+    if !context_markers_hold(matcher, entry, &parent_contains) {
+        return false;
     }
 
     if let Some(min_size_mb) = matcher.min_size_mb
@@ -186,6 +181,49 @@ pub(crate) fn recipe_matches_entry_full(
     // credential/auth/secret/settings file, regardless of how broad its glob is.
     if DEFAULT_PROTECTED.is_protected_fast(&entry.path) || is_sensitive_basename(&entry.path) {
         return false;
+    }
+
+    true
+}
+
+/// The on-disk context proofs: `parent_must_contain` (all-of),
+/// `parent_must_contain_any` (any-of), and `self_must_contain` (all markers
+/// inside the matched directory itself). `dir_contains` is the injected
+/// "does `dir/marker` exist" probe shared by all three.
+#[must_use]
+fn context_markers_hold(
+    matcher: &crate::MatchSpec,
+    entry: &FileEntry,
+    dir_contains: &impl Fn(&Path, &str) -> bool,
+) -> bool {
+    if let Some(markers) = &matcher.parent_must_contain {
+        let Some(parent) = entry.path.parent() else {
+            return false;
+        };
+        if !markers.iter().all(|marker| dir_contains(parent, marker)) {
+            return false;
+        }
+    }
+
+    if let Some(markers) = &matcher.parent_must_contain_any {
+        let Some(parent) = entry.path.parent() else {
+            return false;
+        };
+        if !markers.iter().any(|marker| dir_contains(parent, marker)) {
+            return false;
+        }
+    }
+
+    if let Some(markers) = &matcher.self_must_contain {
+        if entry.kind != FileKind::Directory {
+            return false;
+        }
+        if !markers
+            .iter()
+            .all(|marker| dir_contains(&entry.path, marker))
+        {
+            return false;
+        }
     }
 
     true
@@ -222,6 +260,7 @@ fn build_action(recipe: &RecipeDocument, entry: &FileEntry) -> CleanupAction {
         logical_bytes: entry.logical_bytes,
         reclaimable_bytes: entry.allocated_bytes,
         recipe_id: RecipeId(recipe.recipe.id.clone()),
+        category: recipe.recipe.category.clone(),
         action_type: recipe.action.action_type,
         confidence: Confidence::High,
         safety_level: recipe.recipe.safety_level,
@@ -337,6 +376,70 @@ mod tests {
             &recipe,
             &entry,
             |parent, marker| parent == Path::new("projects/app") && marker == "Cargo.toml",
+        ));
+    }
+
+    #[test]
+    fn parent_must_contain_any_accepts_any_single_marker() {
+        let recipe = test_recipe(MatchSpec {
+            directory_name: Some("build".to_owned()),
+            parent_must_contain_any: Some(vec![
+                "build.gradle".to_owned(),
+                "build.gradle.kts".to_owned(),
+            ]),
+            ..MatchSpec::default()
+        });
+        let entry = test_entry("projects/app/build", FileKind::Directory);
+
+        // Only the Kotlin-DSL manifest exists: still a match.
+        assert!(recipe_matches_entry_with_parent_lookup(
+            &recipe,
+            &entry,
+            |_, marker| marker == "build.gradle.kts",
+        ));
+        // Neither manifest exists: no match.
+        assert!(!recipe_matches_entry_with_parent_lookup(
+            &recipe,
+            &entry,
+            |_, _| false,
+        ));
+    }
+
+    #[test]
+    fn self_must_contain_probes_inside_the_matched_directory() {
+        let recipe = test_recipe(MatchSpec {
+            directory_name: Some("build".to_owned()),
+            self_must_contain: Some(vec!["CMakeCache.txt".to_owned()]),
+            ..MatchSpec::default()
+        });
+        let entry = test_entry("projects/native/build", FileKind::Directory);
+
+        // The lookup receives the matched directory itself, not its parent.
+        assert!(recipe_matches_entry_with_parent_lookup(
+            &recipe,
+            &entry,
+            |dir, marker| dir == Path::new("projects/native/build") && marker == "CMakeCache.txt",
+        ));
+        assert!(!recipe_matches_entry_with_parent_lookup(
+            &recipe,
+            &entry,
+            |_, _| false,
+        ));
+    }
+
+    #[test]
+    fn self_must_contain_never_matches_files() {
+        let recipe = test_recipe(MatchSpec {
+            directory_name: Some("build".to_owned()),
+            self_must_contain: Some(vec!["CMakeCache.txt".to_owned()]),
+            ..MatchSpec::default()
+        });
+        let entry = test_entry("projects/native/build", FileKind::File);
+
+        assert!(!recipe_matches_entry_with_parent_lookup(
+            &recipe,
+            &entry,
+            |_, _| true,
         ));
     }
 

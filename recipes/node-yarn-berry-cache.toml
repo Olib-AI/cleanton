@@ -1,15 +1,18 @@
 [recipe]
 id = "node-yarn-berry-cache"
 name = "Yarn Berry Cache"
-description = "Yarn Berry local package cache"
+# Only the cache/ subtree. The rest of .yarn (releases/, plugins/, patches/,
+# sdks/) is often committed and required to run the project at all -- trashing
+# the whole .yarn dir breaks zero-install and pinned-release setups.
+description = "Yarn Berry package cache (re-fetched by yarn install)"
 category = "node"
 safety_level = "cautious"
 enabled = true
 priority = 50
 
 [match]
-directory_name = ".yarn"
-parent_must_contain = ["package.json"]
+directory_name = "cache"
+path_glob = "**/.yarn/cache"
 
 [action]
 type = "trash"
@@ -17,5 +20,5 @@ prompt = "Move {size} of Yarn Berry cache to Trash?"
 group = true
 
 [test]
-should_match = ["projects/app/.yarn"]
-should_not_match = ["projects/app/src", "loose/.yarn"]
+should_match = ["projects/app/.yarn/cache"]
+should_not_match = ["projects/app/.yarn/releases", "projects/app/.yarn", "loose/cache"]

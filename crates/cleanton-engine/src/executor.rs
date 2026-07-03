@@ -7,9 +7,9 @@ use std::{
 
 use chrono::{DateTime, Local};
 use cleanton_common::{
-    ActionType, CleantonConfig, CleantonError, CleanupAction, CleanupPlan, ExecutionActionResult,
-    ExecutionResult, ExecutionStatus, FileKind, MetadataFingerprint, ProtectedPaths, Result,
-    SafetyLevel,
+    ActionType, CleantonConfig, CleantonError, CleanupAction, CleanupPlan, Confidence,
+    ExecutionActionResult, ExecutionResult, ExecutionStatus, FileKind, MetadataFingerprint,
+    ProtectedPaths, RecipeId, Result, SafetyLevel,
 };
 use serde::Serialize;
 use tokio::sync::mpsc;
@@ -22,6 +22,20 @@ pub(crate) fn execute_plan(
     config: &CleantonConfig,
     plan: &CleanupPlan,
     event_tx: &mpsc::Sender<EngineEvent>,
+) -> Result<ExecutionResult> {
+    execute_plan_with_cancel(config, plan, event_tx, None)
+}
+
+/// Like [`execute_plan`], but stops promptly once `cancel` is set: the current
+/// action finishes (an in-flight trash move is never left half-done), every
+/// remaining action is recorded as `Skipped`, and the partial result — with its
+/// execution log — is returned. Cancellation must actually stop destructive
+/// work, not merely hide its outcome.
+pub(crate) fn execute_plan_with_cancel(
+    config: &CleantonConfig,
+    plan: &CleanupPlan,
+    event_tx: &mpsc::Sender<EngineEvent>,
+    cancel: Option<&std::sync::atomic::AtomicBool>,
 ) -> Result<ExecutionResult> {
     validate_plan(config, plan)?;
 
@@ -37,6 +51,17 @@ pub(crate) fn execute_plan(
     };
 
     for action in &plan.actions {
+        if cancel.is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Relaxed)) {
+            result.skipped_actions += 1;
+            result.actions.push(action_result(
+                action,
+                ExecutionStatus::Skipped,
+                0,
+                0,
+                "skipped: execution cancelled by user",
+            ));
+            continue;
+        }
         result.attempted_actions += 1;
         let _ = event_tx.try_send(EngineEvent::ActionStarted {
             action: action.clone(),
@@ -71,6 +96,329 @@ pub(crate) fn execute_plan(
             }
         }
         result.actions.push(action_result);
+    }
+
+    result.log_path = write_execution_log(config, started, &result)?;
+    Ok(result)
+}
+
+/// Move a single user-reviewed path (a duplicate copy, large item, or
+/// screenshot surfaced in Suggestions) to the Trash.
+///
+/// Suggestions are review-only and are never auto-removed; this runs only after
+/// an explicit, per-item user confirmation in the UI. It builds a one-action,
+/// freshly fingerprinted `Trash` plan and pushes it through the exact same
+/// executor guards as a normal cleanup — protected-path refusal, metadata
+/// revalidation, and Trash-by-default — so the safety model is unchanged.
+pub(crate) fn trash_reviewed_path(
+    config: &CleantonConfig,
+    path: &Path,
+    event_tx: &mpsc::Sender<EngineEvent>,
+) -> Result<ExecutionResult> {
+    let started = Instant::now();
+    let metadata = fs::symlink_metadata(path).map_err(|source| CleantonError::io(path, source))?;
+    let fingerprint = fingerprint_for_path(path, &metadata);
+    let reclaimable = fingerprint.allocated_bytes;
+
+    // Protection model for a *single, explicitly user-confirmed* removal. The
+    // normal executor refuses everything under the user-data roots (~/Desktop,
+    // ~/Documents, ...) precisely so recipes can never mass-act on personal
+    // files. A suggestion the user hand-picked is different: we still refuse the
+    // genuinely critical paths (system dirs, keychains, mail, .ssh, configured
+    // protected paths), but permit a file that lives *inside* a user-data
+    // content root. The root itself is never removable.
+    let protected = ProtectedPaths::new(config.safety.protected_paths.clone());
+    let within_user_data = cleanton_common::is_user_data_content_path(path)
+        && !cleanton_common::is_user_data_content_root(path);
+    if protected.is_protected(path) && !within_user_data {
+        return Err(CleantonError::ExecutionRefused(format!(
+            "refusing to remove a protected path: {}",
+            path.display()
+        )));
+    }
+
+    let action = CleanupAction {
+        target: path.to_path_buf(),
+        logical_bytes: fingerprint.logical_bytes,
+        reclaimable_bytes: reclaimable,
+        recipe_id: RecipeId("suggestion".to_owned()),
+        category: "suggestions".to_owned(),
+        action_type: ActionType::Trash,
+        confidence: Confidence::High,
+        safety_level: SafetyLevel::Cautious,
+        reason: "user-confirmed suggestion removal".to_owned(),
+        fingerprint,
+    };
+    let _ = event_tx.try_send(EngineEvent::ActionStarted {
+        action: action.clone(),
+    });
+
+    let action_result = match trash::delete(path) {
+        Ok(()) => {
+            let _ = event_tx.try_send(EngineEvent::ActionCompleted {
+                action: action.clone(),
+                freed: 0,
+            });
+            action_result(
+                &action,
+                ExecutionStatus::MovedToTrash,
+                reclaimable,
+                0,
+                "moved to Trash; bytes are not freed until Trash is emptied",
+            )
+        }
+        Err(err) => {
+            let _ = event_tx.try_send(EngineEvent::ActionFailed {
+                action: action.clone(),
+                error: format!("trash move failed: {err}"),
+            });
+            action_result(
+                &action,
+                ExecutionStatus::Failed,
+                0,
+                0,
+                format!("trash move failed: {err}"),
+            )
+        }
+    };
+
+    let mut result = ExecutionResult {
+        attempted_actions: 1,
+        moved_to_trash_bytes: action_result.moved_to_trash_bytes,
+        freed_bytes: 0,
+        skipped_actions: 0,
+        log_path: None,
+        actions: vec![action_result],
+    };
+    result.log_path = write_execution_log(config, started, &result)?;
+    Ok(result)
+}
+
+/// User-Library category directories an app uninstall is allowed to reach
+/// into. Everything else — including Keychains, Mail, and Messages, which are
+/// deliberately absent — is out of scope no matter what discovery proposed.
+const UNINSTALL_LIBRARY_SCOPES: &[&str] = &[
+    "Application Support",
+    "Caches",
+    "Preferences",
+    "Saved Application State",
+    "Logs",
+    "WebKit",
+    "HTTPStorages",
+    "Cookies",
+    "Containers",
+    "Group Containers",
+    "Application Scripts",
+    "LaunchAgents",
+];
+
+/// The XDG-style home roots an uninstall may reach into (strict descendants
+/// only, never the root itself). Paired with the bare-dotfolder rule and the
+/// reserved-dotfolder denylist, this bounds what `HomeData` leftovers can be
+/// trashed.
+const UNINSTALL_HOME_XDG_ROOTS: &[&[&str]] = &[
+    &[".cache"],
+    &[".config"],
+    &[".local", "share"],
+    &[".local", "state"],
+];
+
+/// True when `path` is a home-directory app-data location an uninstall may
+/// trash: a bare `~/.<app>` dotfolder (excluding reserved system dotfolders
+/// like `.ssh`/`.config`) or a strict descendant of one of the
+/// [`UNINSTALL_HOME_XDG_ROOTS`]. `trash_uninstall_paths` additionally enforces
+/// `ProtectedPaths` here, so `~/.config/gcloud`, `~/.config/cleanton`, etc. are
+/// still refused even though `~/.config/*` matches structurally.
+fn is_home_app_data(path: &Path, home: &Path) -> bool {
+    let Ok(rel) = path.strip_prefix(home) else {
+        return false;
+    };
+    let depth = rel.components().count();
+
+    // A bare dotfolder directly under $HOME: exactly one component, dot-prefixed.
+    if depth == 1
+        && let Some(name) = path.file_name().and_then(|name| name.to_str())
+        && let Some(key) = name.strip_prefix('.')
+        && !crate::uninstall::is_reserved_home_key(&key.to_ascii_lowercase())
+    {
+        return true;
+    }
+
+    // A strict descendant of an XDG root.
+    UNINSTALL_HOME_XDG_ROOTS.iter().any(|segments| {
+        let mut root = home.to_path_buf();
+        for segment in *segments {
+            root.push(segment);
+        }
+        path != root && path.starts_with(&root)
+    })
+}
+
+/// True when `path` is something a user-confirmed app uninstall may trash:
+/// a `.app` bundle directly under `/Applications` (or one grouping folder
+/// below it) or `~/Applications`; a strict descendant of one of the
+/// [`UNINSTALL_LIBRARY_SCOPES`] under `~/Library`; or a home-directory
+/// app-data location ([`is_home_app_data`]). Never a scope directory itself,
+/// never anything under `/System`.
+fn is_uninstall_scope(path: &Path, home: &Path) -> bool {
+    if path.starts_with("/System") {
+        return false;
+    }
+
+    // The app bundle itself.
+    let is_app_bundle = path
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("app"));
+    if is_app_bundle {
+        if let Some(parent) = path.parent() {
+            if parent == Path::new("/Applications") || parent == home.join("Applications") {
+                return true;
+            }
+            // One grouping folder below /Applications (e.g. /Applications/Utilities).
+            if parent.parent() == Some(Path::new("/Applications")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // A strict descendant of an allowed ~/Library scope.
+    let library = home.join("Library");
+    let in_library = UNINSTALL_LIBRARY_SCOPES.iter().any(|scope| {
+        let scope_dir = library.join(scope);
+        path != scope_dir && path.starts_with(&scope_dir)
+    });
+
+    in_library || is_home_app_data(path, home)
+}
+
+/// Move the user-confirmed items of an app uninstall to the Trash.
+///
+/// Runs only after the UI's explicit per-app review and confirmation. Every
+/// path must pass [`is_uninstall_scope`] — a stricter allow-list than the
+/// normal executor, covering exactly the places `uninstall::find_leftovers`
+/// proposes (app bundle + user-Library leftovers). This is what permits
+/// trashing inside the otherwise-protected `/Applications`, `Containers`, and
+/// `Group Containers` roots for the one hand-picked app. Paths a user
+/// explicitly added to `protected_paths` in their config are still refused.
+/// Out-of-scope or failing items are recorded (Skipped/Failed) and the rest
+/// proceed; everything lands in one execution log.
+pub(crate) fn trash_uninstall_paths(
+    config: &CleantonConfig,
+    paths: &[std::path::PathBuf],
+    event_tx: &mpsc::Sender<EngineEvent>,
+) -> Result<ExecutionResult> {
+    let started = Instant::now();
+    let home = std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .filter(|home| !home.as_os_str().is_empty())
+        .ok_or_else(|| {
+            CleantonError::ExecutionRefused("cannot resolve $HOME for uninstall scope".to_owned())
+        })?;
+    // Only the user's *additional* configured protections are re-checked here:
+    // the default set necessarily covers /Applications and Containers, which
+    // the uninstall scope legitimately carves into.
+    let defaults = ProtectedPaths::defaults();
+    let configured = ProtectedPaths::new(config.safety.protected_paths.clone());
+
+    let mut result = ExecutionResult {
+        attempted_actions: 0,
+        moved_to_trash_bytes: 0,
+        freed_bytes: 0,
+        skipped_actions: 0,
+        log_path: None,
+        actions: Vec::new(),
+    };
+
+    for path in paths {
+        let Ok(metadata) = fs::symlink_metadata(path) else {
+            // Already gone (e.g. trashed with an earlier item): skip quietly.
+            result.skipped_actions += 1;
+            continue;
+        };
+        let fingerprint = fingerprint_for_path(path, &metadata);
+        let reclaimable = fingerprint.allocated_bytes;
+        let action = CleanupAction {
+            target: path.clone(),
+            logical_bytes: fingerprint.logical_bytes,
+            reclaimable_bytes: reclaimable,
+            recipe_id: RecipeId("app-uninstall".to_owned()),
+            category: "apps".to_owned(),
+            action_type: ActionType::Trash,
+            confidence: Confidence::High,
+            safety_level: SafetyLevel::Cautious,
+            reason: "user-confirmed application uninstall".to_owned(),
+            fingerprint,
+        };
+
+        // The default protected set necessarily covers /Applications and the
+        // ~/Library subtrees an uninstall legitimately carves into, so defaults
+        // are ignored *there*. Everywhere else — home dotfolders and XDG dirs —
+        // the defaults are enforced, so `~/.ssh`, `~/.config/gcloud`,
+        // `~/.config/cleanton`, and the user-data roots are refused even if
+        // discovery somehow proposed them. Configured protections always win.
+        let is_app_bundle = path
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("app"));
+        let carve_zone = is_app_bundle || path.starts_with(home.join("Library"));
+        let protection_hit =
+            configured.is_protected(path) || (!carve_zone && defaults.is_protected(path));
+        // A bare `~/.<name>` that is a plain file is a config dotfile (`.zshrc`,
+        // `.gitconfig`, …), never an app-data folder — refuse it regardless of
+        // the app slug that produced it.
+        let bare_dotfile = path.parent() == Some(home.as_path())
+            && path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with('.'))
+            && !metadata.is_dir();
+        if !is_uninstall_scope(path, &home) || protection_hit || bare_dotfile {
+            result.attempted_actions += 1;
+            result.skipped_actions += 1;
+            result.actions.push(action_result(
+                &action,
+                ExecutionStatus::Skipped,
+                0,
+                0,
+                "refused: outside the uninstall scope or explicitly protected",
+            ));
+            continue;
+        }
+
+        result.attempted_actions += 1;
+        let _ = event_tx.try_send(EngineEvent::ActionStarted {
+            action: action.clone(),
+        });
+        match trash::delete(path) {
+            Ok(()) => {
+                result.moved_to_trash_bytes =
+                    result.moved_to_trash_bytes.saturating_add(reclaimable);
+                let _ = event_tx.try_send(EngineEvent::ActionCompleted {
+                    action: action.clone(),
+                    freed: 0,
+                });
+                result.actions.push(action_result(
+                    &action,
+                    ExecutionStatus::MovedToTrash,
+                    reclaimable,
+                    0,
+                    "moved to Trash; bytes are not freed until Trash is emptied",
+                ));
+            }
+            Err(err) => {
+                let _ = event_tx.try_send(EngineEvent::ActionFailed {
+                    action: action.clone(),
+                    error: format!("trash move failed: {err}"),
+                });
+                result.actions.push(action_result(
+                    &action,
+                    ExecutionStatus::Failed,
+                    0,
+                    0,
+                    format!("trash move failed: {err}"),
+                ));
+            }
+        }
     }
 
     result.log_path = write_execution_log(config, started, &result)?;
@@ -449,12 +797,137 @@ mod tests {
             logical_bytes: fingerprint.logical_bytes,
             reclaimable_bytes: fingerprint.allocated_bytes,
             recipe_id: RecipeId("test".to_owned()),
+            category: String::new(),
             action_type: ActionType::Delete,
             confidence: Confidence::High,
             safety_level: SafetyLevel::Aggressive,
             reason: "test".to_owned(),
             fingerprint,
         }
+    }
+
+    #[tokio::test]
+    async fn cancelled_execution_skips_remaining_actions_and_keeps_files() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let file = temp.path().join("cancel-me.txt");
+        std::fs::write(&file, b"payload").expect("write file");
+        let metadata = std::fs::symlink_metadata(&file).expect("metadata");
+        let fingerprint = fingerprint_for_path(&file, &metadata);
+
+        let mut action = test_action(file.clone(), fingerprint);
+        action.action_type = ActionType::Trash;
+        action.safety_level = SafetyLevel::Safe;
+        let plan = CleanupPlan {
+            total_reclaimable: action.reclaimable_bytes,
+            actions: vec![action],
+            scan_duration: Duration::ZERO,
+            analysis_duration: Duration::ZERO,
+            incomplete_scan: false,
+            created_at: SystemTime::now(),
+        };
+
+        let cancel = std::sync::atomic::AtomicBool::new(true);
+        let (event_tx, _event_rx) = mpsc::channel(8);
+        let result =
+            execute_plan_with_cancel(&CleantonConfig::default(), &plan, &event_tx, Some(&cancel))
+                .expect("cancelled execution still returns a (partial) result");
+
+        assert_eq!(result.attempted_actions, 0);
+        assert_eq!(result.skipped_actions, 1);
+        assert!(
+            result
+                .actions
+                .iter()
+                .all(|a| a.status == ExecutionStatus::Skipped),
+            "every action must be recorded as skipped"
+        );
+        assert!(file.exists(), "a cancelled action must not touch the file");
+    }
+
+    #[test]
+    fn uninstall_scope_allows_app_bundles_and_library_leftovers_only() {
+        let home = Path::new("/Users/dev");
+
+        // Allowed: the app bundle and user-Library leftovers.
+        for path in [
+            "/Applications/Slack.app",
+            "/Applications/Utilities/SomeTool.app",
+            "/Users/dev/Applications/Beta.app",
+            "/Users/dev/Library/Application Support/com.tiny.slacky",
+            "/Users/dev/Library/Caches/com.tiny.slacky.helper",
+            "/Users/dev/Library/Preferences/com.tiny.slacky.plist",
+            "/Users/dev/Library/Containers/com.tiny.slacky",
+            "/Users/dev/Library/Group Containers/ABCDE.com.tiny.slacky",
+            "/Users/dev/Library/LaunchAgents/com.tiny.slacky.plist",
+            // Home-directory app data (Ollama / LM Studio style). Discovery
+            // proposes the whole `~/.ollama` folder as one item, so only the
+            // dotfolder itself (not its descendants) needs to be in scope.
+            "/Users/dev/.ollama",
+            "/Users/dev/.cache/lm-studio",
+            "/Users/dev/.config/ollama",
+            "/Users/dev/.local/share/ollama",
+            "/Users/dev/.local/state/ollama",
+        ] {
+            assert!(
+                is_uninstall_scope(Path::new(path), home),
+                "expected in-scope: {path}"
+            );
+        }
+
+        // Refused: scope roots themselves, sensitive subtrees, system paths,
+        // and anything outside the allow-list.
+        for path in [
+            "/Applications",
+            "/Applications/Utilities",
+            "/System/Applications/Safari.app",
+            "/Applications/Deep/Nested/Tool.app",
+            "/Users/dev/Library/Application Support",
+            "/Users/dev/Library/Containers",
+            "/Users/dev/Library/Keychains/login.keychain-db",
+            "/Users/dev/Library/Messages/chat.db",
+            "/Users/dev/Library/Mail/V10/whatever",
+            "/Users/dev/Documents/report.pdf",
+            "/Users/dev/.ssh/id_rsa",
+            "/Library/LaunchDaemons/com.tiny.slacky.plist",
+            "/usr/local/bin/tool",
+            // Reserved home dotfolders and XDG roots themselves.
+            "/Users/dev/.ssh",
+            "/Users/dev/.config",
+            "/Users/dev/.cache",
+            "/Users/dev/.local/share",
+            "/Users/dev/.gitconfig",
+        ] {
+            assert!(
+                !is_uninstall_scope(Path::new(path), home),
+                "expected out of scope: {path}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn uninstall_refuses_out_of_scope_paths_and_keeps_files() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let outside = temp.path().join("not-an-app-location.txt");
+        std::fs::write(&outside, b"payload").expect("write file");
+
+        let (event_tx, _event_rx) = mpsc::channel(8);
+        let result = trash_uninstall_paths(
+            &CleantonConfig::default(),
+            std::slice::from_ref(&outside),
+            &event_tx,
+        )
+        .expect("result");
+
+        assert_eq!(result.skipped_actions, 1);
+        assert_eq!(result.moved_to_trash_bytes, 0);
+        assert!(
+            result
+                .actions
+                .iter()
+                .all(|a| a.status == ExecutionStatus::Skipped),
+            "out-of-scope items must be skipped, not trashed"
+        );
+        assert!(outside.exists(), "the file must be untouched");
     }
 
     #[test]
@@ -489,13 +962,14 @@ mod tests {
 
     #[test]
     fn oversized_plan_is_refused() {
-        let oversized_bytes = 51_u64 * 1_073_741_824;
+        let oversized_bytes = 251_u64 * 1_073_741_824;
         let plan = CleanupPlan {
             actions: vec![CleanupAction {
                 target: PathBuf::from("/tmp/cleanton-test-target"),
                 logical_bytes: oversized_bytes,
                 reclaimable_bytes: oversized_bytes,
                 recipe_id: RecipeId("test".to_owned()),
+                category: String::new(),
                 action_type: ActionType::Trash,
                 confidence: Confidence::High,
                 safety_level: SafetyLevel::Safe,
@@ -528,6 +1002,7 @@ mod tests {
                 logical_bytes: 1,
                 reclaimable_bytes: 1,
                 recipe_id: RecipeId("test".to_owned()),
+                category: String::new(),
                 action_type: ActionType::Delete,
                 confidence: Confidence::High,
                 safety_level: SafetyLevel::Safe,
@@ -564,6 +1039,7 @@ mod tests {
                 logical_bytes: oversized_bytes,
                 reclaimable_bytes: oversized_bytes,
                 recipe_id: RecipeId("test".to_owned()),
+                category: String::new(),
                 action_type: ActionType::Trash,
                 confidence: Confidence::High,
                 safety_level: SafetyLevel::Aggressive,
@@ -606,6 +1082,7 @@ mod tests {
             logical_bytes: 9,
             reclaimable_bytes: 9,
             recipe_id: RecipeId("test-delete".to_owned()),
+            category: String::new(),
             action_type: ActionType::Delete,
             confidence: Confidence::High,
             safety_level: SafetyLevel::Aggressive,
@@ -645,6 +1122,7 @@ mod tests {
             logical_bytes: 0,
             reclaimable_bytes: 0,
             recipe_id: RecipeId("test-symlink".to_owned()),
+            category: String::new(),
             action_type: ActionType::Delete,
             confidence: Confidence::High,
             safety_level: SafetyLevel::Aggressive,
@@ -783,6 +1261,16 @@ mod tests {
 
         assert_eq!(res.status, ExecutionStatus::Skipped);
         assert!(res.message.contains("target no longer exists"));
+    }
+
+    #[tokio::test]
+    async fn trash_reviewed_path_refuses_a_critical_protected_path() {
+        // A system root must be refused before any trash attempt, even for an
+        // explicitly user-confirmed suggestion removal.
+        let (tx, _rx) = mpsc::channel(4);
+        let err = trash_reviewed_path(&CleantonConfig::default(), Path::new("/usr/bin"), &tx)
+            .expect_err("critical path must be refused");
+        assert!(err.to_string().contains("protected"));
     }
 
     #[test]

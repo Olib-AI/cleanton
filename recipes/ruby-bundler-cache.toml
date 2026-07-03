@@ -1,0 +1,21 @@
+[recipe]
+id = "ruby-bundler-cache"
+name = "Bundler Cache"
+description = "Bundler downloaded gem cache (re-fetched by bundle install)"
+category = "ruby"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/.bundle/cache/**"
+min_age_days = 30
+
+[action]
+type = "trash"
+prompt = "Move {size} of Bundler cache to Trash?"
+group = true
+
+[test]
+should_match = ["~/.bundle/cache/compact_index/rubygems.org.443.abc/versions"]
+should_not_match = ["~/.bundle/config"]

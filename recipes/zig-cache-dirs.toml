@@ -1,0 +1,21 @@
+[recipe]
+id = "zig-cache-dirs"
+name = "Zig Build Caches"
+description = ".zig-cache directories of Zig projects (rebuilt by the next zig build)"
+category = "zig"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+directory_name = ".zig-cache"
+parent_must_contain_any = ["build.zig", "build.zig.zon"]
+
+[action]
+type = "trash"
+prompt = "Move {size} of Zig build caches to Trash?"
+group = true
+
+[test]
+should_match = ["projects/zig-app/.zig-cache"]
+should_not_match = ["loose/.zig-cache", "projects/zig-app/src"]

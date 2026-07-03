@@ -1,0 +1,21 @@
+[recipe]
+id = "jvm-coursier-cache"
+name = "Coursier Cache"
+description = "Coursier artifact cache used by Scala and sbt (re-downloaded on demand)"
+category = "jvm"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/Library/Caches/Coursier/**"
+min_age_days = 30
+
+[action]
+type = "trash"
+prompt = "Move {size} of Coursier cache to Trash?"
+group = true
+
+[test]
+should_match = ["~/Library/Caches/Coursier/v1/https/repo1.maven.org/maven2/org/scala-lang/scala-library.jar"]
+should_not_match = ["~/Library/Caches/Yarn"]

@@ -1,0 +1,21 @@
+[recipe]
+id = "swift-tuist-cache"
+name = "Tuist Cache"
+description = "Tuist binary and project-generation caches (rebuilt by tuist)"
+category = "swift"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/Library/Caches/tuist/**"
+min_age_days = 30
+
+[action]
+type = "trash"
+prompt = "Move {size} of Tuist cache to Trash?"
+group = true
+
+[test]
+should_match = ["~/Library/Caches/tuist/BinaryCache/MyFramework.xcframework-payload"]
+should_not_match = ["~/Library/Caches/Yarn"]

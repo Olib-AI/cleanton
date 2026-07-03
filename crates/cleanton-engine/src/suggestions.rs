@@ -193,6 +193,26 @@ pub struct Suggestions {
     pub duplicate_reclaimable: u64,
     /// Large files and folders, sorted by `bytes` descending, capped at [`MAX_LARGE_ITEMS`].
     pub large_items: Vec<LargeItem>,
+    /// macOS screenshots and screen recordings (`note` is `"screenshot"` or
+    /// `"screen recording"`), sorted by `bytes` descending, capped at
+    /// [`MAX_LARGE_ITEMS`]. Defaulted on deserialization for backward
+    /// compatibility with older persisted [`Suggestions`].
+    #[serde(default)]
+    pub screenshots: Vec<LargeItem>,
+    /// Sum of `bytes` across the reported [`Self::screenshots`].
+    #[serde(default)]
+    pub screenshot_reclaimable: u64,
+    /// Installer images and packages sitting in `~/Downloads` (`note` is
+    /// `"installer"`): `.dmg`, `.pkg`, `.mpkg`, `.iso`, `.xip`. Already-installed
+    /// or abandoned downloads users are typically comfortable giving up — all
+    /// re-downloadable. Sorted by `bytes` descending, capped at
+    /// [`Limits::max_large_items`]. Defaulted on deserialization for backward
+    /// compatibility with older persisted [`Suggestions`].
+    #[serde(default)]
+    pub installers: Vec<LargeItem>,
+    /// Sum of `bytes` across the reported [`Self::installers`].
+    #[serde(default)]
+    pub installer_reclaimable: u64,
     /// `true` if the hashing budget was hit and some candidates went un-hashed.
     pub truncated: bool,
 }
@@ -279,13 +299,143 @@ pub(crate) fn detect_with_limits(scan: &ScanResult, home: &Path, limits: &Limits
         .iter()
         .fold(0u64, |acc, set| acc.saturating_add(set.reclaimable_bytes));
     let large_items = detect_large_items(scan, home, limits);
+    let screenshots = detect_screenshots(scan, home, limits);
+    let screenshot_reclaimable = screenshots
+        .iter()
+        .fold(0u64, |acc, item| acc.saturating_add(item.bytes));
+    let installers = detect_installers(scan, home, limits);
+    let installer_reclaimable = installers
+        .iter()
+        .fold(0u64, |acc, item| acc.saturating_add(item.bytes));
 
     Suggestions {
         duplicates,
         duplicate_reclaimable,
         large_items,
+        screenshots,
+        screenshot_reclaimable,
+        installers,
+        installer_reclaimable,
         truncated,
     }
+}
+
+/// Classify a path as a macOS screenshot or screen recording by its basename,
+/// or `None` if it is neither. macOS names screenshots
+/// `"Screenshot 2026-01-01 at 10.00.00 AM.png"` (older systems: `"Screen Shot
+/// ...png"`) and screen recordings `"Screen Recording 2026-01-01 at ....mov"`.
+/// Matched case-insensitively; the leading-word check keeps arbitrary user PNGs
+/// and videos out.
+fn screenshot_kind(path: &Path) -> Option<&'static str> {
+    let name = path.file_name()?.to_str()?.to_ascii_lowercase();
+    let ext = path
+        .extension()
+        .and_then(OsStr::to_str)
+        .map(str::to_ascii_lowercase);
+    let is_image = ext.as_deref() == Some("png");
+    let is_video = matches!(ext.as_deref(), Some("mov" | "mp4" | "m4v"));
+    if is_image && (name.starts_with("screenshot ") || name.starts_with("screen shot ")) {
+        return Some("screenshot");
+    }
+    if is_video && name.starts_with("screen recording ") {
+        return Some("screen recording");
+    }
+    None
+}
+
+/// Detect macOS screenshots and screen recordings anywhere under `$HOME` (clear
+/// of build/cache/toolchain/media-library paths). Review-only, like every other
+/// suggestion. Files keep their exact scan size; sorted largest-first and capped
+/// at [`Limits::max_large_items`].
+fn detect_screenshots(scan: &ScanResult, home: &Path, limits: &Limits) -> Vec<LargeItem> {
+    let mut items: Vec<LargeItem> = Vec::new();
+    for entry in &scan.entries {
+        if entry.kind != FileKind::File {
+            continue;
+        }
+        if home_rel_len(&entry.path, home).is_none() {
+            continue;
+        }
+        let Some(kind) = screenshot_kind(&entry.path) else {
+            continue;
+        };
+        items.push(LargeItem {
+            path: entry.path.clone(),
+            bytes: entry.logical_bytes,
+            is_dir: false,
+            redownloadable: false,
+            note: kind.to_owned(),
+        });
+    }
+    items.sort_by(|a, b| b.bytes.cmp(&a.bytes).then_with(|| a.path.cmp(&b.path)));
+    items.truncate(limits.max_large_items);
+    items
+}
+
+/// Installer/disk-image extensions surfaced by [`detect_installers`]. All are
+/// artifacts of a one-time install and re-downloadable from their vendor.
+const INSTALLER_EXTENSIONS: &[&str] = &["dmg", "pkg", "mpkg", "iso", "xip"];
+
+/// Detect installer images and packages under `~/Downloads`. Scoped to
+/// Downloads on purpose: a `.dmg`/`.iso` kept elsewhere (a VM library, an
+/// archive folder) was placed there deliberately, while Downloads is where
+/// one-time installers accumulate. Review-only, sorted largest-first, capped at
+/// [`Limits::max_large_items`].
+fn detect_installers(scan: &ScanResult, home: &Path, limits: &Limits) -> Vec<LargeItem> {
+    let downloads = home.join("Downloads");
+    let mut items: Vec<LargeItem> = Vec::new();
+    for entry in &scan.entries {
+        if entry.kind != FileKind::File || !entry.path.starts_with(&downloads) {
+            continue;
+        }
+        let is_installer = entry
+            .path
+            .extension()
+            .and_then(OsStr::to_str)
+            .map(str::to_ascii_lowercase)
+            .is_some_and(|ext| INSTALLER_EXTENSIONS.contains(&ext.as_str()));
+        if !is_installer {
+            continue;
+        }
+        items.push(LargeItem {
+            path: entry.path.clone(),
+            bytes: entry.logical_bytes,
+            is_dir: false,
+            redownloadable: true,
+            note: "installer".to_owned(),
+        });
+    }
+    items.sort_by(|a, b| b.bytes.cmp(&a.bytes).then_with(|| a.path.cmp(&b.path)));
+    items.truncate(limits.max_large_items);
+    items
+}
+
+/// Filename suffixes of macOS media-library *bundles* (Photos, Music, TV,
+/// iMovie, Final Cut). These are opaque databases whose loose internal files
+/// (originals, renders, thumbnails) must never be surfaced as duplicate or
+/// large-file suggestions — reclaiming inside them corrupts the library. A
+/// component whose name ends in one of these is treated exactly like a
+/// [`SKIP_COMPONENTS`] entry.
+const MEDIA_LIBRARY_SUFFIXES: &[&str] = &[
+    ".photoslibrary",
+    ".photolibrary",
+    ".aplibrary",
+    ".musiclibrary",
+    ".tvlibrary",
+    ".imovielibrary",
+    ".theater",
+    ".fcpbundle",
+];
+
+/// True when a path component is a media-library bundle (see
+/// [`MEDIA_LIBRARY_SUFFIXES`]), matched case-insensitively on the suffix.
+fn is_media_library_component(name: &OsStr) -> bool {
+    name.to_str().is_some_and(|name| {
+        let lower = name.to_ascii_lowercase();
+        MEDIA_LIBRARY_SUFFIXES
+            .iter()
+            .any(|suffix| lower.ends_with(suffix))
+    })
 }
 
 /// Number of `Normal` components of `path` relative to `home`, or `None` if
@@ -298,7 +448,9 @@ fn user_data_rel_len(path: &Path, home: &Path) -> Option<usize> {
     for component in rel.components() {
         match component {
             Component::Normal(name) => {
-                if SKIP_COMPONENTS.iter().any(|skip| name == OsStr::new(skip)) {
+                if SKIP_COMPONENTS.iter().any(|skip| name == OsStr::new(skip))
+                    || is_media_library_component(name)
+                {
                     return None;
                 }
                 if first.is_none() {
@@ -333,7 +485,9 @@ fn home_rel_len(path: &Path, home: &Path) -> Option<usize> {
     for component in rel.components() {
         match component {
             Component::Normal(name) => {
-                if SKIP_COMPONENTS.iter().any(|skip| name == OsStr::new(skip)) {
+                if SKIP_COMPONENTS.iter().any(|skip| name == OsStr::new(skip))
+                    || is_media_library_component(name)
+                {
                     return None;
                 }
                 count = count.saturating_add(1);
@@ -355,7 +509,12 @@ fn detect_duplicates(scan: &ScanResult, home: &Path, limits: &Limits) -> (Vec<Du
         if entry.kind != FileKind::File || entry.logical_bytes < limits.min_dup_bytes {
             continue;
         }
-        if user_data_rel_len(&entry.path, home).is_none() {
+        // Duplicates are reported anywhere under $HOME that is not a build
+        // cache / VCS / toolchain / media-library path (see `home_rel_len` +
+        // SKIP_COMPONENTS). This is broader than the large-file scope (the six
+        // user-data roots) on purpose: a developer's real duplicates routinely
+        // live in `~/dev`, `~/Code`, `~/GitHub`, download folders, etc.
+        if home_rel_len(&entry.path, home).is_none() {
             continue;
         }
         by_size
@@ -954,6 +1113,117 @@ mod tests {
     }
 
     #[test]
+    fn duplicates_are_found_outside_the_six_user_data_roots() {
+        // A developer's real duplicates often live in project folders, not the
+        // Downloads/Documents/... roots. `home_rel_len` scoping must surface them.
+        let home = tempfile::tempdir().expect("home tempdir");
+        let a = home.path().join("dev").join("proj").join("a.bin");
+        let b = home.path().join("Code").join("b.bin");
+        let payload = vec![0xC3u8; 4_096];
+        let size = write_file(&a, &payload);
+        write_file(&b, &payload);
+
+        let scan = scan_of(vec![file_entry(&a, size), file_entry(&b, size)]);
+        let result = detect_with_limits(&scan, home.path(), &test_limits());
+
+        assert_eq!(result.duplicates.len(), 1);
+        assert_eq!(result.duplicates[0].count, 2);
+    }
+
+    #[test]
+    fn files_inside_a_photo_library_bundle_are_not_candidates() {
+        let home = tempfile::tempdir().expect("home tempdir");
+        let lib = home
+            .path()
+            .join("Pictures")
+            .join("Photos Library.photoslibrary")
+            .join("originals");
+        let a = lib.join("a.bin");
+        let b = lib.join("b.bin");
+        let payload = vec![0x2Bu8; 4_096];
+        let size = write_file(&a, &payload);
+        write_file(&b, &payload);
+
+        let scan = scan_of(vec![file_entry(&a, size), file_entry(&b, size)]);
+        let result = detect_with_limits(&scan, home.path(), &test_limits());
+
+        assert!(result.duplicates.is_empty());
+        assert!(result.large_items.is_empty());
+    }
+
+    #[test]
+    fn screenshots_and_recordings_are_detected() {
+        let home = tempfile::tempdir().expect("home tempdir");
+        let shot = home
+            .path()
+            .join("Desktop")
+            .join("Screenshot 2026-01-01 at 10.00.00 AM.png");
+        let rec = home
+            .path()
+            .join("Desktop")
+            .join("Screen Recording 2026-01-01 at 10.00.00 AM.mov");
+        let ordinary = home.path().join("Desktop").join("diagram.png");
+        let shot_size = write_file(&shot, &vec![0x10u8; 4_096]);
+        let rec_size = write_file(&rec, &vec![0x11u8; 8_192]);
+        write_file(&ordinary, &vec![0x12u8; 2_048]);
+
+        let scan = scan_of(vec![
+            file_entry(&shot, shot_size),
+            file_entry(&rec, rec_size),
+            file_entry(&ordinary, 2_048),
+        ]);
+        let result = detect_with_limits(&scan, home.path(), &test_limits());
+
+        assert_eq!(result.screenshots.len(), 2);
+        // Largest first: the recording (8 KiB) precedes the screenshot (4 KiB).
+        assert_eq!(result.screenshots[0].path, rec);
+        assert_eq!(result.screenshots[0].note, "screen recording");
+        assert_eq!(result.screenshots[1].path, shot);
+        assert_eq!(result.screenshots[1].note, "screenshot");
+        assert_eq!(result.screenshot_reclaimable, shot_size + rec_size);
+        // An ordinary PNG that is not a screenshot must be ignored.
+        assert!(result.screenshots.iter().all(|item| item.path != ordinary));
+    }
+
+    #[test]
+    fn installers_in_downloads_are_detected() {
+        let home = tempfile::tempdir().expect("home tempdir");
+        let downloads = home.path().join("Downloads");
+        let dmg = downloads.join("SomeApp-4.2.1.dmg");
+        let pkg = downloads.join("Tool Installer.PKG");
+        let doc = downloads.join("notes.pdf");
+        let elsewhere = home.path().join("VMs").join("linux.iso");
+        let dmg_size = write_file(&dmg, &vec![0x20u8; 8_192]);
+        let pkg_size = write_file(&pkg, &vec![0x21u8; 4_096]);
+        write_file(&doc, &vec![0x22u8; 2_048]);
+        let iso_size = write_file(&elsewhere, &vec![0x23u8; 8_192]);
+
+        let scan = scan_of(vec![
+            file_entry(&dmg, dmg_size),
+            file_entry(&pkg, pkg_size),
+            file_entry(&doc, 2_048),
+            file_entry(&elsewhere, iso_size),
+        ]);
+        let result = detect_with_limits(&scan, home.path(), &test_limits());
+
+        // Largest first; extension matched case-insensitively.
+        assert_eq!(result.installers.len(), 2);
+        assert_eq!(result.installers[0].path, dmg);
+        assert_eq!(result.installers[1].path, pkg);
+        assert!(
+            result
+                .installers
+                .iter()
+                .all(|item| item.note == "installer")
+        );
+        assert!(result.installers.iter().all(|item| item.redownloadable));
+        assert_eq!(result.installer_reclaimable, dmg_size + pkg_size);
+        // A PDF in Downloads and an ISO kept outside Downloads are not surfaced.
+        assert!(result.installers.iter().all(|item| item.path != doc));
+        assert!(result.installers.iter().all(|item| item.path != elsewhere));
+    }
+
+    #[test]
     fn same_size_different_content_is_not_a_duplicate() {
         let home = tempfile::tempdir().expect("home tempdir");
         let docs = home.path().join("Documents");
@@ -1171,7 +1441,11 @@ mod tests {
         let items =
             detect_large_items_with_probe(&scan, home.path(), &test_limits(), &probe, &sizer);
         assert!(items.iter().all(|item| item.path != repo));
-        assert_eq!(probes.load(Ordering::SeqCst), 0, "no git probe under threshold");
+        assert_eq!(
+            probes.load(Ordering::SeqCst),
+            0,
+            "no git probe under threshold"
+        );
     }
 
     #[test]
@@ -1196,7 +1470,10 @@ mod tests {
 
         let items =
             detect_large_items_with_probe(&scan, home.path(), &test_limits(), &probe, &sizer);
-        assert!(items.is_empty(), "skip-component repos are excluded from scope");
+        assert!(
+            items.is_empty(),
+            "skip-component repos are excluded from scope"
+        );
     }
 
     #[test]

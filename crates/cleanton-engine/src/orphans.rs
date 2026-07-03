@@ -220,6 +220,7 @@ fn candidate(entry: &FileEntry, key: &str) -> AnnotatedAction {
         logical_bytes: entry.logical_bytes,
         reclaimable_bytes: entry.allocated_bytes,
         recipe_id: RecipeId(ORPHAN_RECIPE_ID.to_owned()),
+        category: "apps".to_owned(),
         // Trash-only; never a permanent delete.
         action_type: ActionType::Trash,
         // A conservative engine inference (not recipe- or ML-derived).

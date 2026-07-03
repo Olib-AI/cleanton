@@ -161,8 +161,13 @@ impl Default for SafetyConfig {
     fn default() -> Self {
         Self {
             default_action: ActionType::Trash,
-            max_single_run_gb: 50,
-            max_single_action_gb: 20,
+            // Headroom for real developer cleanups: a single Xcode DerivedData,
+            // Docker, or node/Rust cache sweep routinely tops the old 50 GB /
+            // 20 GB valves. These remain safety ceilings against a runaway plan
+            // (and are user-configurable in Settings); the aggressive permanent-
+            // delete hard cap in the executor is unchanged.
+            max_single_run_gb: 250,
+            max_single_action_gb: 100,
             require_confirmation: true,
             protected_paths: Vec::new(),
             require_full_path_review_for: vec![SafetyLevel::Cautious, SafetyLevel::Aggressive],
@@ -241,7 +246,7 @@ mod tests {
         let config = CleantonConfig::load_from_path(&path).expect("load config");
         assert_eq!(config.scanning.max_depth, 3);
         assert!(!config.scanning.follow_symlinks);
-        assert_eq!(config.safety.max_single_run_gb, 50);
+        assert_eq!(config.safety.max_single_run_gb, 250);
         assert_eq!(
             config.safety.protected_paths,
             vec![PathBuf::from("/Users/example/critical")]
