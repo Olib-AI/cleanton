@@ -142,7 +142,7 @@
         <div class="container">
           <img class="mark" src="assets/logo.png" alt="Cleanton icon" />
           <h1>Reclaim your disk,<br/>without the guesswork</h1>
-          <p class="lede">Cleanton is a native macOS disk cleaner for developers. It finds the space your tools leave behind, shows you every item, and moves what you pick to the Trash.</p>
+          <p class="lede">Cleanton is a native macOS disk cleaner for developers. It finds the space your tools leave behind, uninstalls apps along with everything they leave on disk, and moves what you pick to the Trash.</p>
           <div class="cta-row">
             <a class="btn btn-primary" href="https://github.com/Olib-AI/cleanton/releases/latest">Download for macOS</a>
             <a class="btn btn-ghost" href="https://github.com/Olib-AI/cleanton#install">Read the install guide</a>
@@ -191,34 +191,54 @@
             </div>
             <div class="card">
               <h3>Node</h3>
-              <p>node_modules across your projects, plus npm, Yarn, pnpm, Bun, Deno, framework, and deploy caches.</p>
+              <p>node_modules across your projects, plus npm, Yarn, pnpm, Bun, and Deno caches, and downloaded test browsers.</p>
+            </div>
+            <div class="card">
+              <h3>JVM and Android</h3>
+              <p>Gradle caches and build outputs, the Maven repository, and Android Studio caches.</p>
             </div>
             <div class="card">
               <h3>Swift</h3>
-              <p>Xcode DerivedData and Swift Package Manager caches.</p>
+              <p>Xcode DerivedData, Swift Package Manager, CocoaPods, and Carthage.</p>
             </div>
             <div class="card">
               <h3>Python</h3>
-              <p>virtual environments, pip and uv caches, and tool caches.</p>
+              <p>virtual environments and pip, uv, Poetry, and Conda caches.</p>
+            </div>
+            <div class="card">
+              <h3>More languages</h3>
+              <p>Go, Ruby, PHP, .NET, Dart and Flutter, Elixir, Haskell, Zig, and their build and dependency caches.</p>
+            </div>
+            <div class="card">
+              <h3>IDEs and editors</h3>
+              <p>JetBrains, VS Code, and Zed caches that rebuild themselves on the next launch.</p>
             </div>
             <div class="card">
               <h3>Docker</h3>
               <p>dangling images, build cache, and unused volumes.</p>
             </div>
             <div class="card">
-              <h3>Machine learning</h3>
-              <p>model and checkpoint caches that quietly grow to many gigabytes.</p>
+              <h3>ML and AI tools</h3>
+              <p>model and checkpoint caches, Ollama and LM Studio models, and the caches from Claude Code, Cursor, Copilot, and other assistants.</p>
             </div>
           </div>
-          <h3 style="margin-top: 2.2em;">Two review tools that never delete on their own</h3>
+          <h3 style="margin-top: 2.2em;">Tools that put you in control, and never delete on their own</h3>
           <div class="grid" style="margin-top: 14px;">
             <div class="card">
-              <h3>Suggestions</h3>
-              <p>Large folders worth a look, and large git repositories with a remote and no local changes that you could re-clone instead of storing. Surfaced for review, never removed for you.</p>
+              <h3>Applications</h3>
+              <p>Uninstall an app and everything it leaves behind: the bundle plus its support files, caches, preferences, containers, launch agents, helpers, and home-directory data. Homebrew casks are removed through Homebrew too, and when you drag an app to the Trash yourself, Cleanton offers to clean up the rest.</p>
             </div>
             <div class="card">
-              <h3>Package management</h3>
+              <h3>Suggestions</h3>
+              <p>Duplicate files, large folders, re-clonable git repositories, macOS screenshots and recordings, and old installers left in Downloads. Surfaced for review, never removed for you.</p>
+            </div>
+            <div class="card">
+              <h3>Packages</h3>
               <p>Review and clean npm, pip, Homebrew, and MacPorts packages, with dependency-aware removal and a warning when a package is used by one of your codebases.</p>
+            </div>
+            <div class="card">
+              <h3>Services</h3>
+              <p>See launchd and Homebrew services and startup items, and disable or remove the ones you do not want. System services stay locked as protected.</p>
             </div>
           </div>
         </div>

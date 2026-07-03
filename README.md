@@ -38,16 +38,22 @@ Cleanton finds the disk space that developer tools leave behind and helps you re
 It knows where the space hides:
 
 - **Rust**: `target` directories, the Cargo registry cache, incremental and sccache data
-- **Node**: `node_modules`, npm and Yarn and pnpm and Bun and Deno caches, framework and deploy caches
-- **Swift**: DerivedData, Swift Package Manager caches
-- **Python**: virtual environments, pip and uv and tool caches
+- **Node**: `node_modules`, npm and Yarn and pnpm and Bun and Deno caches, framework and deploy caches, and downloaded test browsers (Playwright, Puppeteer, Cypress)
+- **JVM and Android**: Gradle caches and build outputs, the Maven repository, and Android Studio caches
+- **Swift**: Xcode DerivedData, Swift Package Manager, CocoaPods, and Carthage
+- **Python**: virtual environments and pip, uv, Poetry, and Conda caches
+- **Go, Ruby, PHP, .NET, Dart and Flutter, Elixir, Haskell, Zig, and more**: the build and dependency caches for each
+- **IDEs and editors**: JetBrains, VS Code, and Zed caches
 - **Docker**: dangling images, build cache, unused volumes
-- **Machine learning**: model and checkpoint caches
+- **Machine learning and AI tools**: model and checkpoint caches, Ollama and LM Studio models, and the caches left by Claude Code, Cursor, Copilot, and other assistants
+- **System**: Homebrew and Xcode caches, old logs, crash reports, and Time Machine local snapshots
 
-It also includes two review tools that never delete anything on their own:
+Then it helps you deal with the rest, and never removes any of it on its own:
 
-- **Suggestions**: large folders worth a look, and large git repositories that have a remote and no local changes (the kind you can re-clone instead of storing)
-- **Package management**: review and clean npm, pip, Homebrew, and MacPorts packages, with dependency-aware removal and a warning when a package is referenced by one of your codebases
+- **Applications**: pick an installed app and Cleanton finds everything it leaves behind, the bundle plus its application support, caches, preferences, saved state, logs, containers, launch agents, helpers, and home-directory data like `~/.ollama`. Review each item and move it to the Trash. If the app came from a Homebrew cask, Cleanton removes it through Homebrew too. Remove an app in the Finder and Cleanton notices, then offers to clean up what it left.
+- **Suggestions**: duplicate files, large folders, re-clonable git repositories (a remote and no local changes), macOS screenshots and screen recordings, and old installers left in Downloads. Surfaced for review, never removed for you.
+- **Packages**: review and clean npm, pip, Homebrew, and MacPorts packages, with dependency-aware removal and a warning when a package is referenced by one of your codebases.
+- **Services**: see launchd and Homebrew services and startup items, and disable or remove the ones you do not want, with system services locked as protected.
 
 ---
 
@@ -57,7 +63,7 @@ It also includes two review tools that never delete anything on their own:
 |---|---|
 | **Dashboard.** Scan your home folder and see reclaimable space by category. | **Results.** Review every group and item, with sizes and a safety rating, then select what to remove. |
 | <img src="web/assets/screenshots/dashboard.png" alt="Cleanton Dashboard" width="420"/> | <img src="web/assets/screenshots/results.png" alt="Cleanton Results" width="420"/> |
-| **Packages.** Review npm, pip, Homebrew, and MacPorts packages, with dependency-aware removal and codebase-usage warnings. | **Services.** See launchd and Homebrew services, with system services locked as protected. |
+| **Packages.** Review npm, pip, Homebrew, and MacPorts packages, with dependency-aware removal and codebase-usage warnings. | **Services.** See launchd and Homebrew services and startup items, disable or remove the ones you do not want, with system services locked. |
 | <img src="web/assets/screenshots/packages.png" alt="Cleanton Packages" width="420"/> | <img src="web/assets/screenshots/services.png" alt="Cleanton Services" width="420"/> |
 
 ---

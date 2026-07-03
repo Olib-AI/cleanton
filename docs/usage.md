@@ -12,11 +12,21 @@ Nothing is removed until you confirm. Read the plan, select what you want, then 
 ### Results and suggestions
 
 - **Results** shows the reclaimable items, grouped and selectable.
-- **Suggestions** is review only. It lists large folders worth a look and large git repositories that have a remote and no local changes, which you could re-clone instead of storing. Cleanton never removes these for you.
+- **Suggestions** is review only. It lists duplicate files, large folders, large git repositories that have a remote and no local changes (which you could re-clone instead of storing), macOS screenshots and screen recordings, and old installers left in Downloads. Cleanton surfaces these for review and lets you send individual items to the Trash, but never removes them for you.
+
+### Applications
+
+The Applications tab lists the apps installed on your Mac. Pick one and Cleanton finds everything it leaves on disk: the app bundle plus its application support, caches, preferences, saved state, logs, containers, group containers, launch agents, privileged helpers, and home-directory data such as `~/.ollama` or `~/.lmstudio`. Review each item, then move the selection to the Trash. Items that need administrator rights are shown for reference and can be removed from the Services tab once the app is gone.
+
+If the app was installed with a Homebrew cask, Cleanton also removes it through Homebrew so its records stay consistent. And when you remove an app yourself in the Finder, Cleanton notices, opens the Applications tab, and offers to clean up what the app left behind. Use the "Hide system apps" toggle to focus on the apps you installed.
 
 ### Packages
 
 The Packages tab reads your installed npm, pip, Homebrew, and MacPorts packages. You can update them, clean their caches, and remove ones you do not want. For Homebrew, Cleanton computes a dependency-aware removal plan: keep the packages you want, and it works out which dependencies are safe to drop. It also scans your codebases and warns when a package you are about to remove is referenced by one of them.
+
+### Services
+
+The Services tab lists launchd and Homebrew services, including startup items that run at login. You can disable, enable, or remove the ones you do not want, and remove orphaned startup entries whose program no longer exists. System services are locked as protected. Filters let you hide protected services or show only startup items.
 
 ## The command-line tool
 
