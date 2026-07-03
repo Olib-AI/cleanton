@@ -1,0 +1,23 @@
+[recipe]
+id = "ide-jetbrains-caches"
+name = "JetBrains IDE Caches"
+# Settings/plugins live under ~/Library/Application Support/JetBrains and are
+# never matched; this touches only the rebuildable index/cache tree.
+description = "JetBrains IDE per-version caches: indexes and compile caches (rebuilt on next launch)"
+category = "ide"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/Library/Caches/JetBrains/**"
+min_age_days = 14
+
+[action]
+type = "trash"
+prompt = "Move {size} of JetBrains IDE caches to Trash?"
+group = true
+
+[test]
+should_match = ["~/Library/Caches/JetBrains/IntelliJIdea2025.2/caches/records.dat"]
+should_not_match = ["~/Library/Application Support/JetBrains/IntelliJIdea2025.2/options/other.xml"]

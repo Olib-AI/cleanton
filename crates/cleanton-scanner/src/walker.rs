@@ -88,7 +88,20 @@ pub async fn scan(
     options: ScanOptions,
     progress_tx: mpsc::Sender<ScanProgress>,
 ) -> Result<ScanResult> {
-    tokio::task::spawn_blocking(move || scan_blocking(&options, &progress_tx))
+    tokio::task::spawn_blocking(move || scan_blocking(&options, &progress_tx, None))
+        .await
+        .map_err(|err| CleantonError::Scan(format!("scanner task failed: {err}")))?
+}
+
+/// Like [`scan`], but stops walking promptly once `cancel` is set. A cancelled
+/// scan returns the entries gathered so far with `incomplete = true`, so the
+/// analyzer will surface it but the executor will refuse to act on it.
+pub async fn scan_with_cancel(
+    options: ScanOptions,
+    progress_tx: mpsc::Sender<ScanProgress>,
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> Result<ScanResult> {
+    tokio::task::spawn_blocking(move || scan_blocking(&options, &progress_tx, Some(&cancel)))
         .await
         .map_err(|err| CleantonError::Scan(format!("scanner task failed: {err}")))?
 }
@@ -187,6 +200,7 @@ struct ReadDirContext {
 fn scan_blocking(
     options: &ScanOptions,
     progress_tx: &mpsc::Sender<ScanProgress>,
+    cancel: Option<&std::sync::atomic::AtomicBool>,
 ) -> Result<ScanResult> {
     let started = Instant::now();
     let excludes = compile_excludes(&options.exclude_patterns)?;
@@ -203,7 +217,10 @@ fn scan_blocking(
     };
 
     for root in &options.roots {
-        scan_root(root, options, &excludes, progress_tx, &mut result);
+        scan_root(root, options, &excludes, progress_tx, &mut result, cancel);
+        if cancel.is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Relaxed)) {
+            break;
+        }
     }
 
     aggregate_directory_sizes(&mut result);
@@ -218,6 +235,7 @@ fn scan_root(
     excludes: &[Pattern],
     progress_tx: &mpsc::Sender<ScanProgress>,
     result: &mut ScanResult,
+    cancel: Option<&std::sync::atomic::AtomicBool>,
 ) {
     let root = expand_tilde(root);
     if let Err(source) = fs::symlink_metadata(&root) {
@@ -253,6 +271,18 @@ fn scan_root(
         });
 
     for item in walker {
+        // Cancellation check on the consumer loop: dropping the jwalk iterator
+        // stops the worker pool. A cancelled scan is marked incomplete so the
+        // executor refuses to act on the partial inventory.
+        if cancel.is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Relaxed)) {
+            result.incomplete = true;
+            result.errors.push(ScanError {
+                path: root.clone(),
+                severity: Severity::Warning,
+                message: "scan cancelled by user".to_owned(),
+            });
+            return;
+        }
         process_walk_item(item, progress_tx, result);
     }
 }
@@ -457,7 +487,17 @@ fn should_skip_path(
 
     // Bulk hot path: `is_protected_fast` does no filesystem syscalls (entries are
     // already real walked paths), so pruning stays cheap across huge trees.
-    if protected.is_protected_fast(path) && !protected.is_protected_fast(scan_root) {
+    //
+    // User-data content roots (~/Desktop, ~/Documents, ~/Downloads, ~/Pictures,
+    // ~/Music, ~/Movies) are protected but are the one exception we still
+    // *descend* into: the read-only Suggestions pass (duplicates, large files,
+    // screenshots) needs their contents. Every destructive path (recipe matcher
+    // safety floor + executor) independently re-checks protection, so inventory
+    // here never widens what can be removed.
+    if protected.is_protected_fast(path)
+        && !protected.is_protected_fast(scan_root)
+        && !cleanton_common::is_user_data_content_path(path)
+    {
         return true;
     }
 

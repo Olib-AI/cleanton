@@ -113,6 +113,7 @@ mod tests {
             logical_bytes: bytes,
             reclaimable_bytes: bytes,
             recipe_id: RecipeId("test-recipe".to_owned()),
+            category: String::new(),
             action_type: ActionType::Trash,
             confidence: Confidence::High,
             safety_level: SafetyLevel::Safe,

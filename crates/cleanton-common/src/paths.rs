@@ -1,5 +1,8 @@
 use std::{
-    env, fs,
+    collections::HashSet,
+    env,
+    ffi::OsString,
+    fs,
     path::{Component, Path, PathBuf},
 };
 
@@ -132,6 +135,77 @@ pub fn comparison_candidates(path: &Path) -> Vec<PathBuf> {
 
 fn home_dir() -> Option<PathBuf> {
     env::var_os("HOME").map(PathBuf::from)
+}
+
+/// Common macOS locations where developer CLIs live (`brew`, `npm`, a
+/// Homebrew/pyenv `python3`, `MacPorts` `port`, ...).
+///
+/// A `.app` bundle launched from Finder or by `launchd` inherits only the
+/// minimal `PATH` (`/usr/bin:/bin:/usr/sbin:/sbin`) — none of these dev
+/// locations — so `brew`/`npm` fail to resolve and `python3` falls back to the
+/// system `/usr/bin` copy instead of the user's Homebrew/pyenv one. These dirs
+/// are prepended ahead of the inherited `PATH` so resolution matches a login
+/// shell. Non-existent entries are harmless: callers stat before use.
+fn common_tool_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if let Some(home) = home_dir() {
+        dirs.push(home.join(".local/bin"));
+        dirs.push(home.join(".pyenv/shims"));
+        dirs.push(home.join(".cargo/bin"));
+    }
+    for dir in [
+        "/opt/homebrew/bin",
+        "/opt/homebrew/sbin",
+        "/usr/local/bin",
+        "/usr/local/sbin",
+        "/opt/local/bin",
+        "/opt/local/sbin",
+    ] {
+        dirs.push(PathBuf::from(dir));
+    }
+    dirs
+}
+
+/// The process `PATH` with [`common_tool_dirs`] prepended (de-duplicated,
+/// original order preserved for the inherited entries).
+///
+/// Pass this as the child's `PATH` when spawning developer tools so a
+/// GUI-launched app resolves them the same way the user's terminal would.
+#[must_use]
+pub fn augmented_path() -> OsString {
+    let mut seen = HashSet::new();
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    for dir in common_tool_dirs() {
+        if seen.insert(dir.clone()) {
+            dirs.push(dir);
+        }
+    }
+    if let Some(existing) = env::var_os("PATH") {
+        for dir in env::split_paths(&existing) {
+            if seen.insert(dir.clone()) {
+                dirs.push(dir);
+            }
+        }
+    }
+    env::join_paths(&dirs).unwrap_or_else(|_| env::var_os("PATH").unwrap_or_default())
+}
+
+/// First executable match for `bin` on the [`augmented_path`], if any.
+///
+/// Used both to detect a tool's presence and to resolve it to an absolute path
+/// so a spawn never depends on the (stripped) inherited `PATH`.
+#[must_use]
+pub fn find_executable(bin: &str) -> Option<PathBuf> {
+    for dir in env::split_paths(&augmented_path()) {
+        if dir.as_os_str().is_empty() {
+            continue;
+        }
+        let candidate = dir.join(bin);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
 }
 
 fn normalize_firmlink_aliases(path: &str) -> String {
@@ -337,6 +411,32 @@ mod tests {
             candidates
                 .iter()
                 .any(|path| is_same_or_descendant(path, &real.join("missing")))
+        );
+    }
+
+    #[test]
+    fn augmented_path_prepends_common_tool_dirs() {
+        let path = augmented_path();
+        let dirs: Vec<PathBuf> = env::split_paths(&path).collect();
+        // Homebrew's default bin must be present even when the inherited PATH
+        // (a Finder/launchd bundle's minimal one) never listed it.
+        assert!(
+            dirs.iter().any(|dir| dir == Path::new("/opt/homebrew/bin")),
+            "augmented PATH should include /opt/homebrew/bin: {dirs:?}"
+        );
+        // MacPorts and the system bin are both reachable.
+        assert!(dirs.iter().any(|dir| dir == Path::new("/opt/local/bin")));
+    }
+
+    #[test]
+    fn augmented_path_has_no_duplicate_entries() {
+        let path = augmented_path();
+        let dirs: Vec<PathBuf> = env::split_paths(&path).collect();
+        let unique: HashSet<&PathBuf> = dirs.iter().collect();
+        assert_eq!(
+            unique.len(),
+            dirs.len(),
+            "PATH entries should be de-duplicated"
         );
     }
 }

@@ -138,6 +138,11 @@ pub struct CleanupAction {
     pub logical_bytes: u64,
     pub reclaimable_bytes: u64,
     pub recipe_id: RecipeId,
+    /// The originating recipe's category (e.g. "rust", "node", "ai-tools").
+    /// Presentation-only: lets the UIs bucket actions without guessing from the
+    /// recipe id. Defaults to empty for plans persisted before it existed.
+    #[serde(default)]
+    pub category: String,
     pub action_type: ActionType,
     pub confidence: Confidence,
     pub safety_level: SafetyLevel,
@@ -338,6 +343,7 @@ mod tests {
             logical_bytes: bytes,
             reclaimable_bytes: bytes,
             recipe_id: RecipeId(recipe.to_owned()),
+            category: String::new(),
             action_type: ActionType::Trash,
             confidence: Confidence::High,
             safety_level: SafetyLevel::Safe,

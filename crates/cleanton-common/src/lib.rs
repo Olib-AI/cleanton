@@ -9,7 +9,10 @@ pub mod usage_history;
 pub use config::{CleantonConfig, GeneralConfig, MlConfig, SafetyConfig, ScanningConfig, UiConfig};
 pub use error::{CleantonError, Result};
 pub use paths::{FIRMLINK_ALIASES, firmlink_canonical};
-pub use safety::{HARDCODED_PROTECTED, ProtectedPaths, USER_PROTECTED};
+pub use safety::{
+    HARDCODED_PROTECTED, ProtectedPaths, USER_DATA_CONTENT_ROOTS, USER_PROTECTED,
+    is_user_data_content_path, is_user_data_content_root,
+};
 pub use types::{
     ActionGroup, ActionType, CleanupAction, CleanupPlan, Confidence, Ecosystem,
     ExecutionActionResult, ExecutionResult, ExecutionStatus, FileEntry, FileKind,

@@ -1,0 +1,21 @@
+[recipe]
+id = "swift-carthage-cache"
+name = "Carthage Cache"
+description = "Carthage dependency build cache (rebuilt by carthage bootstrap)"
+category = "swift"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/Library/Caches/org.carthage.CarthageKit/**"
+min_age_days = 30
+
+[action]
+type = "trash"
+prompt = "Move {size} of Carthage cache to Trash?"
+group = true
+
+[test]
+should_match = ["~/Library/Caches/org.carthage.CarthageKit/dependencies/Alamofire.framework.zip"]
+should_not_match = ["~/Library/Caches/Yarn"]

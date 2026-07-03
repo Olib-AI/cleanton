@@ -126,9 +126,7 @@ fn match_recipes(scan: &ScanResult, recipes: &RecipeSet) -> Vec<CleanupAction> {
         .iter()
         .filter_map(|entry| {
             ordered.iter().copied().find_map(|recipe| {
-                action_for_entry_with_subtree_mtime(recipe, entry, |dir| {
-                    newest.get(dir).copied()
-                })
+                action_for_entry_with_subtree_mtime(recipe, entry, |dir| newest.get(dir).copied())
             })
         })
         .collect()

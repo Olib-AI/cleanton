@@ -10,4 +10,4 @@ pub use cleanton_common::{Ecosystem, ProjectRoot};
 pub use project::{detect_project_roots, detect_project_roots_from_entries};
 pub use sizing::{TargetSize, TargetSizing, size_targets};
 pub use snapshots::{LocalSnapshots, list_local_snapshots};
-pub use walker::{ScanOptions, ScanProgress, scan};
+pub use walker::{ScanOptions, ScanProgress, scan, scan_with_cancel};

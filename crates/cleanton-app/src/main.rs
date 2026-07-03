@@ -29,7 +29,8 @@ use cleanton_common::{
 };
 use cleanton_engine::{
     AnalyzedFull, AnalyzedPlan, AnnotatedAction, DockerAnalysis, DockerCleaner, DockerCleanupPlan,
-    DuplicateSet, EngineEvent, LargeItem, Orchestrator, Suggestions,
+    DuplicateSet, EngineEvent, InstalledApp, LargeItem, Orchestrator, Suggestions, UninstallPlan,
+    cask_token_for, find_leftovers, list_installed_apps,
 };
 use cleanton_packages::{Inventory, ManagerKind, PackageManagers, plan_removal, scan_usage};
 use cleanton_scanner::ScanOptions;
@@ -44,6 +45,42 @@ const FA_BRANDS_REGULAR: &[u8] =
     include_bytes!("../../../assets/fonts/Font Awesome 7 Brands-Regular-400.otf");
 
 type CancellationToken = Arc<AtomicBool>;
+
+/// Shared background worker runtime. Every UI callback used to build (and tear
+/// down) a fresh current-thread Tokio runtime per click; one small multi-thread
+/// runtime amortizes that setup across the app's lifetime. `block_on` on a
+/// shared runtime is safe from any number of worker threads concurrently.
+fn worker_runtime() -> &'static tokio::runtime::Runtime {
+    static RUNTIME: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
+    RUNTIME.get_or_init(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("tokio runtime")
+    })
+}
+
+/// One service mutation at a time: rapid clicks otherwise race concurrent
+/// launchctl mutate-then-relist cycles, letting a stale relist overwrite the
+/// newer list. Cleared when the completion closure lands on the UI thread.
+static SERVICE_ACTION_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
+
+/// One suggestion trash at a time (same double-fire concern as above).
+static SUGGESTION_DELETE_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
+
+/// One application-inventory load at a time.
+static APPS_LOADING: AtomicBool = AtomicBool::new(false);
+
+/// One uninstall at a time.
+static UNINSTALL_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
+
+/// App-bundle paths Cleanton itself just moved to the Trash. The background
+/// app-removal watcher consults this so it does not re-trigger the "an app was
+/// removed — clean its leftovers" deep-link for a removal Cleanton performed
+/// (whose leftovers were already handled in the same uninstall).
+static CLEANTON_REMOVED_BUNDLES: std::sync::LazyLock<Mutex<HashSet<PathBuf>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashSet::new()));
 type CurrentOperation = Arc<Mutex<Option<CancellationToken>>>;
 /// The live, mutable application config. Edited via the Settings screen and read
 /// (snapshotted) by each scan/clean/services operation so changes take effect.
@@ -56,6 +93,15 @@ thread_local! {
     /// the store and every read happen inside the single-threaded Slint event
     /// loop, so an `Rc<RefCell<…>>` is sound here (no value crosses threads).
     static ALL_SERVICES: Rc<RefCell<Vec<Service>>> = Rc::new(RefCell::new(Vec::new()));
+
+    /// Installed applications and the currently reviewed uninstall plan
+    /// (Applications tab; UI-thread only, same reasoning as ALL_SERVICES).
+    static ALL_APPS: Rc<RefCell<Vec<InstalledApp>>> = Rc::new(RefCell::new(Vec::new()));
+    static APP_PLAN: RefCell<Option<UninstallPlan>> = const { RefCell::new(None) };
+    /// Installed Homebrew cask tokens (from `brew list --cask`), used to detect
+    /// which applications were installed via Homebrew so the uninstall can go
+    /// through `brew uninstall --cask` as well.
+    static ALL_CASK_TOKENS: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
 
     /// The live expandable cleanup-plan row model (group headers + item rows),
     /// retained so selection/expand callbacks can mutate single rows in place.
@@ -97,7 +143,10 @@ enum RowMeta {
         item_row_count: usize,
     },
     /// An individual item row under a group.
-    Item { action_index: usize, group_row: usize },
+    Item {
+        action_index: usize,
+        group_row: usize,
+    },
     /// A muted "+N more" note row (not selectable).
     Note,
 }
@@ -160,12 +209,7 @@ fn main() -> Result<(), slint::PlatformError> {
 
         // Spawn the scan on a background thread so the UI stays responsive.
         std::thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("tokio runtime");
-
-            rt.block_on(async move {
+            worker_runtime().block_on(async move {
                 let (event_tx, mut event_rx) = mpsc::channel::<EngineEvent>(128);
 
                 // Spawn progress updates to the UI.
@@ -197,11 +241,16 @@ fn main() -> Result<(), slint::PlatformError> {
                 });
 
                 // Run the scan, then the ML-aware analysis (annotations, orphan
-                // candidates, and the demoted/held set).
+                // candidates, and the demoted/held set). The cancel token is
+                // handed to the scanner so Cancel actually stops the walk
+                // instead of letting it burn CPU to completion in the background.
+                let engine_cancel = cancel_token.clone();
                 let result = async {
                     let orchestrator = Orchestrator::new(config.clone())?;
                     let options = scan_options_from_config(&config);
-                    let scan = orchestrator.scan_only(options, event_tx).await?;
+                    let scan = orchestrator
+                        .scan_only_with_cancel(options, event_tx, engine_cancel)
+                        .await?;
                     let full = orchestrator.analyze_full(&scan).await;
                     Ok::<_, cleanton_common::CleantonError>((scan, full))
                 }
@@ -268,17 +317,15 @@ fn main() -> Result<(), slint::PlatformError> {
         let latest_plan = latest_plan_clone.clone();
         let current_operation = current_operation_clone.clone();
         std::thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("tokio runtime");
-
-            rt.block_on(async move {
+            worker_runtime().block_on(async move {
+                let engine_cancel = cancel_token.clone();
                 let result = async {
                     let orchestrator = Orchestrator::new(config.clone())?;
                     let options = scan_options_from_config(&config);
                     let (event_tx, _event_rx) = mpsc::channel::<EngineEvent>(128);
-                    let scan = orchestrator.scan_only(options, event_tx).await?;
+                    let scan = orchestrator
+                        .scan_only_with_cancel(options, event_tx, engine_cancel)
+                        .await?;
                     let full = orchestrator.analyze_full(&scan).await;
                     Ok::<_, cleanton_common::CleantonError>((scan, full))
                 }
@@ -419,13 +466,10 @@ fn main() -> Result<(), slint::PlatformError> {
         let ui_weak = ui.as_weak();
         let config = config_snapshot(&config_clone);
         let current_operation = current_operation_clone.clone();
+        let latest_plan_for_prune = latest_plan_clone.clone();
         std::thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("tokio runtime");
-
-            rt.block_on(async move {
+            worker_runtime().block_on(async move {
+                let exec_cancel = cancel_token.clone();
                 let result = async {
                     let orchestrator = Orchestrator::new(config.clone())?;
                     let total_actions = plan.actions.len() as u64;
@@ -477,7 +521,11 @@ fn main() -> Result<(), slint::PlatformError> {
                         }
                     });
 
-                    let execution = orchestrator.execute_plan(&plan, &event_tx);
+                    // Honour Cancel during execution: the current action
+                    // finishes, the rest are skipped, and the partial result
+                    // is reported instead of silently deleting on.
+                    let execution =
+                        orchestrator.execute_plan_with_cancel(&plan, &event_tx, &exec_cancel);
                     drop(event_tx);
                     let _ = progress_handle.await;
                     execution
@@ -488,17 +536,37 @@ fn main() -> Result<(), slint::PlatformError> {
                 let capacity_view = capacity::read(&capacity_root(&config));
 
                 let _ = ui_weak.upgrade_in_event_loop(move |ui| {
-                    if cancel_token.load(Ordering::Relaxed) {
-                        finish_cancellable_operation(&current_operation, &cancel_token);
+                    // Superseded by a newer operation: drop this result. A user
+                    // cancel is different — execution genuinely stopped, and the
+                    // partial result records what was already moved to Trash, so
+                    // it is applied (and pruned from the list) rather than hidden.
+                    let superseded = operation_superseded(&current_operation, &cancel_token);
+                    let was_cancelled = cancel_token.load(Ordering::Relaxed);
+                    finish_cancellable_operation(&current_operation, &cancel_token);
+                    if superseded {
                         return;
                     }
-                    finish_cancellable_operation(&current_operation, &cancel_token);
                     let state = ui.global::<AppState>();
                     state.set_cleaning(false);
                     apply_capacity_state(&state, &capacity_view);
                     match result {
-                        Ok(result) => apply_execution_result(&state, &result),
+                        Ok(result) => {
+                            apply_execution_result(&state, &result);
+                            // Drop the just-cleaned entries so Results no longer
+                            // lists them; unselected/failed items remain.
+                            prune_executed_actions(&state, &latest_plan_for_prune, &result);
+                            if was_cancelled {
+                                state.set_clean_status(
+                                    "Cleanup cancelled — remaining items were skipped; anything already moved to Trash stays out of the list."
+                                        .into(),
+                                );
+                                state.set_result_mode("Cancelled".into());
+                            }
+                        }
                         Err(err) => {
+                            if was_cancelled {
+                                return;
+                            }
                             state.set_clean_progress(0.0);
                             state.set_clean_status(
                                 format!("Cleanup refused or failed: {err}").into(),
@@ -525,7 +593,7 @@ fn main() -> Result<(), slint::PlatformError> {
             state.set_scan_status("Cancelled".into());
             state.set_scan_coverage_status("Cancelled".into());
             state.set_clean_status(
-                "Cancelled. Any in-flight background result will be ignored.".into(),
+                "Cancelling… the in-flight item finishes, remaining items are skipped.".into(),
             );
             state.set_result_mode("Cancelled".into());
         }
@@ -592,12 +660,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let ui_weak = ui.as_weak();
         let config = config_snapshot(&config_clone);
         std::thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("tokio runtime");
-
-            rt.block_on(async move {
+            worker_runtime().block_on(async move {
                 let manager = ServiceManager::new(config);
                 let result = manager.list_services().await;
                 let _ = ui_weak.upgrade_in_event_loop(move |ui| {
@@ -621,11 +684,12 @@ fn main() -> Result<(), slint::PlatformError> {
     // Pure UI-thread work: rebuilds the displayed model from the retained full
     // set using the current filter. No background thread, no re-query.
     let ui_weak = ui.as_weak();
-    ui.global::<AppCallbacks>().on_apply_service_filter(move || {
-        if let Some(ui) = ui_weak.upgrade() {
-            refresh_services_view(&ui.global::<AppState>());
-        }
-    });
+    ui.global::<AppCallbacks>()
+        .on_apply_service_filter(move || {
+            if let Some(ui) = ui_weak.upgrade() {
+                refresh_services_view(&ui.global::<AppState>());
+            }
+        });
 
     // ── Wire: Disable service callback ─────────────────────────────────────
     // Two-step armed in the UI; the backend independently re-checks protection
@@ -648,9 +712,7 @@ fn main() -> Result<(), slint::PlatformError> {
         match lookup {
             None => {
                 state.set_service_pending_disable_id(SharedString::new());
-                state.set_services_status(
-                    format!("Service no longer available: {id}").into(),
-                );
+                state.set_services_status(format!("Service no longer available: {id}").into());
                 return;
             }
             Some(true) => {
@@ -663,17 +725,16 @@ fn main() -> Result<(), slint::PlatformError> {
             Some(false) => {}
         }
 
+        if SERVICE_ACTION_IN_FLIGHT.swap(true, Ordering::SeqCst) {
+            state.set_services_status("Another service action is still running.".into());
+            return;
+        }
         state.set_services_status(format!("Disabling {id}…").into());
 
         let ui_weak = ui.as_weak();
         let config = config_snapshot(&config_clone);
         std::thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("tokio runtime");
-
-            rt.block_on(async move {
+            worker_runtime().block_on(async move {
                 let disable_result = ServiceManager::new(config.clone())
                     .disable_service(&id)
                     .await;
@@ -681,6 +742,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 // separate user-triggered refresh.
                 let relisted = ServiceManager::new(config).list_services().await;
                 let _ = ui_weak.upgrade_in_event_loop(move |ui| {
+                    SERVICE_ACTION_IN_FLIGHT.store(false, Ordering::SeqCst);
                     let state = ui.global::<AppState>();
                     state.set_service_pending_disable_id(SharedString::new());
                     if let Ok(services) = relisted {
@@ -690,11 +752,288 @@ fn main() -> Result<(), slint::PlatformError> {
                     // the success/failure text is not overwritten.
                     rebuild_services_model(&state);
                     match disable_result {
-                        Ok(()) => state
-                            .set_services_status(format!("Disabled {id}.").into()),
-                        Err(err) => state.set_services_status(
-                            format!("Could not disable {id}: {err}").into(),
-                        ),
+                        Ok(()) => state.set_services_status(format!("Disabled {id}.").into()),
+                        Err(err) => state
+                            .set_services_status(format!("Could not disable {id}: {err}").into()),
+                    }
+                });
+            });
+        });
+    });
+
+    // ── Wire: Enable service callback ──────────────────────────────────────
+    // Non-destructive (single click): re-enable a stopped/disabled startup item
+    // so it starts at login/boot again. The backend still refuses protected
+    // services as defense in depth.
+    let ui_weak = ui.as_weak();
+    let config_clone = shared_config.clone();
+    ui.global::<AppCallbacks>().on_enable_service(move |id| {
+        let ui = ui_weak.unwrap();
+        let state = ui.global::<AppState>();
+        let id = id.to_string();
+        if SERVICE_ACTION_IN_FLIGHT.swap(true, Ordering::SeqCst) {
+            state.set_services_status("Another service action is still running.".into());
+            return;
+        }
+        state.set_services_status(format!("Enabling {id}…").into());
+
+        let ui_weak = ui.as_weak();
+        let config = config_snapshot(&config_clone);
+        std::thread::spawn(move || {
+            worker_runtime().block_on(async move {
+                let enable_result = ServiceManager::new(config.clone())
+                    .enable_service(&id)
+                    .await;
+                let relisted = ServiceManager::new(config).list_services().await;
+                let _ = ui_weak.upgrade_in_event_loop(move |ui| {
+                    SERVICE_ACTION_IN_FLIGHT.store(false, Ordering::SeqCst);
+                    let state = ui.global::<AppState>();
+                    if let Ok(services) = relisted {
+                        ALL_SERVICES.with(|cell| *cell.borrow_mut() = services);
+                    }
+                    rebuild_services_model(&state);
+                    match enable_result {
+                        Ok(()) => state.set_services_status(format!("Enabled {id}.").into()),
+                        Err(err) => state
+                            .set_services_status(format!("Could not enable {id}: {err}").into()),
+                    }
+                });
+            });
+        });
+    });
+
+    // ── Wire: Remove orphaned startup item callback ────────────────────────
+    // Two-step armed in the UI; the backend permits deletion only when the
+    // referenced executable is missing (orphaned leftover) and re-checks
+    // protection, backing up the plist before removing it.
+    let ui_weak = ui.as_weak();
+    let config_clone = shared_config.clone();
+    ui.global::<AppCallbacks>().on_remove_service(move |id| {
+        let ui = ui_weak.unwrap();
+        let state = ui.global::<AppState>();
+        let id = id.to_string();
+        if SERVICE_ACTION_IN_FLIGHT.swap(true, Ordering::SeqCst) {
+            state.set_services_status("Another service action is still running.".into());
+            return;
+        }
+        state.set_services_status(format!("Removing {id}…").into());
+
+        let ui_weak = ui.as_weak();
+        let config = config_snapshot(&config_clone);
+        std::thread::spawn(move || {
+            worker_runtime().block_on(async move {
+                let remove_result = ServiceManager::new(config.clone())
+                    .delete_orphaned_plist(&id)
+                    .await;
+                let relisted = ServiceManager::new(config).list_services().await;
+                let _ = ui_weak.upgrade_in_event_loop(move |ui| {
+                    SERVICE_ACTION_IN_FLIGHT.store(false, Ordering::SeqCst);
+                    let state = ui.global::<AppState>();
+                    state.set_service_pending_remove_id(SharedString::new());
+                    if let Ok(services) = relisted {
+                        ALL_SERVICES.with(|cell| *cell.borrow_mut() = services);
+                    }
+                    rebuild_services_model(&state);
+                    match remove_result {
+                        Ok(()) => state.set_services_status(format!("Removed {id}.").into()),
+                        Err(err) => state
+                            .set_services_status(format!("Could not remove {id}: {err}").into()),
+                    }
+                });
+            });
+        });
+    });
+
+    // ── Wire: Applications tab ─────────────────────────────────────────────
+    let ui_weak = ui.as_weak();
+    ui.global::<AppCallbacks>().on_refresh_apps(move || {
+        if let Some(ui) = ui_weak.upgrade() {
+            start_apps_load(&ui);
+        }
+    });
+
+    let ui_weak = ui.as_weak();
+    ui.global::<AppCallbacks>().on_apply_app_filter(move || {
+        if let Some(ui) = ui_weak.upgrade() {
+            rebuild_apps_model(&ui.global::<AppState>());
+        }
+    });
+
+    let ui_weak = ui.as_weak();
+    ui.global::<AppCallbacks>().on_select_app(move |path| {
+        if let Some(ui) = ui_weak.upgrade() {
+            start_leftover_scan(&ui, path.as_str());
+        }
+    });
+
+    let ui_weak = ui.as_weak();
+    ui.global::<AppCallbacks>().on_toggle_leftover(move |idx| {
+        let Some(ui) = ui_weak.upgrade() else {
+            return;
+        };
+        let state = ui.global::<AppState>();
+        if state.get_uninstalling() {
+            return;
+        }
+        let rows = state.get_leftover_rows();
+        let Ok(index) = usize::try_from(idx) else {
+            return;
+        };
+        if let Some(mut row) = rows.row_data(index)
+            && !row.admin
+        {
+            row.selected = !row.selected;
+            rows.set_row_data(index, row);
+        }
+    });
+
+    // Uninstall: fires only from the two-step Confirm in the review panel.
+    // Best-effort stops the app's user launch agents, then moves every
+    // selected item through the executor's uninstall-scoped trash path.
+    let ui_weak = ui.as_weak();
+    let config_clone = shared_config.clone();
+    ui.global::<AppCallbacks>().on_confirm_uninstall(move || {
+        let ui = ui_weak.unwrap();
+        let state = ui.global::<AppState>();
+        state.set_uninstall_pending(false);
+        if UNINSTALL_IN_FLIGHT.swap(true, Ordering::SeqCst) {
+            state.set_apps_status("An uninstall is already running.".into());
+            return;
+        }
+
+        // Selected, non-admin paths in review order.
+        let rows = state.get_leftover_rows();
+        let selected_paths: HashSet<String> = rows
+            .iter()
+            .filter(|row| row.selected && !row.admin)
+            .map(|row| row.path.to_string())
+            .collect();
+        let (paths, agent_labels) = APP_PLAN.with(|cell| {
+            let plan = cell.borrow();
+            let Some(plan) = plan.as_ref() else {
+                return (Vec::new(), Vec::new());
+            };
+            let paths: Vec<PathBuf> = plan
+                .items
+                .iter()
+                .filter(|item| selected_paths.contains(&item.path.display().to_string()))
+                .map(|item| item.path.clone())
+                .collect();
+            let labels: Vec<String> = plan
+                .items
+                .iter()
+                .filter(|item| {
+                    !item.admin_required
+                        && selected_paths.contains(&item.path.display().to_string())
+                })
+                .filter_map(|item| item.launchd_label.clone())
+                .collect();
+            (paths, labels)
+        });
+        if paths.is_empty() {
+            UNINSTALL_IN_FLIGHT.store(false, Ordering::SeqCst);
+            state.set_apps_status("Nothing selected to uninstall.".into());
+            return;
+        }
+
+        // If this app was installed via a Homebrew cask, remove it through brew
+        // too so Homebrew's records stay consistent (it also removes the app
+        // bundle; our leftover pass then clears what brew leaves behind).
+        let cask_token = APP_PLAN.with(|cell| {
+            cell.borrow().as_ref().and_then(|plan| {
+                // Record the bundle path so the removal watcher doesn't treat
+                // this Cleanton-initiated removal as an external one.
+                if let Ok(mut removed) = CLEANTON_REMOVED_BUNDLES.lock() {
+                    removed.insert(plan.app.path.clone());
+                }
+                let tokens = ALL_CASK_TOKENS.with(|t| t.borrow().clone());
+                cask_token_for(&plan.app, &tokens)
+            })
+        });
+
+        let app_name = state.get_selected_app_name().to_string();
+        state.set_uninstalling(true);
+        state.set_apps_status(format!("Uninstalling {app_name}…").into());
+
+        let ui_weak = ui.as_weak();
+        let config = config_snapshot(&config_clone);
+        std::thread::spawn(move || {
+            worker_runtime().block_on(async move {
+                // Best-effort: stop the app's user launch agents so trashing
+                // their plists leaves no running job behind. Failures are
+                // non-fatal (the job dies at next login regardless).
+                for label in &agent_labels {
+                    let _ = ServiceManager::new(config.clone())
+                        .stop_service(label)
+                        .await;
+                }
+
+                // Homebrew cask removal first (best-effort): brew moves the app
+                // bundle to the Trash and drops its own records. A failure here
+                // (app running, cask already gone) is non-fatal — the leftover
+                // trash pass below still runs.
+                let brew_note = if let Some(token) = &cask_token {
+                    let outcome = PackageManagers::uninstall(
+                        ManagerKind::HomebrewCask,
+                        std::slice::from_ref(token),
+                    )
+                    .await;
+                    if outcome.ok {
+                        " (also removed via Homebrew)"
+                    } else {
+                        " (Homebrew removal failed — trashed directly)"
+                    }
+                } else {
+                    ""
+                };
+
+                let result = async {
+                    let orchestrator = Orchestrator::new(config)?;
+                    let (event_tx, _event_rx) = mpsc::channel::<EngineEvent>(64);
+                    orchestrator.uninstall_app_items(&paths, &event_tx)
+                }
+                .await;
+
+                let _ = ui_weak.upgrade_in_event_loop(move |ui| {
+                    UNINSTALL_IN_FLIGHT.store(false, Ordering::SeqCst);
+                    let state = ui.global::<AppState>();
+                    state.set_uninstalling(false);
+                    match result {
+                        Ok(result) => {
+                            let moved = result
+                                .actions
+                                .iter()
+                                .filter(|a| a.status == ExecutionStatus::MovedToTrash)
+                                .count();
+                            state.set_apps_status(
+                                format!(
+                                    "Moved {moved} item(s) ({}) of {app_name} to the Trash{}{}.",
+                                    display::human_bytes(result.moved_to_trash_bytes),
+                                    if result.skipped_actions > 0 {
+                                        format!("; {} skipped", result.skipped_actions)
+                                    } else {
+                                        String::new()
+                                    },
+                                    brew_note
+                                )
+                                .into(),
+                            );
+                            // Clear the review panel and reload the inventory.
+                            state.set_selected_app_path(SharedString::new());
+                            state.set_selected_app_name(SharedString::new());
+                            state.set_leftover_count(0);
+                            state.set_leftover_rows(ModelRc::from(Rc::new(VecModel::from(Vec::<
+                                LeftoverRow,
+                            >::new(
+                            )))));
+                            APP_PLAN.with(|cell| *cell.borrow_mut() = None);
+                            start_apps_load(&ui);
+                        }
+                        Err(err) => {
+                            state.set_apps_status(
+                                format!("Uninstall refused or failed: {err}").into(),
+                            );
+                        }
                     }
                 });
             });
@@ -810,11 +1149,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let ui_weak = ui.as_weak();
         let config = config_snapshot(&config_clone);
         std::thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("tokio runtime");
-            rt.block_on(async move {
+            worker_runtime().block_on(async move {
                 let result = async {
                     let cleaner = DockerCleaner::new()?;
                     let cleaned = cleaner.clean(plan).await?;
@@ -841,9 +1176,7 @@ fn main() -> Result<(), slint::PlatformError> {
                             );
                         }
                         Err(err) => {
-                            state.set_docker_status(
-                                format!("Docker cleanup failed: {err}").into(),
-                            );
+                            state.set_docker_status(format!("Docker cleanup failed: {err}").into());
                         }
                     }
                 });
@@ -854,6 +1187,54 @@ fn main() -> Result<(), slint::PlatformError> {
     // ── Wire: Reveal in Finder (review-only; never deletes) ────────────────
     ui.global::<AppCallbacks>()
         .on_reveal_in_finder(move |path| reveal_in_finder(path.as_str()));
+
+    // ── Wire: Delete a single suggestion (user-confirmed Trash) ────────────
+    // Suggestions are review-only and never auto-removed; this fires only after
+    // the two-step Confirm. It reuses the engine executor's guards (protected
+    // paths, Trash-by-default) via `Orchestrator::trash_suggestion`.
+    let ui_weak = ui.as_weak();
+    let config_clone = shared_config.clone();
+    ui.global::<AppCallbacks>()
+        .on_delete_suggestion(move |path| {
+            let ui = ui_weak.unwrap();
+            let state = ui.global::<AppState>();
+            let path = path.to_string();
+            if path.is_empty() {
+                return;
+            }
+            if SUGGESTION_DELETE_IN_FLIGHT.swap(true, Ordering::SeqCst) {
+                state.set_trash_status("A suggestion trash is still running.".into());
+                return;
+            }
+            state.set_trash_status(format!("Moving {path} to the Trash…").into());
+
+            let ui_weak = ui.as_weak();
+            let config = config_snapshot(&config_clone);
+            std::thread::spawn(move || {
+                worker_runtime().block_on(async move {
+                    let target = PathBuf::from(&path);
+                    let result = async {
+                        let orchestrator = Orchestrator::new(config)?;
+                        let (event_tx, _event_rx) = mpsc::channel::<EngineEvent>(16);
+                        orchestrator.trash_suggestion(&target, &event_tx)
+                    }
+                    .await;
+                    let _ = ui_weak.upgrade_in_event_loop(move |ui| {
+                        SUGGESTION_DELETE_IN_FLIGHT.store(false, Ordering::SeqCst);
+                        let state = ui.global::<AppState>();
+                        match result {
+                            Ok(_) => {
+                                remove_suggestion_row(&state, &path);
+                                state
+                                    .set_trash_status(format!("Moved {path} to the Trash.").into());
+                            }
+                            Err(err) => state
+                                .set_trash_status(format!("Could not trash {path}: {err}").into()),
+                        }
+                    });
+                });
+            });
+        });
 
     // ── Wire: Packages tab ─────────────────────────────────────────────────
     let ui_weak = ui.as_weak();
@@ -874,11 +1255,12 @@ fn main() -> Result<(), slint::PlatformError> {
             }
         });
     let ui_weak = ui.as_weak();
-    ui.global::<AppCallbacks>().on_toggle_package_keep(move |idx| {
-        if let Some(ui) = ui_weak.upgrade() {
-            toggle_package_keep(&ui.global::<AppState>(), idx);
-        }
-    });
+    ui.global::<AppCallbacks>()
+        .on_toggle_package_keep(move |idx| {
+            if let Some(ui) = ui_weak.upgrade() {
+                toggle_package_keep(&ui.global::<AppState>(), idx);
+            }
+        });
     let ui_weak = ui.as_weak();
     ui.global::<AppCallbacks>()
         .on_set_all_package_keep(move |keep_all| {
@@ -922,7 +1304,11 @@ fn main() -> Result<(), slint::PlatformError> {
     let config_clone = shared_config.clone();
     ui.global::<AppCallbacks>().on_update_package(move |name| {
         if let Some(ui) = ui_weak.upgrade() {
-            run_package_action(&ui, &config_clone, PkgAction::Update(vec![name.to_string()]));
+            run_package_action(
+                &ui,
+                &config_clone,
+                PkgAction::Update(vec![name.to_string()]),
+            );
         }
     });
     let ui_weak = ui.as_weak();
@@ -940,8 +1326,42 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
 
+    // ── Watch for apps removed outside Cleanton ────────────────────────────
+    // A light background poll of the Applications folders. When the user drags
+    // an app to the Trash (or another uninstaller removes it), we deep-link to
+    // the Applications tab and load its leftovers so they can be cleaned up.
+    spawn_app_removal_watcher(ui.as_weak());
+
     // ── Run the event loop ─────────────────────────────────────────────────
     ui.run()
+}
+
+/// Background thread that polls for externally-removed apps and, on detection,
+/// deep-links the UI to review their leftovers. Runs for the app's lifetime.
+fn spawn_app_removal_watcher(ui_weak: slint::Weak<AppWindow>) {
+    std::thread::spawn(move || {
+        let mut watcher = cleanton_engine::AppRemovalWatcher::new();
+        loop {
+            std::thread::sleep(Duration::from_secs(4));
+            let removed = watcher.poll();
+            if removed.is_empty() {
+                continue;
+            }
+            // Deliver on the UI thread; handle the first non-self-initiated
+            // removal (avoid clobbering the review panel with several at once).
+            if ui_weak
+                .upgrade_in_event_loop(move |ui| {
+                    for app in removed {
+                        handle_external_removal(&ui, app);
+                    }
+                })
+                .is_err()
+            {
+                // The event loop is gone (app closing): stop watching.
+                break;
+            }
+        }
+    });
 }
 
 /// A mutating package action dispatched to a background runtime.
@@ -972,7 +1392,15 @@ fn package_scan_roots(config: &CleantonConfig) -> Vec<PathBuf> {
     ));
     if let Some(home) = std::env::var_os("HOME") {
         let home = PathBuf::from(home);
-        for sub in ["GitHub", "Projects", "Developer", "dev", "code", "src", "work"] {
+        for sub in [
+            "GitHub",
+            "Projects",
+            "Developer",
+            "dev",
+            "code",
+            "src",
+            "work",
+        ] {
             push(home.join(sub));
         }
     }
@@ -996,7 +1424,9 @@ fn start_package_load(ui: &AppWindow, idx: i32, config: &SharedConfig) {
 
     // Clear the previous manager's list immediately so it doesn't linger while
     // the new inventory loads.
-    state.set_package_rows(ModelRc::from(Rc::new(VecModel::from(Vec::<PackageRow>::new()))));
+    state.set_package_rows(ModelRc::from(Rc::new(VecModel::from(
+        Vec::<PackageRow>::new(),
+    ))));
     state.set_package_count(0);
     state.set_package_total_size("0 B".into());
     state.set_package_outdated_count(0);
@@ -1010,11 +1440,7 @@ fn start_package_load(ui: &AppWindow, idx: i32, config: &SharedConfig) {
     let ui_weak = ui.as_weak();
     let roots = package_scan_roots(&config_snapshot(config));
     std::thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("tokio runtime");
-        rt.block_on(async move {
+        worker_runtime().block_on(async move {
             // Phase 1 — read the inventory and SHOW it immediately. The slow,
             // network-bound update check runs separately in phase 2.
             let inventory = PackageManagers::inventory(kind).await;
@@ -1162,11 +1588,7 @@ fn run_package_action(ui: &AppWindow, config: &SharedConfig, action: PkgAction) 
     let ui_weak = ui.as_weak();
     let config = config.clone();
     std::thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("tokio runtime");
-        rt.block_on(async move {
+        worker_runtime().block_on(async move {
             let outcome = match &action {
                 PkgAction::Uninstall(names) => PackageManagers::uninstall(kind, names).await,
                 PkgAction::Update(names) => PackageManagers::update(kind, names).await,
@@ -1276,11 +1698,8 @@ fn recompute_package_plan(state: &AppState) {
         return;
     };
     let keep = PKG_KEEP.with(|cell| cell.borrow().clone());
-    let plan = PKG_INVENTORY.with(|cell| {
-        cell.borrow()
-            .as_ref()
-            .map(|inv| plan_removal(inv, &keep))
-    });
+    let plan =
+        PKG_INVENTORY.with(|cell| cell.borrow().as_ref().map(|inv| plan_removal(inv, &keep)));
     let Some(plan) = plan else {
         return;
     };
@@ -1298,7 +1717,10 @@ fn recompute_package_plan(state: &AppState) {
             } else if kept_dep.contains(name) {
                 2
             } else {
-                1
+                // Not in the removal plan's uninstall set: show it as kept, not
+                // removable — the confirm flow only uninstalls `plan.removable`,
+                // so labeling anything else removable would lie to the user.
+                0
             };
             if row.kept != kept || row.state != new_state {
                 row.kept = kept;
@@ -1560,6 +1982,11 @@ fn populate_settings(state: &AppState, config: &CleantonConfig) {
     state.set_setting_exclude_cloud(config.scanning.exclude_cloud_roots);
     state.set_setting_exclude_volumes(config.scanning.exclude_external_volumes);
     state.set_setting_ml(config.ml.enabled);
+    state
+        .set_setting_max_run_gb(i32::try_from(config.safety.max_single_run_gb).unwrap_or(i32::MAX));
+    state.set_setting_max_action_gb(
+        i32::try_from(config.safety.max_single_action_gb).unwrap_or(i32::MAX),
+    );
 }
 
 /// Read the edited Settings controls back into `config`.
@@ -1576,6 +2003,12 @@ fn read_settings_into_config(state: &AppState, config: &mut CleantonConfig) {
     config.scanning.exclude_cloud_roots = state.get_setting_exclude_cloud();
     config.scanning.exclude_external_volumes = state.get_setting_exclude_volumes();
     config.ml.enabled = state.get_setting_ml();
+    // Safety ceilings: keep at least 1 GB so a stray 0 can never wedge every
+    // cleanup with a refusal.
+    config.safety.max_single_run_gb = u64::try_from(state.get_setting_max_run_gb().max(1))
+        .unwrap_or(config.safety.max_single_run_gb);
+    config.safety.max_single_action_gb = u64::try_from(state.get_setting_max_action_gb().max(1))
+        .unwrap_or(config.safety.max_single_action_gb);
 }
 
 fn clamp_to_i32(value: usize) -> i32 {
@@ -1605,6 +2038,21 @@ fn cancel_current_operation(current_operation: &CurrentOperation) -> bool {
             token.store(true, Ordering::Relaxed);
             true
         }
+        Err(err) => {
+            tracing::error!("Current operation lock poisoned: {err}");
+            false
+        }
+    }
+}
+
+/// True when a *different* operation replaced this token as current. A user
+/// cancel clears the slot instead (see [`cancel_current_operation`]), so a
+/// cancelled-but-not-superseded operation may still report its partial result.
+fn operation_superseded(current_operation: &CurrentOperation, token: &CancellationToken) -> bool {
+    match current_operation.lock() {
+        Ok(current) => current
+            .as_ref()
+            .is_some_and(|current_token| !Arc::ptr_eq(current_token, token)),
         Err(err) => {
             tracing::error!("Current operation lock poisoned: {err}");
             false
@@ -1651,7 +2099,9 @@ fn clear_plan_state(state: &AppState) {
     state.set_docker_available(false);
     state.set_docker_reclaimable("0 B".into());
     state.set_docker_status("Not scanned".into());
-    state.set_docker_rows(ModelRc::from(Rc::new(VecModel::from(Vec::<DockerRow>::new()))));
+    state.set_docker_rows(ModelRc::from(Rc::new(VecModel::from(
+        Vec::<DockerRow>::new(),
+    ))));
     DOCKER_MODEL.with(|cell| *cell.borrow_mut() = None);
     state.set_duplicate_count(0);
     state.set_duplicate_reclaimable("0 B".into());
@@ -1662,6 +2112,17 @@ fn clear_plan_state(state: &AppState) {
     state.set_large_item_rows(ModelRc::from(Rc::new(VecModel::from(
         Vec::<SuggestionRow>::new(),
     ))));
+    state.set_screenshot_count(0);
+    state.set_screenshot_reclaimable("0 B".into());
+    state.set_screenshot_rows(ModelRc::from(Rc::new(VecModel::from(
+        Vec::<SuggestionRow>::new(),
+    ))));
+    state.set_installer_count(0);
+    state.set_installer_reclaimable("0 B".into());
+    state.set_installer_rows(ModelRc::from(Rc::new(VecModel::from(
+        Vec::<SuggestionRow>::new(),
+    ))));
+    state.set_suggestion_pending_delete_path(SharedString::new());
 
     reset_execution_state(state);
     apply_category_totals(state, CategoryTotals::default(), 0);
@@ -1731,7 +2192,11 @@ fn apply_analyzed_full(state: &AppState, full: &AnalyzedFull) {
     // The Dashboard Docker tile is driven by real Docker accounting (independent
     // of the filesystem scan root), not by the ~0 filesystem docker actions.
     let docker_bytes = full.docker.total_reclaimable;
-    let combined = full.analyzed.plan.total_reclaimable.saturating_add(docker_bytes);
+    let combined = full
+        .analyzed
+        .plan
+        .total_reclaimable
+        .saturating_add(docker_bytes);
     state.set_docker_size(display::human_bytes(docker_bytes).into());
     state.set_docker_ratio(ratio(docker_bytes, combined.max(1)));
 }
@@ -1879,13 +2344,33 @@ fn apply_suggestions_state(state: &AppState, suggestions: &Suggestions) {
         .collect::<Vec<_>>();
     state.set_large_item_count(clamp_to_i32(suggestions.large_items.len()));
     state.set_large_item_rows(ModelRc::from(Rc::new(VecModel::from(large_rows))));
+
+    let screenshot_rows = suggestions
+        .screenshots
+        .iter()
+        .take(MAX_SUGGESTION_ROWS)
+        .map(screenshot_row)
+        .collect::<Vec<_>>();
+    state.set_screenshot_count(clamp_to_i32(suggestions.screenshots.len()));
+    state.set_screenshot_reclaimable(
+        display::human_bytes(suggestions.screenshot_reclaimable).into(),
+    );
+    state.set_screenshot_rows(ModelRc::from(Rc::new(VecModel::from(screenshot_rows))));
+
+    let installer_rows = suggestions
+        .installers
+        .iter()
+        .take(MAX_SUGGESTION_ROWS)
+        .map(installer_row)
+        .collect::<Vec<_>>();
+    state.set_installer_count(clamp_to_i32(suggestions.installers.len()));
+    state.set_installer_reclaimable(display::human_bytes(suggestions.installer_reclaimable).into());
+    state.set_installer_rows(ModelRc::from(Rc::new(VecModel::from(installer_rows))));
 }
 
 fn duplicate_row(set: &DuplicateSet) -> SuggestionRow {
     let first = set.paths.first();
-    let path = first
-        .map(|p| p.display().to_string())
-        .unwrap_or_default();
+    let path = first.map(|p| p.display().to_string()).unwrap_or_default();
     let name = first
         .and_then(|p| p.file_name())
         .map(|n| n.to_string_lossy().into_owned())
@@ -1901,6 +2386,10 @@ fn duplicate_row(set: &DuplicateSet) -> SuggestionRow {
         size: SharedString::from(display::human_bytes(set.reclaimable_bytes)),
         icon: SharedString::from("\u{f0c5}"),
         path: SharedString::from(path),
+        // Reveal-only: a duplicate *set* has no single unambiguous copy to
+        // trash (deleting the first-sorted copy is rarely what the user means).
+        // The user reveals each copy in Finder and removes the right one.
+        deletable: false,
     }
 }
 
@@ -1931,6 +2420,82 @@ fn large_item_row(item: &LargeItem) -> SuggestionRow {
         size: SharedString::from(display::human_bytes(item.bytes)),
         icon: SharedString::from(icon),
         path: SharedString::from(path),
+        // A large file/folder or re-clonable repo is a single clear target, so
+        // it can be moved to the Trash after explicit confirmation.
+        deletable: true,
+    }
+}
+
+/// Drop a just-trashed suggestion from the displayed models so it disappears
+/// immediately without a full rescan. Only the deletable lists (large items and
+/// screenshots) carry a Trash affordance, so only those are pruned.
+fn remove_suggestion_row(state: &AppState, path: &str) {
+    let large: Vec<SuggestionRow> = state
+        .get_large_item_rows()
+        .iter()
+        .filter(|row| row.path.as_str() != path)
+        .collect();
+    state.set_large_item_count(clamp_to_i32(large.len()));
+    state.set_large_item_rows(ModelRc::from(Rc::new(VecModel::from(large))));
+
+    let shots: Vec<SuggestionRow> = state
+        .get_screenshot_rows()
+        .iter()
+        .filter(|row| row.path.as_str() != path)
+        .collect();
+    state.set_screenshot_count(clamp_to_i32(shots.len()));
+    state.set_screenshot_rows(ModelRc::from(Rc::new(VecModel::from(shots))));
+
+    let installers: Vec<SuggestionRow> = state
+        .get_installer_rows()
+        .iter()
+        .filter(|row| row.path.as_str() != path)
+        .collect();
+    state.set_installer_count(clamp_to_i32(installers.len()));
+    state.set_installer_rows(ModelRc::from(Rc::new(VecModel::from(installers))));
+
+    state.set_suggestion_pending_delete_path(SharedString::new());
+}
+
+/// An installer image/package in ~/Downloads (single file, re-downloadable,
+/// deletable after explicit confirmation).
+fn installer_row(item: &LargeItem) -> SuggestionRow {
+    let path = item.path.display().to_string();
+    let name = item
+        .path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.clone());
+    SuggestionRow {
+        title: SharedString::from(name),
+        detail: SharedString::from(path.clone()),
+        size: SharedString::from(display::human_bytes(item.bytes)),
+        icon: SharedString::from("\u{f187}"), // box-archive
+        path: SharedString::from(path),
+        deletable: true,
+    }
+}
+
+/// A screenshot / screen-recording suggestion row (single file, deletable).
+fn screenshot_row(item: &LargeItem) -> SuggestionRow {
+    let path = item.path.display().to_string();
+    let name = item
+        .path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.clone());
+    let icon = if item.note == "screen recording" {
+        "\u{f03d}" // video
+    } else {
+        "\u{f03e}" // image
+    };
+    SuggestionRow {
+        title: SharedString::from(name),
+        detail: SharedString::from(path.clone()),
+        size: SharedString::from(display::human_bytes(item.bytes)),
+        icon: SharedString::from(icon),
+        path: SharedString::from(path),
+        deletable: true,
     }
 }
 
@@ -2024,6 +2589,87 @@ fn apply_execution_result(state: &AppState, result: &ExecutionResult) {
     }
 }
 
+/// After a successful cleanup, drop the actions that were actually removed
+/// (moved to Trash or deleted) from the retained plan and rebuild the Results
+/// list, so cleaned entries no longer linger. Actions the user did not select
+/// (or that were skipped/failed) stay in the list. Leaves the execution-result
+/// summary and suggestions untouched — only the plan list is pruned.
+fn prune_executed_actions(
+    state: &AppState,
+    latest_plan: &Arc<Mutex<Option<CleanupPlan>>>,
+    result: &ExecutionResult,
+) {
+    let removed: HashSet<PathBuf> = result
+        .actions
+        .iter()
+        .filter(|action| {
+            matches!(
+                action.status,
+                ExecutionStatus::MovedToTrash | ExecutionStatus::Deleted
+            )
+        })
+        .map(|action| action.target.clone())
+        .collect();
+    if removed.is_empty() {
+        return;
+    }
+
+    let reduced = {
+        let Ok(mut guard) = latest_plan.lock() else {
+            return;
+        };
+        let Some(plan) = guard.as_mut() else {
+            return;
+        };
+        plan.actions
+            .retain(|action| !removed.contains(&action.target));
+        plan.total_reclaimable = plan
+            .actions
+            .iter()
+            .map(|action| action.reclaimable_bytes)
+            .fold(0u64, u64::saturating_add);
+        if plan.actions.is_empty() {
+            *guard = None;
+            None
+        } else {
+            Some(plan.clone())
+        }
+    };
+
+    match reduced {
+        None => clear_plan_list_only(state),
+        Some(plan) => {
+            let groups = plan.grouped();
+            let safety = safety_by_recipe(&plan.actions);
+            state.set_total_reclaimable(display::human_bytes(plan.total_reclaimable).into());
+            state.set_plan_action_count(clamp_to_i32(groups.len()));
+            state.set_plan_file_count(clamp_to_i32(plan.actions.len()));
+            build_plan_model(state, &plan, &groups, &safety);
+            state.set_plan_ready(!plan.actions.is_empty());
+        }
+    }
+}
+
+/// Clear just the cleanup-plan list + selection (used when a cleanup removed
+/// every listed action). Unlike [`clear_plan_state`], this preserves the
+/// execution-result summary, capacity, docker, and suggestions.
+fn clear_plan_list_only(state: &AppState) {
+    state.set_total_reclaimable("0 B".into());
+    state.set_plan_action_count(0);
+    state.set_plan_file_count(0);
+    state.set_plan_rows(ModelRc::from(Rc::new(VecModel::from(
+        Vec::<PlanListItem>::new(),
+    ))));
+    PLAN_ROWS.with(|cell| *cell.borrow_mut() = None);
+    PLAN_ROW_META.with(|cell| cell.borrow_mut().clear());
+    SELECTED_ACTIONS.with(|cell| cell.borrow_mut().clear());
+    PLAN_ACTION_BYTES.with(|cell| cell.borrow_mut().clear());
+    state.set_plan_selected_count(0);
+    state.set_plan_selected_reclaimable("0 B".into());
+    state.set_plan_all_selected(true);
+    state.set_plan_ready(false);
+}
+
 fn execution_failed_count(result: &ExecutionResult) -> u64 {
     result
         .actions
@@ -2073,7 +2719,10 @@ fn group_row(group: &ActionGroup, safety: SafetyLevel) -> PlanActionRow {
 }
 
 /// Build the grouped row vector, capped, with each group's representative safety.
-fn plan_rows_vec(groups: &[ActionGroup], safety: &HashMap<&str, SafetyLevel>) -> Vec<PlanActionRow> {
+fn plan_rows_vec(
+    groups: &[ActionGroup],
+    safety: &HashMap<&str, SafetyLevel>,
+) -> Vec<PlanActionRow> {
     groups
         .iter()
         .take(MAX_PLAN_GROUP_ROWS)
@@ -2111,8 +2760,12 @@ fn item_display(target: &Path, home: &Path) -> (String, String) {
         Err(_) => target.display().to_string(),
     };
     let mut comps = target.components().rev();
-    let last = comps.next().map(|c| c.as_os_str().to_string_lossy().into_owned());
-    let prev = comps.next().map(|c| c.as_os_str().to_string_lossy().into_owned());
+    let last = comps
+        .next()
+        .map(|c| c.as_os_str().to_string_lossy().into_owned());
+    let prev = comps
+        .next()
+        .map(|c| c.as_os_str().to_string_lossy().into_owned());
     let name = match (prev, last) {
         (Some(p), Some(l)) => format!("{p}/{l}"),
         (None, Some(l)) => l,
@@ -2342,8 +2995,13 @@ fn plan_row_toggle(state: &AppState, idx: i32) {
         return;
     };
     enum Action {
-        Group { indices: Vec<usize> },
-        Item { action_index: usize, group_row: usize },
+        Group {
+            indices: Vec<usize>,
+        },
+        Item {
+            action_index: usize,
+            group_row: usize,
+        },
         Ignore,
     }
     let action = PLAN_ROW_META.with(|cell| match cell.borrow().get(index) {
@@ -2362,8 +3020,8 @@ fn plan_row_toggle(state: &AppState, idx: i32) {
 
     match action {
         Action::Group { indices } => {
-            let all_selected = SELECTED_ACTIONS
-                .with(|cell| indices.iter().all(|i| cell.borrow().contains(i)));
+            let all_selected =
+                SELECTED_ACTIONS.with(|cell| indices.iter().all(|i| cell.borrow().contains(i)));
             SELECTED_ACTIONS.with(|cell| {
                 let mut selected = cell.borrow_mut();
                 for &i in &indices {
@@ -2477,7 +3135,9 @@ fn set_discovered_services(state: &AppState, services: Vec<Service>) {
 /// (used when discovery fails).
 fn clear_discovered_services(state: &AppState) {
     ALL_SERVICES.with(|cell| cell.borrow_mut().clear());
-    state.set_services(ModelRc::from(Rc::new(VecModel::from(Vec::<ServiceRow>::new()))));
+    state.set_services(ModelRc::from(Rc::new(VecModel::from(
+        Vec::<ServiceRow>::new(),
+    ))));
     state.set_service_count(0);
     state.set_service_running_count(0);
 }
@@ -2498,6 +3158,8 @@ fn refresh_services_view(state: &AppState) {
 fn rebuild_services_model(state: &AppState) -> (usize, usize) {
     let needle = state.get_service_filter().to_lowercase();
     let running_only = state.get_service_running_only();
+    let hide_protected = state.get_service_hide_protected();
+    let startup_only = state.get_service_startup_only();
 
     ALL_SERVICES.with(|cell| {
         let services = cell.borrow();
@@ -2509,7 +3171,9 @@ fn rebuild_services_model(state: &AppState) -> (usize, usize) {
 
         let matched = services
             .iter()
-            .filter(|service| service_matches_filter(service, &needle, running_only))
+            .filter(|service| {
+                service_matches_filter(service, &needle, running_only, hide_protected, startup_only)
+            })
             .collect::<Vec<_>>();
         let shown = matched.len();
         let rows = matched
@@ -2526,9 +3190,22 @@ fn rebuild_services_model(state: &AppState) -> (usize, usize) {
 }
 
 /// Case-insensitive substring match against the service name OR plist path,
-/// optionally constrained to running services. An empty needle matches all.
-fn service_matches_filter(service: &Service, needle: &str, running_only: bool) -> bool {
+/// optionally constrained to running services, non-protected services, and/or
+/// startup (RunAtLoad) items. An empty needle matches all.
+fn service_matches_filter(
+    service: &Service,
+    needle: &str,
+    running_only: bool,
+    hide_protected: bool,
+    startup_only: bool,
+) -> bool {
     if running_only && !matches!(service.status, ServiceStatus::Running { .. }) {
+        return false;
+    }
+    if hide_protected && is_protected(&service.id, &service.plist_path) {
+        return false;
+    }
+    if startup_only && !service.run_at_load {
         return false;
     }
     if needle.is_empty() {
@@ -2548,7 +3225,10 @@ fn services_status_text(total: usize, shown: usize) -> String {
     if total == 0 {
         "No services discovered.".to_owned()
     } else {
-        format!("Showing {} of {total} services", shown.min(MAX_SERVICE_ROWS))
+        format!(
+            "Showing {} of {total} services",
+            shown.min(MAX_SERVICE_ROWS)
+        )
     }
 }
 
@@ -2561,7 +3241,26 @@ fn service_row(service: &Service) -> ServiceRow {
         path: SharedString::from(service.plist_path.display().to_string()),
         running: matches!(service.status, ServiceStatus::Running { .. }),
         protected_service: is_protected(&service.id, &service.plist_path),
+        run_at_load: service.run_at_load,
+        orphaned: service_is_orphaned(service),
     }
+}
+
+/// A launchd service whose referenced executable no longer exists: its plist is
+/// a safe-to-remove leftover. Mirrors the backend `delete_orphaned_plist`
+/// eligibility (Homebrew services are never treated as orphaned here — they are
+/// managed by `brew`, not by a removable plist).
+fn service_is_orphaned(service: &Service) -> bool {
+    if service.service_type == ServiceType::BrewService {
+        return false;
+    }
+    if let Some(program) = &service.program {
+        return !program.exists();
+    }
+    if let Some(first_arg) = service.program_arguments.first() {
+        return !PathBuf::from(first_arg).exists();
+    }
+    true
 }
 
 fn service_type_label(service_type: ServiceType) -> &'static str {
@@ -2571,6 +3270,202 @@ fn service_type_label(service_type: ServiceType) -> &'static str {
         ServiceType::SystemLaunchDaemon => "Daemon",
         ServiceType::BrewService => "Brew",
     }
+}
+
+/// Load (or reload) the installed-application inventory on a background
+/// worker; bundle sizing walks every app bundle, so this never runs on the UI
+/// thread.
+fn start_apps_load(ui: &AppWindow) {
+    if APPS_LOADING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let state = ui.global::<AppState>();
+    state.set_apps_loading(true);
+    state.set_apps_status("Loading applications…".into());
+
+    let ui_weak = ui.as_weak();
+    std::thread::spawn(move || {
+        worker_runtime().block_on(async move {
+            let apps = tokio::task::spawn_blocking(list_installed_apps)
+                .await
+                .unwrap_or_default();
+            // Which of these were installed via Homebrew? `brew list --cask`
+            // tokens let us route the uninstall through brew too. A missing or
+            // slow brew degrades to "no casks" — the trash path still works.
+            let cask_tokens: Vec<String> = PackageManagers::inventory(ManagerKind::HomebrewCask)
+                .await
+                .packages
+                .into_iter()
+                .map(|pkg| pkg.name)
+                .collect();
+            let _ = ui_weak.upgrade_in_event_loop(move |ui| {
+                APPS_LOADING.store(false, Ordering::SeqCst);
+                let state = ui.global::<AppState>();
+                state.set_apps_loading(false);
+                ALL_APPS.with(|cell| *cell.borrow_mut() = apps);
+                ALL_CASK_TOKENS.with(|cell| *cell.borrow_mut() = cask_tokens);
+                rebuild_apps_model(&state);
+            });
+        });
+    });
+}
+
+/// Rebuild the visible application rows from ALL_APPS through the filter box.
+fn rebuild_apps_model(state: &AppState) {
+    let filter = state.get_app_filter().to_lowercase();
+    let hide_system = state.get_apps_hide_system();
+    let tokens = ALL_CASK_TOKENS.with(|cell| cell.borrow().clone());
+    let (rows, total) = ALL_APPS.with(|cell| {
+        let apps = cell.borrow();
+        let rows: Vec<AppListRow> = apps
+            .iter()
+            .filter(|app| !hide_system || !app.protected)
+            .filter(|app| {
+                filter.is_empty()
+                    || app.name.to_lowercase().contains(&filter)
+                    || app
+                        .bundle_id
+                        .as_deref()
+                        .is_some_and(|id| id.to_lowercase().contains(&filter))
+            })
+            .map(|app| app_list_row(app, &tokens))
+            .collect();
+        (rows, apps.len())
+    });
+    state.set_apps_status(format!("Showing {} of {} applications", rows.len(), total).into());
+    state.set_app_rows(ModelRc::from(Rc::new(VecModel::from(rows))));
+}
+
+fn app_list_row(app: &InstalledApp, cask_tokens: &[String]) -> AppListRow {
+    AppListRow {
+        name: SharedString::from(app.name.as_str()),
+        version: SharedString::from(app.version.as_deref().unwrap_or("")),
+        bundle_id: SharedString::from(app.bundle_id.as_deref().unwrap_or("")),
+        path: SharedString::from(app.path.display().to_string()),
+        size: SharedString::from(display::human_bytes(app.bytes)),
+        protected: app.protected,
+        brew: cask_token_for(app, cask_tokens).is_some(),
+    }
+}
+
+fn leftover_row(item: &cleanton_engine::LeftoverItem) -> LeftoverRow {
+    let name = item
+        .path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| item.path.display().to_string());
+    LeftoverRow {
+        name: SharedString::from(name),
+        path: SharedString::from(item.path.display().to_string()),
+        kind: SharedString::from(item.kind.label()),
+        size: SharedString::from(display::human_bytes(item.bytes)),
+        admin: item.admin_required,
+        // Everything trashable starts selected; admin items are review-only.
+        selected: !item.admin_required,
+    }
+}
+
+/// Populate the leftover review panel for the app at `path` (background
+/// discovery; sizes require walking each leftover).
+fn start_leftover_scan(ui: &AppWindow, path: &str) {
+    let Some(app) = ALL_APPS.with(|cell| {
+        cell.borrow()
+            .iter()
+            .find(|app| app.path.display().to_string() == path)
+            .cloned()
+    }) else {
+        return;
+    };
+    start_leftover_scan_for_app(ui, app);
+}
+
+/// Deep-link handler for an app removed *outside* Cleanton: jump to the
+/// Applications tab and load the (now-gone) app's leftovers for review.
+/// Removals Cleanton performed itself are ignored (their leftovers were already
+/// handled in the same uninstall).
+fn handle_external_removal(ui: &AppWindow, app: InstalledApp) {
+    let self_initiated = CLEANTON_REMOVED_BUNDLES
+        .lock()
+        .map(|mut removed| removed.remove(&app.path))
+        .unwrap_or(false);
+    if self_initiated || app.protected {
+        return;
+    }
+    // Don't yank focus while another uninstall is mid-flight.
+    if UNINSTALL_IN_FLIGHT.load(Ordering::SeqCst) {
+        return;
+    }
+    let state = ui.global::<AppState>();
+    state.set_active_screen(5);
+    state
+        .set_apps_status(format!("\"{}\" was removed — reviewing its leftovers…", app.name).into());
+    // Refresh the inventory so the removed app drops off the list, then load
+    // its leftovers from the retained identity.
+    start_apps_load(ui);
+    start_leftover_scan_for_app(ui, app);
+}
+
+/// Populate the leftover review panel for a specific app (used both by list
+/// selection and by the external-removal deep-link, where the app is no longer
+/// in the inventory).
+fn start_leftover_scan_for_app(ui: &AppWindow, app: InstalledApp) {
+    let state = ui.global::<AppState>();
+    let path = app.path.display().to_string();
+
+    state.set_selected_app_path(SharedString::from(path.as_str()));
+    state.set_selected_app_name(SharedString::from(app.name.as_str()));
+    state.set_uninstall_pending(false);
+    APP_PLAN.with(|cell| *cell.borrow_mut() = None);
+
+    if app.protected {
+        state.set_leftover_loading(false);
+        state.set_leftover_count(0);
+        state.set_leftover_total("0 B".into());
+        state.set_leftover_rows(ModelRc::from(Rc::new(VecModel::from(
+            Vec::<LeftoverRow>::new(),
+        ))));
+        state.set_apps_status(
+            format!(
+                "{} is a system application and cannot be uninstalled.",
+                app.name
+            )
+            .into(),
+        );
+        return;
+    }
+
+    state.set_leftover_loading(true);
+    let ui_weak = ui.as_weak();
+    std::thread::spawn(move || {
+        worker_runtime().block_on(async move {
+            let plan = tokio::task::spawn_blocking(move || find_leftovers(&app))
+                .await
+                .ok()
+                .flatten();
+            let _ = ui_weak.upgrade_in_event_loop(move |ui| {
+                let state = ui.global::<AppState>();
+                state.set_leftover_loading(false);
+                let Some(plan) = plan else {
+                    state.set_leftover_count(0);
+                    state.set_leftover_rows(ModelRc::from(Rc::new(VecModel::from(Vec::<
+                        LeftoverRow,
+                    >::new(
+                    )))));
+                    return;
+                };
+                // Only show what still belongs to the currently selected app —
+                // the user may have clicked another row while we were scanning.
+                if state.get_selected_app_path().as_str() != plan.app.path.display().to_string() {
+                    return;
+                }
+                let rows: Vec<LeftoverRow> = plan.items.iter().map(leftover_row).collect();
+                state.set_leftover_count(clamp_to_i32(rows.len()));
+                state.set_leftover_total(display::human_bytes(plan.total_bytes).into());
+                state.set_leftover_rows(ModelRc::from(Rc::new(VecModel::from(rows))));
+                APP_PLAN.with(|cell| *cell.borrow_mut() = Some(plan));
+            });
+        });
+    });
 }
 
 fn service_status_label(status: &ServiceStatus) -> String {
@@ -2590,6 +3485,9 @@ struct CategoryTotals {
     python: u64,
     docker: u64,
     ml: u64,
+    jvm: u64,
+    ai_tools: u64,
+    other: u64,
 }
 
 fn category_totals(plan: &CleanupPlan) -> CategoryTotals {
@@ -2602,6 +3500,9 @@ fn category_totals(plan: &CleanupPlan) -> CategoryTotals {
             ActionCategory::Python => totals.python += action.reclaimable_bytes,
             ActionCategory::Docker => totals.docker += action.reclaimable_bytes,
             ActionCategory::Ml => totals.ml += action.reclaimable_bytes,
+            ActionCategory::Jvm => totals.jvm += action.reclaimable_bytes,
+            ActionCategory::AiTools => totals.ai_tools += action.reclaimable_bytes,
+            ActionCategory::Other => totals.other += action.reclaimable_bytes,
         }
     }
     totals
@@ -2620,6 +3521,12 @@ fn apply_category_totals(state: &AppState, totals: CategoryTotals, total_reclaim
     state.set_docker_ratio(ratio(totals.docker, total_reclaimable));
     state.set_ml_size(display::human_bytes(totals.ml).into());
     state.set_ml_ratio(ratio(totals.ml, total_reclaimable));
+    state.set_jvm_size(display::human_bytes(totals.jvm).into());
+    state.set_jvm_ratio(ratio(totals.jvm, total_reclaimable));
+    state.set_aitools_size(display::human_bytes(totals.ai_tools).into());
+    state.set_aitools_ratio(ratio(totals.ai_tools, total_reclaimable));
+    state.set_other_size(display::human_bytes(totals.other).into());
+    state.set_other_ratio(ratio(totals.other, total_reclaimable));
 }
 
 fn ratio(bytes: u64, total: u64) -> f32 {
@@ -2637,9 +3544,28 @@ enum ActionCategory {
     Python,
     Docker,
     Ml,
+    Jvm,
+    AiTools,
+    Other,
 }
 
 fn action_category(action: &CleanupAction) -> ActionCategory {
+    // Recipes carry their category since it was added to `CleanupAction`; the
+    // string heuristic below only handles plans persisted before that field
+    // existed (deserialized with an empty category).
+    match action.category.as_str() {
+        "rust" => return ActionCategory::Rust,
+        "swift" => return ActionCategory::Swift,
+        "node" => return ActionCategory::Node,
+        "python" => return ActionCategory::Python,
+        "docker" => return ActionCategory::Docker,
+        "ml" => return ActionCategory::Ml,
+        "jvm" | "android" => return ActionCategory::Jvm,
+        "ai-tools" => return ActionCategory::AiTools,
+        "" => {}
+        _ => return ActionCategory::Other,
+    }
+
     let recipe_id = action.recipe_id.0.to_lowercase();
     let target = action.target.to_string_lossy().to_lowercase();
     let haystack = format!("{recipe_id} {target}");
@@ -2660,8 +3586,10 @@ fn action_category(action: &CleanupAction) -> ActionCategory {
         || haystack.contains("checkpoint")
     {
         ActionCategory::Ml
-    } else {
+    } else if haystack.contains("python") || haystack.contains("pip") {
         ActionCategory::Python
+    } else {
+        ActionCategory::Other
     }
 }
 

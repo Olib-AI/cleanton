@@ -42,6 +42,52 @@ pub const USER_PROTECTED: &[&str] = &[
     "Movies",
 ];
 
+/// Home-relative user-data content roots that hold personal *files* (as opposed
+/// to credentials/keychains/mail). They are a subset of [`USER_PROTECTED`]:
+/// still fully protected from any destructive recipe/executor action, but the
+/// scanner is allowed to *descend* into them so the read-only Suggestions pass
+/// (duplicate sets, large files, screenshots) can see their contents. Without
+/// this, the scanner prunes these roots entirely and every user-data suggestion
+/// comes back empty.
+pub const USER_DATA_CONTENT_ROOTS: &[&str] = &[
+    "Desktop",
+    "Documents",
+    "Downloads",
+    "Pictures",
+    "Music",
+    "Movies",
+];
+
+/// True when `path` is one of the [`USER_DATA_CONTENT_ROOTS`] under `$HOME`, or
+/// a descendant of one. Filesystem-free (pure `$HOME`-join comparison), matching
+/// the scanner's hot-path pruning check.
+#[must_use]
+pub fn is_user_data_content_path(path: &Path) -> bool {
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+        return false;
+    };
+    let normalized = normalize_for_comparison(path);
+    USER_DATA_CONTENT_ROOTS.iter().any(|root| {
+        let content_root = normalize_for_comparison(&home.join(root));
+        starts_with_or_equal(&normalized, &content_root)
+    })
+}
+
+/// True when `path` is *exactly* one of the [`USER_DATA_CONTENT_ROOTS`] (e.g.
+/// `~/Desktop` itself, not a file inside it). Used to permit removing hand-picked
+/// files *within* a user-data root while never letting the root itself be
+/// removed.
+#[must_use]
+pub fn is_user_data_content_root(path: &Path) -> bool {
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+        return false;
+    };
+    let normalized = normalize_for_comparison(path);
+    USER_DATA_CONTENT_ROOTS
+        .iter()
+        .any(|root| normalized == normalize_for_comparison(&home.join(root)))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProtectedPaths {
     hardcoded: Vec<PathBuf>,

@@ -1,0 +1,23 @@
+[recipe]
+id = "apps-electron-service-worker-cache"
+name = "App Service Worker Caches"
+# CacheStorage holds re-fetchable media/assets. IndexedDB and Local Storage
+# (logins, app state) are different subtrees and never match.
+description = "Service-worker media caches of Electron apps (re-fetched in use)"
+category = "apps"
+safety_level = "cautious"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/Library/Application Support/*/Service Worker/CacheStorage/**"
+min_age_days = 30
+
+[action]
+type = "trash"
+prompt = "Move {size} of app service-worker caches to Trash?"
+group = true
+
+[test]
+should_match = ["~/Library/Application Support/Microsoft Teams/Service Worker/CacheStorage/abc/entry"]
+should_not_match = ["~/Library/Application Support/Microsoft Teams/IndexedDB/https_teams.leveldb/000005.ldb"]

@@ -42,8 +42,30 @@ const SOLID_REFS: &[(u32, &str)] = &[
     (0xf023, "lock (protected)"),
     (0xf111, "circle (status dot)"),
     (0xf04d, "stop (cancel)"),
-    (0xf187, "box-archive (archive action)"),
+    (
+        0xf187,
+        "box-archive (archive action / installer suggestion)",
+    ),
     (0xf05a, "circle-info (snapshot note)"),
+    (0xf03d, "video (screen-recording suggestion)"),
+    (0xf03e, "image (screenshot suggestion)"),
+    (0xf053, "chevron-left (category carousel paging)"),
+    (
+        0xf054,
+        "chevron-right (collapsed plan group / carousel paging)",
+    ),
+    (0xf062, "arrow-up (package update)"),
+    (0xf068, "minus (indeterminate selection)"),
+    (0xf078, "chevron-down (expanded plan group)"),
+    (0xf0c5, "copy (duplicate-set suggestion)"),
+    (0xf0c7, "floppy-disk (other category)"),
+    (0xf0e2, "rotate-left (restart service)"),
+    (0xf0eb, "lightbulb (suggestions panel)"),
+    (0xf110, "spinner (loading)"),
+    (0xf126, "code-branch (re-clonable repo suggestion)"),
+    (0xf1b3, "cubes (packages)"),
+    (0xf35d, "up-right-from-square (reveal in Finder)"),
+    (0xf544, "robot (ai tools category)"),
 ];
 
 /// Brand-style codepoints referenced by the GUI (ecosystem category icons).
@@ -53,6 +75,7 @@ const BRAND_REFS: &[(u32, &str)] = &[
     (0xf3d3, "node-js"),
     (0xf3e2, "python"),
     (0xf395, "docker"),
+    (0xf17b, "android (jvm/android category)"),
 ];
 
 #[test]

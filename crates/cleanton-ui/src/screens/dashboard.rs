@@ -437,30 +437,48 @@ fn get_sectors(app: &App) -> Vec<DonutSector> {
         return sectors;
     }
 
-    // Group sizes by category
+    // Group sizes by the recipe category carried on each action; the string
+    // heuristic only handles plans persisted before that field existed.
     let mut category_sizes = std::collections::HashMap::new();
     for action in &plan.actions {
-        let cat_name = format!("{:?}", action.recipe_id.0).to_lowercase();
-        let cat = if cat_name.contains("rust") || cat_name.contains("cargo") {
-            "Rust"
-        } else if cat_name.contains("node") || cat_name.contains("npm") {
-            "Node"
-        } else if cat_name.contains("python")
-            || cat_name.contains("pip")
-            || cat_name.contains("cache")
-        {
-            "Python"
-        } else if cat_name.contains("swift")
-            || cat_name.contains("xcode")
-            || cat_name.contains("derived")
-        {
-            "Swift"
-        } else if cat_name.contains("docker") {
-            "Docker"
-        } else if cat_name.contains("brew") {
-            "Homebrew"
-        } else {
-            "Other"
+        let cat = match action.category.as_str() {
+            "rust" => "Rust",
+            "node" => "Node",
+            "python" => "Python",
+            "swift" => "Swift",
+            "docker" => "Docker",
+            "ml" => "ML / AI",
+            "jvm" | "android" => "JVM",
+            "ai-tools" => "AI Tools",
+            "system" => "System",
+            "apps" => "Apps",
+            "go" => "Go",
+            "ide" => "IDEs",
+            "" => {
+                let cat_name = action.recipe_id.0.to_lowercase();
+                if cat_name.contains("rust") || cat_name.contains("cargo") {
+                    "Rust"
+                } else if cat_name.contains("node") || cat_name.contains("npm") {
+                    "Node"
+                } else if cat_name.contains("python")
+                    || cat_name.contains("pip")
+                    || cat_name.contains("cache")
+                {
+                    "Python"
+                } else if cat_name.contains("swift")
+                    || cat_name.contains("xcode")
+                    || cat_name.contains("derived")
+                {
+                    "Swift"
+                } else if cat_name.contains("docker") {
+                    "Docker"
+                } else if cat_name.contains("brew") {
+                    "Homebrew"
+                } else {
+                    "Other"
+                }
+            }
+            _ => "Other",
         };
         *category_sizes.entry(cat).or_insert(0) += action.reclaimable_bytes;
     }

@@ -1093,7 +1093,7 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "cleanton-app"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cleanton-common",
  "cleanton-engine",
@@ -1111,7 +1111,7 @@ dependencies = [
 
 [[package]]
 name = "cleanton-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "cleanton-common",
@@ -1129,7 +1129,7 @@ dependencies = [
 
 [[package]]
 name = "cleanton-common"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "humansize",
@@ -1144,7 +1144,7 @@ dependencies = [
 
 [[package]]
 name = "cleanton-engine"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bollard",
  "chrono",
@@ -1164,7 +1164,7 @@ dependencies = [
 
 [[package]]
 name = "cleanton-ml"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cleanton-common",
  "serde",
@@ -1175,7 +1175,7 @@ dependencies = [
 
 [[package]]
 name = "cleanton-packages"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cleanton-common",
  "serde",
@@ -1187,7 +1187,7 @@ dependencies = [
 
 [[package]]
 name = "cleanton-recipes"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cleanton-common",
  "glob",
@@ -1199,7 +1199,7 @@ dependencies = [
 
 [[package]]
 name = "cleanton-scanner"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cleanton-common",
  "glob",
@@ -1213,7 +1213,7 @@ dependencies = [
 
 [[package]]
 name = "cleanton-services"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cleanton-common",
  "plist",
@@ -1226,7 +1226,7 @@ dependencies = [
 
 [[package]]
 name = "cleanton-ui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cleanton-common",
  "cleanton-engine",

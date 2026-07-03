@@ -61,6 +61,7 @@ fn trash_action(target: &Path, fingerprint: MetadataFingerprint) -> CleanupActio
         logical_bytes: 1024,
         reclaimable_bytes: 1024,
         recipe_id: RecipeId("test-refusal".to_owned()),
+        category: String::new(),
         action_type: ActionType::Trash,
         confidence: Confidence::High,
         safety_level: SafetyLevel::Safe,

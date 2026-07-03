@@ -1,0 +1,21 @@
+[recipe]
+id = "node-cypress-cache"
+name = "Cypress Binary Cache"
+description = "Cypress downloaded binary versions (re-downloaded by cypress install)"
+category = "node"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/Library/Caches/Cypress/**"
+min_age_days = 30
+
+[action]
+type = "trash"
+prompt = "Move {size} of Cypress binaries to Trash?"
+group = true
+
+[test]
+should_match = ["~/Library/Caches/Cypress/13.10.0/Cypress.app-payload"]
+should_not_match = ["~/Library/Caches/Yarn"]

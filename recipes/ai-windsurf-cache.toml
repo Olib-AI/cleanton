@@ -1,0 +1,23 @@
+[recipe]
+id = "ai-windsurf-cache"
+name = "Windsurf Cache"
+# Only the Electron *Cache* subtrees. User settings and globalStorage
+# (auth/session) never match.
+description = "Windsurf editor caches (regenerated on next launch)"
+category = "ai-tools"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/Library/Application Support/Windsurf/*Cache*/**"
+min_age_days = 7
+
+[action]
+type = "trash"
+prompt = "Move {size} of Windsurf cache to Trash?"
+group = true
+
+[test]
+should_match = ["~/Library/Application Support/Windsurf/CachedData/abc/module.js"]
+should_not_match = ["~/Library/Application Support/Windsurf/User/keybindings.json"]

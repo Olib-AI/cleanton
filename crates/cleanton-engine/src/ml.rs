@@ -69,7 +69,6 @@ impl ActionAnnotation {
             note: note.into(),
         }
     }
-
 }
 
 /// A cleanup action paired with its ML annotation.
@@ -333,6 +332,7 @@ mod tests {
             logical_bytes: entry.logical_bytes,
             reclaimable_bytes: entry.allocated_bytes,
             recipe_id: RecipeId("test".to_owned()),
+            category: String::new(),
             action_type: ActionType::Trash,
             confidence: Confidence::High,
             safety_level: SafetyLevel::Safe,

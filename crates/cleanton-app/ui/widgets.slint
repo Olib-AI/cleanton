@@ -106,7 +106,12 @@ export component MetricTile inherits Panel {
     in property <brush> accent-color: Theme.palette.accent;
     in property <float> ratio: 0.0;
 
-    min-height: 104px;
+    // A metric tile summarizes a single number; it must never balloon to fill
+    // leftover vertical space and starve the list/table beneath it. The cap is
+    // set to the tile's natural content height (icon+label, value, bar, detail)
+    // so the detail line is never clipped while the tile still stays compact.
+    min-height: 116px;
+    max-height: 116px;
     min-width: 160px;
 
     VerticalLayout {
@@ -599,14 +604,20 @@ export component FileRow inherits Rectangle {
     }
 }
 
-// A review-only suggestion row (duplicate set or large file/folder). Clicking
-// anywhere reveals the path in Finder; nothing is ever deleted from here.
+// A review-only suggestion row (duplicate set, large file/folder, or
+// screenshot). Clicking the row reveals the path in Finder. When `deletable`,
+// a two-step "Trash" affordance moves the item to the Trash after the user
+// clicks it a second time to confirm.
 export component SuggestionListRow inherits Rectangle {
     in property <string> title;
     in property <string> detail;
     in property <string> size;
     in property <string> icon-glyph: "";
+    in property <bool> deletable: false;
+    in property <bool> armed-delete: false;
     callback reveal();
+    callback arm-delete();
+    callback confirm-delete();
 
     height: 52px;
     background: ta.has-hover ? Theme.palette.surface-elevated : transparent;
@@ -651,13 +662,53 @@ export component SuggestionListRow inherits Rectangle {
             min-width: RowColumns.size-col;
         }
 
+        // Reveal-in-Finder affordance (row click also reveals).
         Rectangle {
-            width: 96px;
+            width: 84px;
             HorizontalLayout {
                 alignment: end;
                 spacing: Theme.spacing-xs;
                 Text { text: "Reveal"; color: Theme.palette.accent; font-size: Theme.font-size-xs; font-weight: 600; vertical-alignment: center; }
-                FaIcon { glyph: "\u{f35d}"; icon-color: Theme.palette.accent; icon-size: Theme.font-size-xs; width: 12px; }
+                FaIcon { glyph: "\u{f35d}"; icon-color: Theme.palette.accent; icon-size: Theme.font-size-xs; width: 12px; y: (parent.height - self.height) / 2; }
+            }
+        }
+
+        // Two-step Trash affordance for deletable suggestions.
+        Rectangle {
+            width: 84px;
+            if root.deletable: HorizontalLayout {
+                alignment: end;
+                Rectangle {
+                    width: 78px;
+                    height: 28px;
+                    y: (parent.height - self.height) / 2;
+                    border-radius: Theme.radius-sm;
+                    background: root.armed-delete
+                        ? Theme.palette.danger
+                        : (del-ta.has-hover ? Theme.palette.surface-elevated : transparent);
+                    border-width: 1px;
+                    border-color: root.armed-delete ? Theme.palette.danger : Theme.palette.border;
+                    animate background, border-color { duration: Theme.anim-fast; }
+
+                    del-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            if root.armed-delete {
+                                root.confirm-delete();
+                            } else {
+                                root.arm-delete();
+                            }
+                        }
+                    }
+                    Text {
+                        text: root.armed-delete ? "Confirm" : "Trash";
+                        color: root.armed-delete ? #FFFFFF : Theme.palette.text-secondary;
+                        font-size: Theme.font-size-xs;
+                        font-weight: 650;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
             }
         }
     }
@@ -789,15 +840,27 @@ export component ServiceListRow inherits Rectangle {
     in property <string> path;
     in property <bool> running: false;
     in property <bool> protected-service: false;
+    // Starts at login/boot; drives the "startup only" filter and the badge.
+    in property <bool> run-at-load: false;
+    // Executable missing → the plist is a removable leftover (offer "Remove").
+    in property <bool> orphaned: false;
     // Id of the single row whose Disable action is currently armed; when it
     // equals this row's id the action shows the red "Confirm" affordance.
     in property <string> pending-disable-id;
+    // Same, for the orphaned-item Remove action.
+    in property <string> pending-remove-id;
 
     // First click arms this row; clicking the armed "Confirm" disables it.
     callback arm-disable(string);
     callback confirm-disable(string);
+    // Orphaned-item removal (two-step arm/confirm, like disable).
+    callback arm-remove(string);
+    callback confirm-remove(string);
+    // Enable a stopped/disabled service (non-destructive, single click).
+    callback enable(string);
 
     property <bool> armed: root.id != "" && root.id == root.pending-disable-id;
+    property <bool> armed-remove: root.id != "" && root.id == root.pending-remove-id;
 
     height: 56px;
     background: ta.has-hover ? Theme.palette.surface-elevated : transparent;
@@ -810,11 +873,17 @@ export component ServiceListRow inherits Rectangle {
         padding-right: Theme.spacing-md;
         spacing: Theme.spacing-md;
 
-        FaIcon {
-            glyph: "\u{f111}";
-            icon-color: root.running ? Theme.palette.success : Theme.palette.text-muted;
-            icon-size: 8px;
+        // Status dot, vertically centred in the 56px row (a fixed-size child is
+        // not centred by the HorizontalLayout on its own).
+        Rectangle {
             width: 14px;
+            FaIcon {
+                glyph: "\u{f111}";
+                icon-color: root.running ? Theme.palette.success : Theme.palette.text-muted;
+                icon-size: 8px;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+            }
         }
 
         VerticalLayout {
@@ -825,11 +894,35 @@ export component ServiceListRow inherits Rectangle {
             Text { text: root.path; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; overflow: elide; }
         }
 
-        Badge { label: root.kind; badge-color: Theme.palette.info; }
-        Badge { label: root.status; badge-color: root.running ? Theme.palette.success : Theme.palette.text-muted; }
+        // Each badge sits in a fixed-width cell and is centred by a layout so it
+        // hugs its own text (a bare Badge would fill the cell and let a long
+        // label like "System agent" spill past the pill). The type cell is wide
+        // enough for the longest kind ("System agent").
+        Rectangle {
+            width: 104px;
+            HorizontalLayout {
+                alignment: center;
+                Badge {
+                    label: root.kind;
+                    badge-color: Theme.palette.info;
+                }
+            }
+        }
+        Rectangle {
+            width: 104px;
+            HorizontalLayout {
+                alignment: center;
+                Badge {
+                    label: root.status;
+                    badge-color: root.running ? Theme.palette.success : Theme.palette.text-muted;
+                }
+            }
+        }
 
-        // ACTION column: locked label for protected rows, otherwise a calm grey
-        // Disable button that turns red ("Confirm") once armed.
+        // ACTION column. Protected rows read as locked. Orphaned startup items
+        // get a red two-step "Remove" (delete the leftover plist). Otherwise a
+        // running service shows a two-step "Disable" and a stopped one a calm
+        // single-click "Enable".
         Rectangle {
             width: 100px;
 
@@ -841,6 +934,7 @@ export component ServiceListRow inherits Rectangle {
                     icon-color: Theme.palette.warning;
                     icon-size: Theme.font-size-xs;
                     width: 14px;
+                    y: (parent.height - self.height) / 2;
                 }
                 Text {
                     text: "Protected";
@@ -850,12 +944,50 @@ export component ServiceListRow inherits Rectangle {
                 }
             }
 
-            if !root.protected-service: HorizontalLayout {
+            // Orphaned leftover: destructive Remove (two-step).
+            if !root.protected-service && root.orphaned: HorizontalLayout {
+                alignment: end;
+                Rectangle {
+                    width: 92px;
+                    height: 30px;
+                    y: (parent.height - self.height) / 2;
+                    border-radius: Theme.radius-sm;
+                    background: root.armed-remove
+                        ? Theme.palette.danger
+                        : (rm-ta.has-hover ? Theme.palette.surface-elevated : transparent);
+                    border-width: 1px;
+                    border-color: root.armed-remove ? Theme.palette.danger : Theme.palette.border;
+                    animate background, border-color { duration: Theme.anim-fast; }
+
+                    rm-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            if root.armed-remove {
+                                root.confirm-remove(root.id);
+                            } else {
+                                root.arm-remove(root.id);
+                            }
+                        }
+                    }
+                    Text {
+                        text: root.armed-remove ? "Confirm" : "Remove";
+                        color: root.armed-remove ? #FFFFFF : Theme.palette.text-secondary;
+                        font-size: Theme.font-size-xs;
+                        font-weight: 650;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            // Running service: two-step Disable.
+            if !root.protected-service && !root.orphaned && root.running: HorizontalLayout {
                 alignment: end;
 
                 Rectangle {
                     width: 92px;
                     height: 30px;
+                    y: (parent.height - self.height) / 2;
                     border-radius: Theme.radius-sm;
                     background: root.armed
                         ? Theme.palette.danger
@@ -879,6 +1011,33 @@ export component ServiceListRow inherits Rectangle {
                     Text {
                         text: root.armed ? "Confirm" : "Disable";
                         color: root.armed ? #FFFFFF : Theme.palette.text-secondary;
+                        font-size: Theme.font-size-xs;
+                        font-weight: 650;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            // Stopped/disabled service: single-click Enable.
+            if !root.protected-service && !root.orphaned && !root.running: HorizontalLayout {
+                alignment: end;
+                Rectangle {
+                    width: 92px;
+                    height: 30px;
+                    y: (parent.height - self.height) / 2;
+                    border-radius: Theme.radius-sm;
+                    background: en-ta.has-hover ? Theme.palette.surface-elevated : transparent;
+                    border-width: 1px;
+                    border-color: Theme.palette.border;
+
+                    en-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.enable(root.id); }
+                    }
+                    Text {
+                        text: "Enable";
+                        color: Theme.palette.accent;
                         font-size: Theme.font-size-xs;
                         font-weight: 650;
                         horizontal-alignment: center;

@@ -10,7 +10,7 @@ priority = 50
 
 [match]
 directory_name = ".mypy_cache"
-parent_must_contain = ["pyproject.toml"]
+parent_must_contain_any = ["pyproject.toml", "setup.py", "setup.cfg", "mypy.ini", "requirements.txt"]
 
 [action]
 type = "trash"

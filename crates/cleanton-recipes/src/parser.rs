@@ -33,6 +33,14 @@ pub struct MatchSpec {
     pub file_extension: Option<Vec<String>>,
     pub path_glob: Option<String>,
     pub parent_must_contain: Option<Vec<String>>,
+    /// Any-of variant of `parent_must_contain`: at least one marker must exist
+    /// in the parent directory. Lets one recipe cover ecosystems with several
+    /// equivalent project manifests (e.g. `build.gradle` / `build.gradle.kts`).
+    pub parent_must_contain_any: Option<Vec<String>>,
+    /// Markers that must exist *inside* the matched directory itself (all of
+    /// them). Proves a generically named directory really is the tool's output
+    /// (e.g. a `build` dir containing `CMakeCache.txt`). Directory targets only.
+    pub self_must_contain: Option<Vec<String>>,
     pub min_size_mb: Option<u64>,
     pub min_age_days: Option<u64>,
     #[serde(default)]

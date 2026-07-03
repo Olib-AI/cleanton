@@ -117,9 +117,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     } else {
         let empty_para = Paragraph::new(vec![
             Line::from(""),
-            Line::from(
-                "   Switch to the Dashboard (1) and press [s] to start a scan.",
-            ),
+            Line::from("   Switch to the Dashboard (1) and press [s] to start a scan."),
         ]);
         f.render_widget(empty_para, tree_inner);
     }
@@ -313,7 +311,10 @@ fn render_docker(f: &mut Frame, app: &App, area: Rect) {
 fn docker_line(app: &App, label: &str, bytes: u64, suffix: &str) -> Line<'static> {
     use cleanton_common::display::human_bytes;
     Line::from(vec![
-        Span::styled(format!("  {label:<20}{suffix} "), Style::default().fg(app.theme.fg)),
+        Span::styled(
+            format!("  {label:<20}{suffix} "),
+            Style::default().fg(app.theme.fg),
+        ),
         Span::styled(human_bytes(bytes), Style::default().fg(app.theme.highlight)),
     ])
 }
@@ -341,10 +342,14 @@ fn render_suggestions(f: &mut Frame, app: &App, area: Rect) {
         );
         return;
     };
-    if sugg.duplicates.is_empty() && sugg.large_items.is_empty() {
+    if sugg.duplicates.is_empty()
+        && sugg.large_items.is_empty()
+        && sugg.screenshots.is_empty()
+        && sugg.installers.is_empty()
+    {
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
-                "  No duplicate sets or large items found.",
+                "  No duplicate sets, large items, screenshots, or installers found.",
                 Style::default().fg(app.theme.muted),
             ))),
             inner,
@@ -355,6 +360,35 @@ fn render_suggestions(f: &mut Frame, app: &App, area: Rect) {
     // Budget the visible rows to the panel height so nothing overflows.
     let capacity = inner.height as usize;
     let mut lines: Vec<Line<'static>> = Vec::with_capacity(capacity);
+
+    // Running index over the deletable rows, in the exact order of
+    // `App::deletable_suggestions` (screenshots, installers, large items).
+    // The selected row gets a marker and can be trashed with [t] → [y].
+    let mut deletable_idx = 0usize;
+    let selected = app.suggestion_selected;
+    let armed = app.pending_suggestion_trash.as_deref();
+    let mut selectable_prefix = |path: &std::path::Path| -> (String, Style) {
+        let is_selected = deletable_idx == selected;
+        let is_armed = armed.is_some_and(|armed| armed == path);
+        deletable_idx += 1;
+        if is_armed {
+            (
+                "  ▸ ".to_owned(),
+                Style::default()
+                    .fg(app.theme.danger)
+                    .add_modifier(Modifier::BOLD),
+            )
+        } else if is_selected {
+            (
+                "  ▸ ".to_owned(),
+                Style::default()
+                    .fg(app.theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            )
+        } else {
+            ("    ".to_owned(), Style::default().fg(app.theme.fg))
+        }
+    };
 
     if !sugg.duplicates.is_empty() {
         let sampled = if sugg.truncated { " (sampled)" } else { "" };
@@ -370,11 +404,10 @@ fn render_suggestions(f: &mut Frame, app: &App, area: Rect) {
                 .add_modifier(Modifier::BOLD),
         )));
         for set in sugg.duplicates.iter().take(3) {
-            let name = set
-                .paths
-                .first()
-                .and_then(|p| p.file_name())
-                .map_or_else(|| "duplicate".to_owned(), |n| n.to_string_lossy().into_owned());
+            let name = set.paths.first().and_then(|p| p.file_name()).map_or_else(
+                || "duplicate".to_owned(),
+                |n| n.to_string_lossy().into_owned(),
+            );
             lines.push(Line::from(Span::styled(
                 format!(
                     "    {}× {} ({} each) — save {}",
@@ -388,6 +421,66 @@ fn render_suggestions(f: &mut Frame, app: &App, area: Rect) {
         }
     }
 
+    if !sugg.screenshots.is_empty() {
+        lines.push(Line::from(Span::styled(
+            format!(
+                "  Screenshots & recordings: {} file(s), {}",
+                sugg.screenshots.len(),
+                human_bytes(sugg.screenshot_reclaimable)
+            ),
+            Style::default()
+                .fg(app.theme.highlight)
+                .add_modifier(Modifier::BOLD),
+        )));
+        for item in sugg
+            .screenshots
+            .iter()
+            .take(crate::app::App::SUGGESTIONS_PER_CATEGORY)
+        {
+            let (prefix, style) = selectable_prefix(&item.path);
+            lines.push(Line::from(vec![
+                Span::styled(prefix, style),
+                Span::styled(
+                    format!("{} ", human_bytes(item.bytes)),
+                    Style::default()
+                        .fg(app.theme.accent)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(path_tail(&item.path), style),
+            ]));
+        }
+    }
+
+    if !sugg.installers.is_empty() {
+        lines.push(Line::from(Span::styled(
+            format!(
+                "  Old installers in Downloads: {} file(s), {} (re-downloadable)",
+                sugg.installers.len(),
+                human_bytes(sugg.installer_reclaimable)
+            ),
+            Style::default()
+                .fg(app.theme.highlight)
+                .add_modifier(Modifier::BOLD),
+        )));
+        for item in sugg
+            .installers
+            .iter()
+            .take(crate::app::App::SUGGESTIONS_PER_CATEGORY)
+        {
+            let (prefix, style) = selectable_prefix(&item.path);
+            lines.push(Line::from(vec![
+                Span::styled(prefix, style),
+                Span::styled(
+                    format!("{} ", human_bytes(item.bytes)),
+                    Style::default()
+                        .fg(app.theme.accent)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(path_tail(&item.path), style),
+            ]));
+        }
+    }
+
     if !sugg.large_items.is_empty() {
         lines.push(Line::from(Span::styled(
             "  Largest files & folders:",
@@ -395,27 +488,36 @@ fn render_suggestions(f: &mut Frame, app: &App, area: Rect) {
                 .fg(app.theme.highlight)
                 .add_modifier(Modifier::BOLD),
         )));
-        let remaining = capacity.saturating_sub(lines.len());
-        for item in sugg.large_items.iter().take(remaining.max(1)) {
+        for item in sugg
+            .large_items
+            .iter()
+            .take(crate::app::App::SUGGESTIONS_PER_CATEGORY)
+        {
             let kind = if item.is_dir { " (folder)" } else { "" };
             let tag = if item.redownloadable {
                 " · re-clonable"
             } else {
                 ""
             };
+            let (prefix, style) = selectable_prefix(&item.path);
             lines.push(Line::from(vec![
+                Span::styled(prefix, style),
                 Span::styled(
-                    format!("    {} ", human_bytes(item.bytes)),
+                    format!("{} ", human_bytes(item.bytes)),
                     Style::default()
                         .fg(app.theme.accent)
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(
-                    format!("{}{}{}", path_tail(&item.path), kind, tag),
-                    Style::default().fg(app.theme.fg),
-                ),
+                Span::styled(format!("{}{}{}", path_tail(&item.path), kind, tag), style),
             ]));
         }
+    }
+
+    if lines.len() < capacity {
+        lines.push(Line::from(Span::styled(
+            "  [ / ] select · [t] Trash selected · duplicates are reveal-only",
+            Style::default().fg(app.theme.muted),
+        )));
     }
 
     f.render_widget(Paragraph::new(lines), inner);

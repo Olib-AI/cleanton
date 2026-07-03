@@ -1,0 +1,21 @@
+[recipe]
+id = "elixir-build-dirs"
+name = "Elixir Build Outputs"
+description = "_build outputs of Mix projects (rebuilt by the next mix compile)"
+category = "elixir"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+directory_name = "_build"
+parent_must_contain = ["mix.exs"]
+
+[action]
+type = "trash"
+prompt = "Move {size} of Elixir build outputs to Trash?"
+group = true
+
+[test]
+should_match = ["projects/phoenix-app/_build"]
+should_not_match = ["loose/_build", "projects/phoenix-app/lib"]

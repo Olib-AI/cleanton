@@ -3,7 +3,9 @@ use crate::capacity::{self, CapacityView};
 use crate::theme::{DARK_THEME, Theme};
 use crate::widgets::FileTreeState;
 use cleanton_common::{CleantonConfig, CleanupPlan, ExecutionResult, ScanResult};
-use cleanton_engine::{AnnotatedAction, DockerAnalysis, Orchestrator, Suggestions};
+use cleanton_engine::{
+    AnnotatedAction, DockerAnalysis, InstalledApp, Orchestrator, Suggestions, UninstallPlan,
+};
 use cleanton_packages::{Inventory, ManagerKind, RemovalPlan};
 use cleanton_services::Service;
 use std::collections::HashSet;
@@ -28,6 +30,7 @@ pub enum ActiveScreen {
     Results,
     Packages,
     Services,
+    Applications,
     Settings,
     Execution,
 }
@@ -120,10 +123,53 @@ pub struct App {
 
     // Services state
     pub services: Vec<Service>,
+    /// Index into [`Self::visible_service_indices`] (the filtered list), not
+    /// into `services` directly.
     pub selected_service_idx: usize,
     pub service_logs: Vec<String>,
     pub is_loading_services: bool,
     pub pending_service_confirmation: Option<PendingServiceConfirmation>,
+    /// Hide system-protected (read-only) services from the list.
+    pub service_hide_protected: bool,
+    /// Show only startup items (services with `RunAtLoad`).
+    pub service_startup_only: bool,
+
+    // Suggestions interaction state (Results screen): which deletable
+    // suggestion row is selected, and the path armed for a two-step trash.
+    pub suggestion_selected: usize,
+    pub pending_suggestion_trash: Option<std::path::PathBuf>,
+
+    // Applications screen state (mirrors the Slint app's Applications tab).
+    pub installed_apps: Vec<InstalledApp>,
+    pub apps_loading: bool,
+    /// Hide protected (Apple/system) applications from the list.
+    pub apps_hide_system: bool,
+    /// Whether the inventory has been loaded at least once, so entering the
+    /// Applications screen auto-loads exactly once (via any navigation path)
+    /// without re-triggering if the load legitimately returns nothing.
+    pub apps_load_attempted: bool,
+    /// Installed Homebrew cask tokens (`brew list --cask`), used to detect
+    /// apps installed via Homebrew so uninstall also runs `brew uninstall`.
+    pub apps_cask_tokens: Vec<String>,
+    /// App-bundle paths the TUI itself just trashed, so the background removal
+    /// watcher does not deep-link a removal Cleanton performed.
+    pub uninstalled_by_us: Arc<std::sync::Mutex<HashSet<std::path::PathBuf>>>,
+    /// Index into [`Self::visible_app_indices`] (the filtered list).
+    pub selected_app_idx: usize,
+    /// The reviewable uninstall plan for the loaded app (Enter loads it).
+    pub app_uninstall_plan: Option<UninstallPlan>,
+    /// Bundle path of the app whose leftovers are being loaded, so a background
+    /// scan result can be matched to the current target even when the app is no
+    /// longer in the inventory (external removal deep-link).
+    pub leftover_target_path: Option<std::path::PathBuf>,
+    pub leftover_loading: bool,
+    /// Cursor within the loaded plan's items.
+    pub leftover_selected: usize,
+    /// Item indices the user deselected (admin items are implicitly excluded).
+    pub leftover_excluded: HashSet<usize>,
+    /// Two-step confirm armed for the loaded plan.
+    pub pending_uninstall: bool,
+    pub uninstalling: bool,
 
     // Execution state
     pub execution_progress: f32,
@@ -188,6 +234,24 @@ impl App {
             service_logs: Vec::new(),
             is_loading_services: false,
             pending_service_confirmation: None,
+            service_hide_protected: false,
+            service_startup_only: false,
+            suggestion_selected: 0,
+            pending_suggestion_trash: None,
+            installed_apps: Vec::new(),
+            apps_loading: false,
+            apps_hide_system: false,
+            apps_load_attempted: false,
+            apps_cask_tokens: Vec::new(),
+            uninstalled_by_us: Arc::new(std::sync::Mutex::new(HashSet::new())),
+            selected_app_idx: 0,
+            app_uninstall_plan: None,
+            leftover_target_path: None,
+            leftover_loading: false,
+            leftover_selected: 0,
+            leftover_excluded: HashSet::new(),
+            pending_uninstall: false,
+            uninstalling: false,
             execution_progress: 0.0,
             execution_logs: Vec::new(),
             execution_result: None,
@@ -217,7 +281,8 @@ impl App {
             ActiveScreen::Dashboard => ActiveScreen::Results,
             ActiveScreen::Results => ActiveScreen::Packages,
             ActiveScreen::Packages => ActiveScreen::Services,
-            ActiveScreen::Services => ActiveScreen::Settings,
+            ActiveScreen::Services => ActiveScreen::Applications,
+            ActiveScreen::Applications => ActiveScreen::Settings,
             ActiveScreen::Settings => {
                 if self.is_executing || self.execution_result.is_some() {
                     ActiveScreen::Execution
@@ -235,8 +300,9 @@ impl App {
             2 => ActiveScreen::Results,
             3 => ActiveScreen::Packages,
             4 => ActiveScreen::Services,
-            5 => ActiveScreen::Settings,
-            6 => ActiveScreen::Execution,
+            5 => ActiveScreen::Applications,
+            6 => ActiveScreen::Settings,
+            7 => ActiveScreen::Execution,
             _ => self.active_screen,
         };
     }
@@ -248,6 +314,61 @@ impl App {
             .get(self.package_manager_idx)
             .copied()
             .unwrap_or(ManagerKind::Homebrew)
+    }
+
+    /// Indices into [`Self::installed_apps`] shown after the hide-system
+    /// filter, mirroring the Slint app's "Hide system apps" toggle.
+    #[must_use]
+    pub fn visible_app_indices(&self) -> Vec<usize> {
+        self.installed_apps
+            .iter()
+            .enumerate()
+            .filter(|(_, app)| !self.apps_hide_system || !app.protected)
+            .map(|(idx, _)| idx)
+            .collect()
+    }
+
+    /// Indices into [`Self::services`] that pass the active filters
+    /// (hide-protected, startup-only), mirroring the Slint app's filter bar.
+    #[must_use]
+    pub fn visible_service_indices(&self) -> Vec<usize> {
+        self.services
+            .iter()
+            .enumerate()
+            .filter(|(_, svc)| {
+                if self.service_hide_protected
+                    && cleanton_services::is_protected(&svc.id, &svc.plist_path)
+                {
+                    return false;
+                }
+                if self.service_startup_only && !svc.run_at_load {
+                    return false;
+                }
+                true
+            })
+            .map(|(idx, _)| idx)
+            .collect()
+    }
+
+    /// How many deletable suggestion rows the Results screen exposes per
+    /// category. Keeps rendering and key-handling agreed on the same list.
+    pub const SUGGESTIONS_PER_CATEGORY: usize = 3;
+
+    /// The deletable suggestion rows shown on the Results screen, flattened in
+    /// display order: screenshots, installers, then large items, each capped at
+    /// [`Self::SUGGESTIONS_PER_CATEGORY`]. Duplicate sets are reveal-only and
+    /// excluded. Order MUST match `screens::results::render_suggestions`.
+    #[must_use]
+    pub fn deletable_suggestions(&self) -> Vec<&cleanton_engine::LargeItem> {
+        let Some(sugg) = self.suggestions.as_ref() else {
+            return Vec::new();
+        };
+        sugg.screenshots
+            .iter()
+            .take(Self::SUGGESTIONS_PER_CATEGORY)
+            .chain(sugg.installers.iter().take(Self::SUGGESTIONS_PER_CATEGORY))
+            .chain(sugg.large_items.iter().take(Self::SUGGESTIONS_PER_CATEGORY))
+            .collect()
     }
 }
 

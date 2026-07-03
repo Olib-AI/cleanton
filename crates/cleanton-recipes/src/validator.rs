@@ -60,16 +60,38 @@ fn validate_matcher(path: &Path, matcher: &MatchSpec) -> Result<()> {
     validate_file_name(path, matcher)?;
     validate_file_extensions(path, matcher.file_extension.as_deref())?;
     validate_path_glob_safety(path, matcher.path_glob.as_deref())?;
-    validate_parent_markers(path, matcher.parent_must_contain.as_deref())?;
+    validate_markers(
+        path,
+        "parent_must_contain",
+        matcher.parent_must_contain.as_deref(),
+    )?;
+    validate_markers(
+        path,
+        "parent_must_contain_any",
+        matcher.parent_must_contain_any.as_deref(),
+    )?;
+    validate_markers(
+        path,
+        "self_must_contain",
+        matcher.self_must_contain.as_deref(),
+    )?;
     validate_numeric_guards(path, matcher)?;
+
+    if matcher.self_must_contain.is_some() && matcher.directory_name.is_none() {
+        return Err(recipe_error(
+            path,
+            "self_must_contain requires directory_name (it proves a directory target)",
+        ));
+    }
 
     if matcher.directory_name.is_some()
         && matcher.path_glob.is_none()
         && !has_parent_markers(matcher)
+        && !has_self_markers(matcher)
     {
         return Err(recipe_error(
             path,
-            "directory_name matchers require path_glob or parent_must_contain context",
+            "directory_name matchers require path_glob, parent_must_contain, parent_must_contain_any, or self_must_contain context",
         ));
     }
 
@@ -181,6 +203,17 @@ fn has_parent_markers(matcher: &MatchSpec) -> bool {
         .parent_must_contain
         .as_ref()
         .is_some_and(|items| !items.is_empty())
+        || matcher
+            .parent_must_contain_any
+            .as_ref()
+            .is_some_and(|items| !items.is_empty())
+}
+
+fn has_self_markers(matcher: &MatchSpec) -> bool {
+    matcher
+        .self_must_contain
+        .as_ref()
+        .is_some_and(|items| !items.is_empty())
 }
 
 fn validate_path_glob_safety(path: &Path, path_glob: Option<&str>) -> Result<()> {
@@ -212,13 +245,13 @@ fn validate_path_glob_safety(path: &Path, path_glob: Option<&str>) -> Result<()>
     Ok(())
 }
 
-fn validate_parent_markers(path: &Path, markers: Option<&[String]>) -> Result<()> {
+fn validate_markers(path: &Path, field: &str, markers: Option<&[String]>) -> Result<()> {
     let Some(markers) = markers else {
         return Ok(());
     };
 
     if markers.is_empty() {
-        return Err(recipe_error(path, "parent_must_contain must not be empty"));
+        return Err(recipe_error(path, format!("{field} must not be empty")));
     }
 
     for marker in markers {
@@ -231,7 +264,7 @@ fn validate_parent_markers(path: &Path, markers: Option<&[String]>) -> Result<()
         {
             return Err(recipe_error(
                 path,
-                format!("invalid parent_must_contain marker: {marker:?}"),
+                format!("invalid {field} marker: {marker:?}"),
             ));
         }
     }
@@ -430,7 +463,7 @@ mod tests {
     fn builtin_recipe_self_tests_are_valid() {
         let recipes = RecipeSet::load_builtin().expect("built-in recipes should validate");
 
-        assert_eq!(recipes.len(), 70);
+        assert_eq!(recipes.len(), 113);
     }
 
     #[test]
@@ -539,6 +572,55 @@ mod tests {
         });
 
         assert_recipe_error_contains(&recipe, "invalid parent_must_contain");
+    }
+
+    #[test]
+    fn rejects_invalid_any_of_parent_marker() {
+        let recipe = test_recipe(MatchSpec {
+            directory_name: Some("build".to_owned()),
+            parent_must_contain_any: Some(vec!["/abs/build.gradle".to_owned()]),
+            ..MatchSpec::default()
+        });
+
+        assert_recipe_error_contains(&recipe, "invalid parent_must_contain_any");
+    }
+
+    #[test]
+    fn any_of_parent_markers_count_as_directory_context() {
+        let recipe = test_recipe(MatchSpec {
+            directory_name: Some("build".to_owned()),
+            parent_must_contain_any: Some(vec![
+                "build.gradle".to_owned(),
+                "build.gradle.kts".to_owned(),
+            ]),
+            ..MatchSpec::default()
+        })
+        .with_tests(["projects/app/build"], ["loose/build"]);
+
+        validate_recipe(Path::new("test.toml"), &recipe).expect("any-of context is valid");
+    }
+
+    #[test]
+    fn rejects_self_must_contain_without_directory_name() {
+        let recipe = test_recipe(MatchSpec {
+            path_glob: Some("**/build/**".to_owned()),
+            self_must_contain: Some(vec!["CMakeCache.txt".to_owned()]),
+            ..MatchSpec::default()
+        });
+
+        assert_recipe_error_contains(&recipe, "self_must_contain requires directory_name");
+    }
+
+    #[test]
+    fn self_markers_count_as_directory_context() {
+        let recipe = test_recipe(MatchSpec {
+            directory_name: Some("build".to_owned()),
+            self_must_contain: Some(vec!["CMakeCache.txt".to_owned()]),
+            ..MatchSpec::default()
+        })
+        .with_tests(["projects/native/build"], ["loose/build"]);
+
+        validate_recipe(Path::new("test.toml"), &recipe).expect("self-marker context is valid");
     }
 
     #[test]

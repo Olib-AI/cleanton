@@ -61,6 +61,27 @@ impl Orchestrator {
         options: ScanOptions,
         event_tx: mpsc::Sender<EngineEvent>,
     ) -> Result<ScanResult> {
+        self.scan_only_inner(options, event_tx, None).await
+    }
+
+    /// Like [`scan_only`](Self::scan_only), but the walk stops promptly once
+    /// `cancel` is set. A cancelled scan comes back `incomplete`, which the
+    /// executor refuses to act on.
+    pub async fn scan_only_with_cancel(
+        &self,
+        options: ScanOptions,
+        event_tx: mpsc::Sender<EngineEvent>,
+        cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) -> Result<ScanResult> {
+        self.scan_only_inner(options, event_tx, Some(cancel)).await
+    }
+
+    async fn scan_only_inner(
+        &self,
+        options: ScanOptions,
+        event_tx: mpsc::Sender<EngineEvent>,
+        cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    ) -> Result<ScanResult> {
         for root in &options.roots {
             let _ = event_tx.try_send(EngineEvent::ScanStarted { root: root.clone() });
         }
@@ -77,7 +98,12 @@ impl Orchestrator {
             }
         });
 
-        let scan = cleanton_scanner::scan(options, progress_tx).await?;
+        let scan = match cancel {
+            Some(cancel) => {
+                cleanton_scanner::scan_with_cancel(options, progress_tx, cancel).await?
+            }
+            None => cleanton_scanner::scan(options, progress_tx).await?,
+        };
         progress_task.abort();
 
         let _ = event_tx.try_send(EngineEvent::ScanCompleted {
@@ -143,6 +169,42 @@ impl Orchestrator {
         event_tx: &mpsc::Sender<EngineEvent>,
     ) -> Result<ExecutionResult> {
         execute_plan(&self.config, plan, event_tx)
+    }
+
+    /// Like [`execute_plan`](Self::execute_plan), but honours a cancellation
+    /// flag: once set, the current action finishes, the rest are recorded as
+    /// skipped, and the partial (logged) result is returned.
+    pub fn execute_plan_with_cancel(
+        &self,
+        plan: &CleanupPlan,
+        event_tx: &mpsc::Sender<EngineEvent>,
+        cancel: &std::sync::atomic::AtomicBool,
+    ) -> Result<ExecutionResult> {
+        crate::executor::execute_plan_with_cancel(&self.config, plan, event_tx, Some(cancel))
+    }
+
+    /// Move a single user-confirmed suggestion path (duplicate copy, large item,
+    /// or screenshot) to the Trash, reusing the executor's safety guards. See
+    /// [`crate::executor::trash_reviewed_path`].
+    pub fn trash_suggestion(
+        &self,
+        path: &std::path::Path,
+        event_tx: &mpsc::Sender<EngineEvent>,
+    ) -> Result<ExecutionResult> {
+        crate::executor::trash_reviewed_path(&self.config, path, event_tx)
+    }
+
+    /// Move the user-confirmed items of an application uninstall to the Trash.
+    /// Every path is re-validated against the executor's uninstall allow-list
+    /// (app bundle + user-Library leftover scopes); out-of-scope items are
+    /// skipped, and the whole run lands in one execution log. See
+    /// [`crate::executor::trash_uninstall_paths`].
+    pub fn uninstall_app_items(
+        &self,
+        paths: &[std::path::PathBuf],
+        event_tx: &mpsc::Sender<EngineEvent>,
+    ) -> Result<ExecutionResult> {
+        crate::executor::trash_uninstall_paths(&self.config, paths, event_tx)
     }
 }
 

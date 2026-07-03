@@ -1,0 +1,25 @@
+[recipe]
+id = "dart-pub-cache"
+name = "Dart Pub Cache"
+# pub credentials moved to ~/Library/Application Support/dart; a legacy
+# credentials.json inside the cache is refused by the sensitive-basename
+# floor regardless.
+description = "Dart/Flutter pub package cache (restored by dart pub get / flutter pub get)"
+category = "dart"
+safety_level = "cautious"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/.pub-cache/**"
+min_age_days = 60
+min_size_mb = 50
+
+[action]
+type = "trash"
+prompt = "Move {size} of pub cache to Trash?"
+group = true
+
+[test]
+should_match = ["~/.pub-cache/hosted/pub.dev/http-1.2.0/lib/http.dart-payload"]
+should_not_match = ["~/Library/Application Support/dart/pub-credentials.json"]

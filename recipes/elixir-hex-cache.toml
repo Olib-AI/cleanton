@@ -1,0 +1,23 @@
+[recipe]
+id = "elixir-hex-cache"
+name = "Hex Package Cache"
+# Only packages/; ~/.hex/hex.config (which can hold an API key) is outside
+# the glob and never matched.
+description = "Elixir Hex package tarball cache (re-fetched by mix deps.get)"
+category = "elixir"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/.hex/packages/**"
+min_age_days = 30
+
+[action]
+type = "trash"
+prompt = "Move {size} of Hex package cache to Trash?"
+group = true
+
+[test]
+should_match = ["~/.hex/packages/hexpm/phoenix-1.7.14.tar"]
+should_not_match = ["~/.hex/hex.config"]

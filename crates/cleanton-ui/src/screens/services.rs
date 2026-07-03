@@ -19,16 +19,29 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
         .constraints([Constraint::Min(5), Constraint::Length(6)])
         .split(chunks[0]);
 
-    // 1. Left side: Services List
-    let list_title = if app.is_loading_services {
-        "Discovered Background Services (Loading...)"
+    // 1. Left side: Services List (filtered like the Slint app's filter bar)
+    let visible = app.visible_service_indices();
+    let mut filters = Vec::new();
+    if app.service_startup_only {
+        filters.push("startup only");
+    }
+    if app.service_hide_protected {
+        filters.push("protected hidden");
+    }
+    let filter_suffix = if filters.is_empty() {
+        String::new()
     } else {
-        "Discovered Background Services"
+        format!(" [{}]", filters.join(", "))
+    };
+    let list_title = if app.is_loading_services {
+        format!("Discovered Background Services (Loading...){filter_suffix}")
+    } else {
+        format!("Discovered Background Services{filter_suffix}")
     };
 
-    let items: Vec<ListItem> = app
-        .services
+    let items: Vec<ListItem> = visible
         .iter()
+        .filter_map(|&svc_idx| app.services.get(svc_idx))
         .enumerate()
         .map(|(idx, svc)| {
             let is_selected = idx == app.selected_service_idx;
@@ -125,7 +138,10 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
         .split(chunks[1]);
 
     // Detail Pane
-    let detail_para = if let Some(svc) = app.services.get(app.selected_service_idx) {
+    let detail_para = if let Some(svc) = visible
+        .get(app.selected_service_idx)
+        .and_then(|&svc_idx| app.services.get(svc_idx))
+    {
         let svc_type = match svc.service_type {
             ServiceType::UserLaunchAgent => "User LaunchAgent (~/Library/LaunchAgents)",
             ServiceType::SystemLaunchAgent => "System LaunchAgent (/Library/LaunchAgents)",
@@ -238,6 +254,34 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled("Reload Service list", Style::default().fg(app.theme.fg)),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                "  [o]  ",
+                Style::default()
+                    .fg(app.theme.highlight)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("Startup items only ", Style::default().fg(app.theme.fg)),
+            Span::styled(
+                "  [p]  ",
+                Style::default()
+                    .fg(app.theme.highlight)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("Hide protected", Style::default().fg(app.theme.fg)),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                "  [Del]",
+                Style::default()
+                    .fg(app.theme.danger)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                " Remove orphaned plist (Trash)",
+                Style::default().fg(app.theme.fg),
+            ),
         ]),
     ];
 

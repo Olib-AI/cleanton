@@ -1,0 +1,21 @@
+[recipe]
+id = "apps-ios-device-updates"
+name = "iOS Update Installers"
+description = "Downloaded iPhone/iPad software update installers (re-downloaded if needed)"
+category = "apps"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/Library/iTunes/*Software Updates/**"
+min_size_mb = 100
+
+[action]
+type = "trash"
+prompt = "Move {size} of iOS update installers to Trash?"
+group = true
+
+[test]
+should_match = ["~/Library/iTunes/iPhone Software Updates/iPhone16,1_18.5_Restore.ipsw"]
+should_not_match = ["~/Library/iTunes/iTunes Media/track.m4a"]

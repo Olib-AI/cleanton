@@ -1,0 +1,22 @@
+[recipe]
+id = "dotnet-nuget-cache"
+name = "NuGet Package Cache"
+description = ".NET NuGet global package cache (restored by dotnet restore)"
+category = "dotnet"
+safety_level = "cautious"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/.nuget/packages/**"
+min_age_days = 60
+min_size_mb = 50
+
+[action]
+type = "trash"
+prompt = "Move {size} of NuGet packages to Trash?"
+group = true
+
+[test]
+should_match = ["~/.nuget/packages/newtonsoft.json/13.0.3/lib/net8.0/Newtonsoft.Json.dll"]
+should_not_match = ["~/.nuget/NuGet/NuGet.Config"]

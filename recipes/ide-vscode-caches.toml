@@ -1,0 +1,23 @@
+[recipe]
+id = "ide-vscode-caches"
+name = "VS Code Caches"
+# Matches only the *Cache* subtrees. User/ (settings, keybindings, snippets)
+# and globalStorage (auth/session state) never match.
+description = "VS Code Cache, CachedData, Code Cache and GPUCache (regenerated on next launch)"
+category = "ide"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/Library/Application Support/Code/*Cache*/**"
+min_age_days = 7
+
+[action]
+type = "trash"
+prompt = "Move {size} of VS Code caches to Trash?"
+group = true
+
+[test]
+should_match = ["~/Library/Application Support/Code/CachedData/abc/extension.js", "~/Library/Application Support/Code/Code Cache/js/index_0"]
+should_not_match = ["~/Library/Application Support/Code/User/keybindings.json"]

@@ -1,0 +1,23 @@
+[recipe]
+id = "android-studio-caches"
+name = "Android Studio Caches"
+# Only ~/Library/Caches; settings, keymaps, and AVDs live elsewhere and are
+# never matched.
+description = "Android Studio per-version system caches (rebuilt by the IDE on next launch)"
+category = "android"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/Library/Caches/Google/AndroidStudio*/**"
+min_age_days = 14
+
+[action]
+type = "trash"
+prompt = "Move {size} of Android Studio caches to Trash?"
+group = true
+
+[test]
+should_match = ["~/Library/Caches/Google/AndroidStudio2025.1/caches/content.dat.storageData"]
+should_not_match = ["~/Library/Application Support/Google/AndroidStudio2025.1/options/ide.general.xml"]

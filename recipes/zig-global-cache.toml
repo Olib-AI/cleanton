@@ -1,0 +1,21 @@
+[recipe]
+id = "zig-global-cache"
+name = "Zig Global Cache"
+description = "Zig global package and build cache (re-fetched/rebuilt on demand)"
+category = "zig"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/.cache/zig/**"
+min_age_days = 30
+
+[action]
+type = "trash"
+prompt = "Move {size} of Zig global cache to Trash?"
+group = true
+
+[test]
+should_match = ["~/.cache/zig/p/1220abcdef/src/main.zig-payload"]
+should_not_match = ["~/.cache/other"]

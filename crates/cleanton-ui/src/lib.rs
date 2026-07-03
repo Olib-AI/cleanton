@@ -90,9 +90,7 @@ pub enum PackageUpdate {
         usage: HashMap<String, Vec<PathBuf>>,
     },
     /// A mutating action (uninstall / update / clean cache) finished.
-    ActionFinished {
-        outcome: Box<ActionOutcome>,
-    },
+    ActionFinished { outcome: Box<ActionOutcome> },
 }
 
 /// A mutating package action dispatched to a background task. Mirrors the app's
@@ -126,6 +124,30 @@ pub enum TuiEvent {
     },
     TrashEmptied {
         result: Result<(), String>,
+    },
+    /// Result of a single user-confirmed suggestion trash (Results screen).
+    SuggestionTrashed {
+        path: std::path::PathBuf,
+        result: Result<(), String>,
+    },
+    /// Installed-application inventory finished loading (Applications screen).
+    AppsLoaded {
+        apps: Vec<cleanton_engine::InstalledApp>,
+        cask_tokens: Vec<String>,
+    },
+    /// An application was removed outside Cleanton (dragged to Trash, etc.);
+    /// deep-link to the Applications screen and load its leftovers.
+    AppRemovedExternally(cleanton_engine::InstalledApp),
+    /// Leftover discovery finished for one app. `None` when the app is a
+    /// protected system application (nothing reviewable).
+    AppLeftoversLoaded {
+        app_path: std::path::PathBuf,
+        plan: Option<Box<cleanton_engine::UninstallPlan>>,
+    },
+    /// A user-confirmed application uninstall finished.
+    AppUninstallFinished {
+        app_name: String,
+        result: Result<ExecutionResult, cleanton_common::CleantonError>,
     },
 }
 
@@ -255,6 +277,36 @@ async fn run_tui_async<B: ratatui::backend::Backend>(
         }
     });
 
+    // Watch for apps removed outside Cleanton (Finder drag-to-Trash, another
+    // uninstaller). On detection we deep-link to the Applications screen and
+    // load the removed app's leftovers. A light readdir-diff poll, on a
+    // dedicated blocking thread; removals Cleanton performed itself are
+    // suppressed via the shared `uninstalled_by_us` set.
+    let removal_tx = tui_tx.clone();
+    let removal_suppress = app.uninstalled_by_us.clone();
+    std::thread::spawn(move || {
+        let mut watcher = cleanton_engine::AppRemovalWatcher::new();
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(4));
+            let removed = watcher.poll();
+            for removed_app in removed {
+                let self_initiated = removal_suppress
+                    .lock()
+                    .map(|mut set| set.remove(&removed_app.path))
+                    .unwrap_or(false);
+                if self_initiated || removed_app.protected {
+                    continue;
+                }
+                if removal_tx
+                    .blocking_send(TuiEvent::AppRemovedExternally(removed_app))
+                    .is_err()
+                {
+                    return; // receiver gone: stop watching.
+                }
+            }
+        }
+    });
+
     // Read real disk capacity + usage history once at startup (no mock data).
     app.refresh_capacity();
 
@@ -308,6 +360,9 @@ async fn run_tui_async<B: ratatui::backend::Backend>(
                         ActiveScreen::Services => {
                             screens::services::render(f, &app, main_layout[1])
                         }
+                        ActiveScreen::Applications => {
+                            screens::applications::render(f, &app, main_layout[1])
+                        }
                         ActiveScreen::Settings => {
                             screens::settings::render(f, &app, main_layout[1])
                         }
@@ -332,6 +387,15 @@ async fn run_tui_async<B: ratatui::backend::Backend>(
             match event {
                 TuiEvent::Crossterm(Event::Key(key)) => {
                     handle_key_event(key, &mut app, &tui_tx, &service_tx, &mut should_quit).await;
+                    // Auto-load the app inventory the first time the user lands
+                    // on the Applications screen, however they navigated there
+                    // (number key, Tab cycle, or deep-link).
+                    if app.active_screen == ActiveScreen::Applications
+                        && !app.apps_load_attempted
+                        && !app.apps_loading
+                    {
+                        load_installed_apps(&mut app, &tui_tx);
+                    }
                 }
                 TuiEvent::Crossterm(Event::Resize(_, _)) => {
                     // ratatui handles resizes automatically, we just redraw on the next loop
@@ -380,6 +444,12 @@ async fn run_tui_async<B: ratatui::backend::Backend>(
                         app.services = services;
                         app.is_loading_services = false;
                         app.pending_service_confirmation = None;
+                        // Keep the selection inside the (filtered) list after a
+                        // reload shrinks it.
+                        let visible = app.visible_service_indices().len();
+                        if app.selected_service_idx >= visible {
+                            app.selected_service_idx = visible.saturating_sub(1);
+                        }
                     }
                     ServiceUpdate::StatusMessage(msg) => {
                         app.service_logs.push(msg.clone());
@@ -393,9 +463,14 @@ async fn run_tui_async<B: ratatui::backend::Backend>(
                     operation_id,
                     result,
                 } => {
-                    if !is_current_operation(&app, operation_id) {
+                    // A different id means a newer operation superseded this one:
+                    // drop it. A matching id is applied even after cancellation —
+                    // execution now genuinely stops on cancel, and the partial
+                    // result records which items were already moved to Trash.
+                    if app.operation_id != operation_id {
                         continue;
                     }
+                    let was_cancelled = app.operation_cancelled.load(Ordering::Relaxed);
                     finish_operation(&mut app, operation_id);
                     app.is_executing = false;
                     match result {
@@ -408,12 +483,54 @@ async fn run_tui_async<B: ratatui::backend::Backend>(
                                     a.status == cleanton_common::ExecutionStatus::MovedToTrash
                                 })
                                 .count();
+
+                            // Drop the just-cleaned entries from the plan so the
+                            // Results tree no longer lists them; skipped/failed
+                            // items remain for another attempt.
+                            let removed: std::collections::HashSet<std::path::PathBuf> = exec_res
+                                .actions
+                                .iter()
+                                .filter(|a| {
+                                    matches!(
+                                        a.status,
+                                        cleanton_common::ExecutionStatus::MovedToTrash
+                                            | cleanton_common::ExecutionStatus::Deleted
+                                    )
+                                })
+                                .map(|a| a.target.clone())
+                                .collect();
+                            if !removed.is_empty() {
+                                let mut now_empty = false;
+                                if let Some(plan) = app.cleanup_plan.as_mut() {
+                                    plan.actions.retain(|a| !removed.contains(&a.target));
+                                    plan.total_reclaimable = plan
+                                        .actions
+                                        .iter()
+                                        .map(|a| a.reclaimable_bytes)
+                                        .fold(0u64, u64::saturating_add);
+                                    now_empty = plan.actions.is_empty();
+                                }
+                                if now_empty {
+                                    app.cleanup_plan = None;
+                                    app.file_tree_state = None;
+                                } else if let Some(plan) = app.cleanup_plan.as_ref() {
+                                    app.file_tree_state =
+                                        Some(FileTreeState::new(plan, &app.plan_annotations));
+                                }
+                            }
+
                             app.execution_result = Some(exec_res);
                             app.execution_progress = 1.0;
                             // Refresh capacity so the dashboard reflects any bytes
                             // actually freed (deletes), and records a usage sample.
                             app.refresh_capacity();
-                            if moved > 0 {
+                            if was_cancelled {
+                                app.set_status(&format!(
+                                    "Cleanup cancelled — {} item(s) ({}) were already moved to Trash before stopping.",
+                                    moved_actions,
+                                    cleanton_common::display::human_bytes(moved)
+                                ));
+                            } else if moved > 0 {
                                 app.set_status(&format!(
                                     "Moved {} items to Trash ({}) — press E to Empty Trash and reclaim.",
                                     moved_actions,
@@ -442,6 +559,103 @@ async fn run_tui_async<B: ratatui::backend::Backend>(
                         }
                     }
                 }
+                TuiEvent::SuggestionTrashed { path, result } => match result {
+                    Ok(()) => {
+                        remove_suggestion_item(&mut app, &path);
+                        app.set_status(&format!("Moved {} to Trash.", path.display()));
+                    }
+                    Err(err) => {
+                        app.set_status(&format!("Could not trash {}: {err}", path.display()));
+                    }
+                },
+                TuiEvent::AppsLoaded { apps, cask_tokens } => {
+                    app.apps_loading = false;
+                    app.installed_apps = apps;
+                    app.apps_cask_tokens = cask_tokens;
+                    let visible = app.visible_app_indices().len();
+                    if app.selected_app_idx >= visible {
+                        app.selected_app_idx = visible.saturating_sub(1);
+                    }
+                    app.app_uninstall_plan = None;
+                    app.leftover_excluded.clear();
+                    app.leftover_selected = 0;
+                    app.set_status(&format!(
+                        "{} applications found. Press Enter to review one.",
+                        app.installed_apps.len()
+                    ));
+                }
+                TuiEvent::AppLeftoversLoaded { app_path, plan } => {
+                    app.leftover_loading = false;
+                    // Ignore stale results if the target changed (matched by the
+                    // path we recorded when the scan started, so it works for an
+                    // externally-removed app not in the inventory).
+                    if app.leftover_target_path.as_deref() != Some(app_path.as_path()) {
+                        continue;
+                    }
+                    match plan {
+                        Some(plan) => {
+                            app.set_status(&format!(
+                                "{}: {} item(s), {} — [ and ] move, Space toggles, u uninstalls.",
+                                plan.app.name,
+                                plan.items.len(),
+                                cleanton_common::display::human_bytes(plan.total_bytes)
+                            ));
+                            app.app_uninstall_plan = Some(*plan);
+                            app.leftover_selected = 0;
+                            app.leftover_excluded.clear();
+                        }
+                        None => {
+                            app.set_status("This application cannot be uninstalled.");
+                        }
+                    }
+                }
+                TuiEvent::AppRemovedExternally(removed_app) => {
+                    // Deep-link to the Applications screen and load the removed
+                    // app's leftovers (its bundle is already gone).
+                    app.set_tab(5);
+                    app.pending_uninstall = false;
+                    app.set_status(&format!(
+                        "\"{}\" was removed — reviewing its leftovers…",
+                        removed_app.name
+                    ));
+                    load_leftovers_for_app(&mut app, removed_app, &tui_tx);
+                    // Refresh the inventory so the removed app drops off the list.
+                    load_installed_apps(&mut app, &tui_tx);
+                }
+                TuiEvent::AppUninstallFinished { app_name, result } => {
+                    app.uninstalling = false;
+                    app.app_uninstall_plan = None;
+                    app.leftover_excluded.clear();
+                    app.leftover_selected = 0;
+                    match result {
+                        Ok(result) => {
+                            let moved = result
+                                .actions
+                                .iter()
+                                .filter(|a| {
+                                    a.status == cleanton_common::ExecutionStatus::MovedToTrash
+                                })
+                                .count();
+                            app.set_status(&format!(
+                                "Moved {moved} item(s) ({}) of {app_name} to the Trash{}.",
+                                cleanton_common::display::human_bytes(result.moved_to_trash_bytes),
+                                if result.skipped_actions > 0 {
+                                    format!("; {} skipped", result.skipped_actions)
+                                } else {
+                                    String::new()
+                                }
+                            ));
+                            // Refresh the inventory (the bundle is gone).
+                            load_installed_apps(&mut app, &tui_tx);
+                            app.refresh_capacity();
+                        }
+                        Err(err) => {
+                            app.set_status(&format!(
+                                "Uninstall of {app_name} refused or failed: {err}"
+                            ));
+                        }
+                    }
+                }
             }
         }
     }
@@ -462,7 +676,10 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
                 .fg(app.theme.success)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("v0.1.0 ", Style::default().fg(app.theme.muted)),
+        Span::styled(
+            concat!("v", env!("CARGO_PKG_VERSION"), " "),
+            Style::default().fg(app.theme.muted),
+        ),
     ]))
     .block(
         Block::default()
@@ -476,8 +693,9 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
         (ActiveScreen::Results, " [2] Results "),
         (ActiveScreen::Packages, " [3] Packages "),
         (ActiveScreen::Services, " [4] Services "),
-        (ActiveScreen::Settings, " [5] Settings "),
-        (ActiveScreen::Execution, " [6] Execution "),
+        (ActiveScreen::Applications, " [5] Apps "),
+        (ActiveScreen::Settings, " [6] Settings "),
+        (ActiveScreen::Execution, " [7] Execution "),
     ];
 
     let mut tab_spans = Vec::new();
@@ -549,10 +767,16 @@ async fn handle_key_event(
         crossterm::event::KeyCode::Char('5') => {
             clear_pending_confirmations(app);
             app.set_tab(5);
+            // The inventory auto-loads on entering the Applications screen (see
+            // the post-key-handling check in the event loop).
         }
         crossterm::event::KeyCode::Char('6') => {
             clear_pending_confirmations(app);
             app.set_tab(6);
+        }
+        crossterm::event::KeyCode::Char('7') => {
+            clear_pending_confirmations(app);
+            app.set_tab(7);
         }
         crossterm::event::KeyCode::Char('y') if app.pending_empty_trash_confirmation => {
             trigger_empty_trash(app, tui_tx);
@@ -626,12 +850,38 @@ async fn handle_key_event(
                 crossterm::event::KeyCode::Char('c') => {
                     arm_cleanup_confirmation(app);
                 }
+                crossterm::event::KeyCode::Char('[') => {
+                    app.pending_suggestion_trash = None;
+                    let count = app.deletable_suggestions().len();
+                    if count > 0 {
+                        app.suggestion_selected =
+                            app.suggestion_selected.checked_sub(1).unwrap_or(count - 1);
+                    }
+                }
+                crossterm::event::KeyCode::Char(']') => {
+                    app.pending_suggestion_trash = None;
+                    let count = app.deletable_suggestions().len();
+                    if count > 0 {
+                        app.suggestion_selected = (app.suggestion_selected + 1) % count;
+                    }
+                }
+                crossterm::event::KeyCode::Char('t') => {
+                    arm_suggestion_trash(app);
+                }
                 crossterm::event::KeyCode::Char('y') => {
-                    trigger_cleanup(app, tui_tx);
+                    if app.pending_suggestion_trash.is_some() {
+                        trigger_suggestion_trash(app, tui_tx);
+                    } else {
+                        trigger_cleanup(app, tui_tx);
+                    }
                 }
                 crossterm::event::KeyCode::Char('n') => {
-                    app.pending_cleanup_confirmation = None;
-                    app.set_status("Cleanup confirmation cancelled.");
+                    if app.pending_suggestion_trash.take().is_some() {
+                        app.set_status("Suggestion trash cancelled.");
+                    } else {
+                        app.pending_cleanup_confirmation = None;
+                        app.set_status("Cleanup confirmation cancelled.");
+                    }
                 }
                 _ => {}
             },
@@ -644,9 +894,29 @@ async fn handle_key_event(
                 }
                 crossterm::event::KeyCode::Down => {
                     clear_pending_confirmations(app);
-                    if app.selected_service_idx + 1 < app.services.len() {
+                    if app.selected_service_idx + 1 < app.visible_service_indices().len() {
                         app.selected_service_idx += 1;
                     }
+                }
+                crossterm::event::KeyCode::Char('p') => {
+                    clear_pending_confirmations(app);
+                    app.service_hide_protected = !app.service_hide_protected;
+                    app.selected_service_idx = 0;
+                    app.set_status(if app.service_hide_protected {
+                        "Hiding system-protected services."
+                    } else {
+                        "Showing all services."
+                    });
+                }
+                crossterm::event::KeyCode::Char('o') => {
+                    clear_pending_confirmations(app);
+                    app.service_startup_only = !app.service_startup_only;
+                    app.selected_service_idx = 0;
+                    app.set_status(if app.service_startup_only {
+                        "Showing startup items (RunAtLoad) only."
+                    } else {
+                        "Showing all services."
+                    });
                 }
                 crossterm::event::KeyCode::Char('s') => {
                     arm_service_confirmation(app, ServiceActionKind::Start);
@@ -676,6 +946,75 @@ async fn handle_key_event(
                 crossterm::event::KeyCode::Char('l') => {
                     clear_pending_confirmations(app);
                     load_services(app, service_tx);
+                }
+                _ => {}
+            },
+            ActiveScreen::Applications => match key.code {
+                crossterm::event::KeyCode::Up => {
+                    app.pending_uninstall = false;
+                    if app.selected_app_idx > 0 {
+                        app.selected_app_idx -= 1;
+                    }
+                }
+                crossterm::event::KeyCode::Down => {
+                    app.pending_uninstall = false;
+                    if app.selected_app_idx + 1 < app.visible_app_indices().len() {
+                        app.selected_app_idx += 1;
+                    }
+                }
+                crossterm::event::KeyCode::Enter => {
+                    app.pending_uninstall = false;
+                    load_app_leftovers(app, tui_tx);
+                }
+                crossterm::event::KeyCode::Char('l') => {
+                    app.pending_uninstall = false;
+                    load_installed_apps(app, tui_tx);
+                }
+                crossterm::event::KeyCode::Char('h') => {
+                    app.pending_uninstall = false;
+                    app.apps_hide_system = !app.apps_hide_system;
+                    app.selected_app_idx = 0;
+                    app.app_uninstall_plan = None;
+                    app.set_status(if app.apps_hide_system {
+                        "Hiding system applications."
+                    } else {
+                        "Showing all applications."
+                    });
+                }
+                crossterm::event::KeyCode::Char('[') => {
+                    app.pending_uninstall = false;
+                    let count = app
+                        .app_uninstall_plan
+                        .as_ref()
+                        .map_or(0, |plan| plan.items.len());
+                    if count > 0 {
+                        app.leftover_selected =
+                            app.leftover_selected.checked_sub(1).unwrap_or(count - 1);
+                    }
+                }
+                crossterm::event::KeyCode::Char(']') => {
+                    app.pending_uninstall = false;
+                    let count = app
+                        .app_uninstall_plan
+                        .as_ref()
+                        .map_or(0, |plan| plan.items.len());
+                    if count > 0 {
+                        app.leftover_selected = (app.leftover_selected + 1) % count;
+                    }
+                }
+                crossterm::event::KeyCode::Char(' ') => {
+                    app.pending_uninstall = false;
+                    toggle_leftover_selected(app);
+                }
+                crossterm::event::KeyCode::Char('u') => {
+                    arm_app_uninstall(app);
+                }
+                crossterm::event::KeyCode::Char('y') => {
+                    trigger_app_uninstall(app, tui_tx);
+                }
+                crossterm::event::KeyCode::Char('n') if app.pending_uninstall => {
+                    app.pending_uninstall = false;
+                    app.set_status("Uninstall cancelled.");
                 }
                 _ => {}
             },
@@ -893,6 +1232,8 @@ fn apply_analyzed_full(app: &mut App, full: AnalyzedFull) {
     app.held_actions = analyzed.held;
     app.docker = Some(docker);
     app.suggestions = Some(suggestions);
+    app.suggestion_selected = 0;
+    app.pending_suggestion_trash = None;
     app.pending_cleanup_confirmation = None;
     app.donut_animation.set_target(1.0);
     app.set_status(&status);
@@ -984,7 +1325,9 @@ fn trigger_scan(app: &mut App, tx: &mpsc::Sender<TuiEvent>) {
             }
         });
 
-        match cleanton_scanner::scan(options, scan_progress_tx).await {
+        match cleanton_scanner::scan_with_cancel(options, scan_progress_tx, cancel_token.clone())
+            .await
+        {
             Ok(scan_res) => {
                 if cancel_token.load(Ordering::Relaxed) {
                     return;
@@ -1045,6 +1388,7 @@ fn clear_pending_confirmations(app: &mut App) {
     app.pending_service_confirmation = None;
     app.pending_empty_trash_confirmation = false;
     app.pending_package_confirmation = None;
+    app.pending_suggestion_trash = None;
 }
 
 fn request_empty_trash_confirmation(app: &mut App) {
@@ -1066,6 +1410,76 @@ fn trigger_empty_trash(app: &mut App, tx: &mpsc::Sender<TuiEvent>) {
             .unwrap_or_else(|join_err| Err(format!("empty-trash task failed: {join_err}")));
         let _ = tx.send(TuiEvent::TrashEmptied { result }).await;
     });
+}
+
+/// Arm the two-step trash for the selected deletable suggestion row. Mirrors
+/// the Slint app's per-row Trash → Confirm flow: nothing is removed until the
+/// user presses `y`, and execution goes through the same executor guards.
+fn arm_suggestion_trash(app: &mut App) {
+    let suggestions = app.deletable_suggestions();
+    let Some(item) = suggestions.get(app.suggestion_selected) else {
+        app.set_status("No deletable suggestion selected. Navigate with [ and ].");
+        return;
+    };
+    let path = item.path.clone();
+    let bytes = item.bytes;
+    app.pending_cleanup_confirmation = None;
+    app.pending_suggestion_trash = Some(path.clone());
+    app.set_status(&format!(
+        "Move {} ({}) to Trash? Press y to confirm, n to cancel.",
+        path.display(),
+        cleanton_common::display::human_bytes(bytes)
+    ));
+}
+
+/// Execute a user-confirmed suggestion trash on a blocking worker. The
+/// engine-side `trash_suggestion` re-checks protected paths and logs the
+/// action exactly like a plan execution.
+fn trigger_suggestion_trash(app: &mut App, tx: &mpsc::Sender<TuiEvent>) {
+    let Some(path) = app.pending_suggestion_trash.take() else {
+        return;
+    };
+    app.set_status(&format!("Moving {} to Trash…", path.display()));
+    let orchestrator = app.orchestrator.clone();
+    let tx = tx.clone();
+    tokio::spawn(async move {
+        let target = path.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            // The engine event stream is unused here: the single-action result
+            // is reported back through `SuggestionTrashed` instead.
+            let (event_tx, _event_rx) = mpsc::channel(8);
+            orchestrator
+                .trash_suggestion(&target, &event_tx)
+                .map(|_| ())
+                .map_err(|err| err.to_string())
+        })
+        .await
+        .unwrap_or_else(|join_err| Err(format!("suggestion-trash task failed: {join_err}")));
+        let _ = tx.send(TuiEvent::SuggestionTrashed { path, result }).await;
+    });
+}
+
+/// Drop a just-trashed suggestion from the in-memory suggestion lists so it
+/// disappears immediately without a rescan (mirrors the Slint app).
+fn remove_suggestion_item(app: &mut App, path: &std::path::Path) {
+    let Some(sugg) = app.suggestions.as_mut() else {
+        return;
+    };
+    sugg.screenshots.retain(|item| item.path != path);
+    sugg.screenshot_reclaimable = sugg
+        .screenshots
+        .iter()
+        .fold(0u64, |acc, item| acc.saturating_add(item.bytes));
+    sugg.installers.retain(|item| item.path != path);
+    sugg.installer_reclaimable = sugg
+        .installers
+        .iter()
+        .fold(0u64, |acc, item| acc.saturating_add(item.bytes));
+    sugg.large_items.retain(|item| item.path != path);
+    let count = app.deletable_suggestions().len();
+    if app.suggestion_selected >= count {
+        app.suggestion_selected = count.saturating_sub(1);
+    }
 }
 
 fn arm_cleanup_confirmation(app: &mut App) {
@@ -1171,15 +1585,243 @@ fn trigger_cleanup(app: &mut App, tx: &mpsc::Sender<TuiEvent>) {
             }
         });
 
-        let res = orchestrator.execute_plan(&filtered_plan, &exec_event_tx);
-        if !cancel_token.load(Ordering::Relaxed) {
-            let _ = tx
-                .send(TuiEvent::ExecutionFinished {
-                    operation_id,
-                    result: res,
-                })
+        // Run the blocking executor on a blocking worker (it performs thousands
+        // of filesystem operations) and honour the cancel token: cancellation
+        // stops the remaining actions, not just the reporting. The terminal
+        // event is ALWAYS sent — the executor may have partially run, and the
+        // UI must settle on the real (possibly partial) result.
+        let exec_orchestrator = orchestrator.clone();
+        let exec_cancel = cancel_token.clone();
+        let res = tokio::task::spawn_blocking(move || {
+            exec_orchestrator.execute_plan_with_cancel(&filtered_plan, &exec_event_tx, &exec_cancel)
+        })
+        .await
+        .unwrap_or_else(|join_err| {
+            Err(cleanton_common::CleantonError::Scan(format!(
+                "execution task failed: {join_err}"
+            )))
+        });
+        let _ = tx
+            .send(TuiEvent::ExecutionFinished {
+                operation_id,
+                result: res,
+            })
+            .await;
+    });
+}
+
+/// Load (or reload) the installed-application inventory on a blocking worker.
+fn load_installed_apps(app: &mut App, tx: &mpsc::Sender<TuiEvent>) {
+    if app.apps_loading {
+        return;
+    }
+    app.apps_loading = true;
+    app.apps_load_attempted = true;
+    app.set_status("Loading applications…");
+    let tx = tx.clone();
+    tokio::spawn(async move {
+        let apps = tokio::task::spawn_blocking(cleanton_engine::list_installed_apps)
+            .await
+            .unwrap_or_default();
+        // Homebrew cask tokens, so uninstall can also run `brew uninstall`.
+        // A missing/slow brew degrades to no casks; the trash path still works.
+        let cask_tokens: Vec<String> = cleanton_packages::PackageManagers::inventory(
+            cleanton_packages::ManagerKind::HomebrewCask,
+        )
+        .await
+        .packages
+        .into_iter()
+        .map(|pkg| pkg.name)
+        .collect();
+        let _ = tx.send(TuiEvent::AppsLoaded { apps, cask_tokens }).await;
+    });
+}
+
+/// The installed app under the cursor, resolved through the hide-system filter.
+fn selected_installed_app(app: &App) -> Option<&cleanton_engine::InstalledApp> {
+    let visible = app.visible_app_indices();
+    visible
+        .get(app.selected_app_idx)
+        .and_then(|&idx| app.installed_apps.get(idx))
+}
+
+/// Discover the selected app's leftovers on a blocking worker (sizes walk disk).
+fn load_app_leftovers(app: &mut App, tx: &mpsc::Sender<TuiEvent>) {
+    let Some(selected) = selected_installed_app(app).cloned() else {
+        return;
+    };
+    load_leftovers_for_app(app, selected, tx);
+}
+
+/// Discover a specific app's leftovers. Used by list selection and by the
+/// external-removal deep-link (where the app is no longer in the inventory).
+fn load_leftovers_for_app(
+    app: &mut App,
+    target: cleanton_engine::InstalledApp,
+    tx: &mpsc::Sender<TuiEvent>,
+) {
+    if target.protected {
+        app.set_status(&format!(
+            "{} is a system application and cannot be uninstalled.",
+            target.name
+        ));
+        return;
+    }
+    if app.leftover_loading {
+        return;
+    }
+    app.leftover_loading = true;
+    app.app_uninstall_plan = None;
+    app.leftover_target_path = Some(target.path.clone());
+    app.leftover_selected = 0;
+    app.leftover_excluded.clear();
+    app.set_status(&format!("Scanning leftovers of {}…", target.name));
+    let tx = tx.clone();
+    tokio::spawn(async move {
+        let app_path = target.path.clone();
+        let plan = tokio::task::spawn_blocking(move || cleanton_engine::find_leftovers(&target))
+            .await
+            .ok()
+            .flatten();
+        let _ = tx
+            .send(TuiEvent::AppLeftoversLoaded {
+                app_path,
+                plan: plan.map(Box::new),
+            })
+            .await;
+    });
+}
+
+/// Toggle include/exclude for the leftover row under the cursor. Admin-required
+/// items are never includable (they are review-only in the engine as well).
+fn toggle_leftover_selected(app: &mut App) {
+    let Some(plan) = app.app_uninstall_plan.as_ref() else {
+        return;
+    };
+    let idx = app.leftover_selected;
+    let Some(item) = plan.items.get(idx) else {
+        return;
+    };
+    if item.admin_required {
+        app.set_status(
+            "This item needs admin rights: once the app is gone it appears as orphaned on the Services tab and can be removed there.",
+        );
+        return;
+    }
+    if !app.leftover_excluded.remove(&idx) {
+        app.leftover_excluded.insert(idx);
+    }
+}
+
+fn arm_app_uninstall(app: &mut App) {
+    let Some(plan) = app.app_uninstall_plan.as_ref() else {
+        app.set_status("Press Enter on an application first to review its leftovers.");
+        return;
+    };
+    if app.uninstalling {
+        return;
+    }
+    let (count, bytes) = included_leftovers(app, plan);
+    if count == 0 {
+        app.set_status("Nothing selected: every item is excluded.");
+        return;
+    }
+    app.pending_cleanup_confirmation = None;
+    let name = plan.app.name.clone();
+    app.pending_uninstall = true;
+    app.set_status(&format!(
+        "Uninstall {name}: move {count} item(s) ({}) to Trash? Press y to confirm, n to cancel.",
+        cleanton_common::display::human_bytes(bytes)
+    ));
+}
+
+fn included_leftovers(app: &App, plan: &cleanton_engine::UninstallPlan) -> (usize, u64) {
+    plan.items
+        .iter()
+        .enumerate()
+        .filter(|(idx, item)| !item.admin_required && !app.leftover_excluded.contains(idx))
+        .fold((0usize, 0u64), |(count, bytes), (_, item)| {
+            (count + 1, bytes.saturating_add(item.bytes))
+        })
+}
+
+/// Execute the confirmed uninstall: best-effort stop of the app's user launch
+/// agents, then everything included goes through the executor's
+/// uninstall-scoped trash path on a blocking worker.
+fn trigger_app_uninstall(app: &mut App, tx: &mpsc::Sender<TuiEvent>) {
+    if !app.pending_uninstall || app.uninstalling {
+        return;
+    }
+    app.pending_uninstall = false;
+    let Some(plan) = app.app_uninstall_plan.as_ref() else {
+        return;
+    };
+    let paths: Vec<std::path::PathBuf> = plan
+        .items
+        .iter()
+        .enumerate()
+        .filter(|(idx, item)| !item.admin_required && !app.leftover_excluded.contains(idx))
+        .map(|(_, item)| item.path.clone())
+        .collect();
+    let agent_labels: Vec<String> = plan
+        .items
+        .iter()
+        .enumerate()
+        .filter(|(idx, item)| !item.admin_required && !app.leftover_excluded.contains(idx))
+        .filter_map(|(_, item)| item.launchd_label.clone())
+        .collect();
+    if paths.is_empty() {
+        return;
+    }
+
+    // If installed via a Homebrew cask, remove it through brew too.
+    let cask_token = cleanton_engine::cask_token_for(&plan.app, &app.apps_cask_tokens);
+
+    // Record the bundle path so the removal watcher treats trashing it as a
+    // Cleanton-initiated removal, not an external one to deep-link again.
+    if let Ok(mut set) = app.uninstalled_by_us.lock() {
+        set.insert(plan.app.path.clone());
+    }
+
+    let app_name = plan.app.name.clone();
+    app.uninstalling = true;
+    app.set_status(&format!("Uninstalling {app_name}…"));
+    let orchestrator = app.orchestrator.clone();
+    let config = app.config.clone();
+    let tx = tx.clone();
+    tokio::spawn(async move {
+        // Best-effort: stop user launch agents before their plists are trashed.
+        for label in &agent_labels {
+            let _ = ServiceManager::new(config.clone())
+                .stop_service(label)
                 .await;
         }
+        // Homebrew cask removal first (best-effort): brew moves the bundle to
+        // the Trash and drops its records; the leftover pass clears the rest.
+        if let Some(token) = &cask_token {
+            let _ = cleanton_packages::PackageManagers::uninstall(
+                cleanton_packages::ManagerKind::HomebrewCask,
+                std::slice::from_ref(token),
+            )
+            .await;
+        }
+        let name = app_name.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            let (event_tx, _event_rx) = mpsc::channel(64);
+            orchestrator.uninstall_app_items(&paths, &event_tx)
+        })
+        .await
+        .unwrap_or_else(|join_err| {
+            Err(cleanton_common::CleantonError::Scan(format!(
+                "uninstall task failed: {join_err}"
+            )))
+        });
+        let _ = tx
+            .send(TuiEvent::AppUninstallFinished {
+                app_name: name,
+                result,
+            })
+            .await;
     });
 }
 
@@ -1242,7 +1884,10 @@ impl ServiceActionKind {
 }
 
 fn selected_service(app: &App) -> Option<&Service> {
-    app.services.get(app.selected_service_idx)
+    let visible = app.visible_service_indices();
+    visible
+        .get(app.selected_service_idx)
+        .and_then(|&idx| app.services.get(idx))
 }
 
 fn service_protected_message(svc: &Service) -> String {
@@ -1528,7 +2173,15 @@ fn package_scan_roots(config: &CleantonConfig) -> Vec<PathBuf> {
     ));
     if let Some(home) = std::env::var_os("HOME") {
         let home = PathBuf::from(home);
-        for sub in ["GitHub", "Projects", "Developer", "dev", "code", "src", "work"] {
+        for sub in [
+            "GitHub",
+            "Projects",
+            "Developer",
+            "dev",
+            "code",
+            "src",
+            "work",
+        ] {
             push(home.join(sub));
         }
     }
@@ -1633,12 +2286,7 @@ fn package_result_current(app: &App, load_id: u64, manager_idx: usize) -> bool {
 
 /// Apply phase-1 inventory: retain it, default the keep-set to ALL packages, and
 /// recompute the removal plan. Mirrors the app's `apply_inventory`.
-fn apply_package_inventory(
-    app: &mut App,
-    load_id: u64,
-    manager_idx: usize,
-    inventory: Inventory,
-) {
+fn apply_package_inventory(app: &mut App, load_id: u64, manager_idx: usize, inventory: Inventory) {
     if !package_result_current(app, load_id, manager_idx) {
         return;
     }
@@ -1884,9 +2532,9 @@ fn arm_package_confirmation(app: &mut App, action: PackageActionKind) {
         PackageActionKind::UpdateAll => format!(
             "Confirm: update all outdated {manager} packages? This can take a while. Press y to proceed, n to cancel."
         ),
-        PackageActionKind::UpdateSelected(name) => format!(
-            "Confirm: update '{name}'? Press y to proceed, n to cancel."
-        ),
+        PackageActionKind::UpdateSelected(name) => {
+            format!("Confirm: update '{name}'? Press y to proceed, n to cancel.")
+        }
         PackageActionKind::CleanCache => format!(
             "Confirm: clean the {manager} download/build cache? Press y to proceed, n to cancel."
         ),
@@ -2006,8 +2654,8 @@ mod tests {
         assert!(is_current_operation(&app, current_id));
     }
 
-    /// The Scanner screen is gone; numeric jumps and Tab cycling must map onto
-    /// Dashboard / Results / Packages / Services / Settings with no off-by-one gap.
+    /// Numeric jumps and Tab cycling must map onto Dashboard / Results /
+    /// Packages / Services / Applications / Settings with no off-by-one gap.
     #[test]
     fn tab_navigation_matches_app_screen_order() {
         let mut app = test_app();
@@ -2016,7 +2664,8 @@ mod tests {
             (2, ActiveScreen::Results),
             (3, ActiveScreen::Packages),
             (4, ActiveScreen::Services),
-            (5, ActiveScreen::Settings),
+            (5, ActiveScreen::Applications),
+            (6, ActiveScreen::Settings),
         ] {
             app.set_tab(idx);
             assert_eq!(app.active_screen, expected, "numeric jump {idx}");
@@ -2027,6 +2676,7 @@ mod tests {
             ActiveScreen::Results,
             ActiveScreen::Packages,
             ActiveScreen::Services,
+            ActiveScreen::Applications,
             ActiveScreen::Settings,
             ActiveScreen::Dashboard,
         ];

@@ -201,10 +201,31 @@ fn canonical_regenerable_caches_are_matched_with_context_proof() {
     let pycache_file = root.join("api/__pycache__/mod.cpython-311.pyc");
     let py_entry = entry(&pycache_file, FileKind::File, 4096);
 
-    let expectations: [(&FileEntry, &str); 3] = [
+    // Gradle build/ proven by the any-of manifest markers (Kotlin DSL here).
+    let gradle_build = project_with_marker(root, "androidproj", "build.gradle.kts", "build");
+    let gradle_entry = entry(&gradle_build, FileKind::Directory, LARGE_BYTES);
+
+    // CMake build/ proven by the CMakeCache.txt *inside* the matched directory.
+    let cmake_build = root.join("nativeproj/build");
+    std::fs::create_dir_all(&cmake_build).expect("create cmake build dir");
+    let cmake_cache = cmake_build.join("CMakeCache.txt");
+    std::fs::write(&cmake_cache, b"marker").expect("write CMakeCache.txt");
+    // Backdate the on-disk tree: the recipe's min_age_days probes real subtree
+    // mtimes, and a freshly written marker would otherwise look "in use".
+    let a_month_ago = SystemTime::now() - Duration::from_hours(31 * 24);
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&cmake_cache)
+        .and_then(|file| file.set_modified(a_month_ago))
+        .expect("backdate CMakeCache.txt");
+    let cmake_entry = entry(&cmake_build, FileKind::Directory, LARGE_BYTES);
+
+    let expectations: [(&FileEntry, &str); 5] = [
         (&rust_entry, "rust-target-dirs"),
         (&node_entry, "node-modules"),
         (&py_entry, "python-bytecode"),
+        (&gradle_entry, "jvm-gradle-build-dirs"),
+        (&cmake_entry, "cmake-build-dirs"),
     ];
 
     for (candidate, expected_id) in expectations {

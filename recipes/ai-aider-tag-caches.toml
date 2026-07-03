@@ -1,0 +1,22 @@
+[recipe]
+id = "ai-aider-tag-caches"
+name = "Aider Tag Caches"
+# Chat history (.aider.chat.history.md) and input history are never matched.
+description = "Per-project aider repo-map tag caches (rebuilt on next aider run)"
+category = "ai-tools"
+safety_level = "cautious"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "**/.aider.tags.cache*/**"
+min_age_days = 14
+
+[action]
+type = "trash"
+prompt = "Move {size} of aider tag caches to Trash?"
+group = true
+
+[test]
+should_match = ["projects/app/.aider.tags.cache.v4/cache.db"]
+should_not_match = ["projects/app/.aider.chat.history.md"]
