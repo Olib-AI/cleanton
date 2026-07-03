@@ -46,6 +46,76 @@ require_var() {
   fi
 }
 
+# ---------------------------------------------------------------------------
+# Interactive fallback: prompt for any missing credential.
+# Passwords are hidden (read -rs). The .p12 is read from a file path and
+# base64-encoded here so you never have to paste a large blob.
+#
+# NOTE: uses printf -v to assign values — this is the only safe way to
+# store passwords with special chars ($, !, #, `, etc.) into variables
+# without the shell interpreting them.
+# ---------------------------------------------------------------------------
+_prompt_var() {
+  local var_name="$1"
+  local prompt_text="$2"
+  local sensitive="${3:-false}"
+  if [[ -z "${!var_name:-}" ]]; then
+    if [[ "$sensitive" == "true" ]]; then
+      local val
+      IFS= read -rs -p "  $prompt_text: " val </dev/tty
+      echo ""
+      printf -v "$var_name" '%s' "$val"   # safe: no shell interpretation of val
+      export "$var_name"
+    else
+      local val
+      IFS= read -r -p "  $prompt_text: " val </dev/tty
+      printf -v "$var_name" '%s' "$val"
+      export "$var_name"
+    fi
+  fi
+}
+
+if [[ -z "${APPLE_CERTIFICATE_B64:-}" ]]; then
+  echo ""
+  echo "==> Credentials not set — prompting interactively."
+  echo "    (Press Enter to accept defaults shown in brackets)"
+  echo ""
+  p12_default="$HOME/.ssh/ovc-devid.p12"
+  IFS= read -r -p "  Path to Developer ID .p12 [$p12_default]: " p12_path </dev/tty
+  p12_path="${p12_path:-$p12_default}"
+  if [[ ! -f "$p12_path" ]]; then
+    die "File not found: $p12_path"
+  fi
+
+  # Prompt for password and verify it against the .p12 immediately —
+  # Uses /usr/bin/openssl (macOS LibreSSL) — the same engine as security import.
+  # Homebrew OpenSSL 3.x requires -legacy to read its own legacy-format files,
+  # so we avoid it here to match what security import actually does.
+  while true; do
+    cert_pass=""
+    IFS= read -rs -p "  Password used to export the .p12: " cert_pass </dev/tty
+    echo ""
+    if /usr/bin/openssl pkcs12 -in "$p12_path" -noout -passin "pass:${cert_pass}" 2>/dev/null; then
+      printf -v APPLE_CERTIFICATE_PASSWORD '%s' "$cert_pass"
+      export APPLE_CERTIFICATE_PASSWORD
+      echo "  ==> Password verified ✓"
+      break
+    else
+      echo "  ❌  Wrong password — please try again."
+    fi
+  done
+
+  APPLE_CERTIFICATE_B64="$(base64 -i "$p12_path")"
+  export APPLE_CERTIFICATE_B64
+fi
+
+_prompt_var APPLE_ID          "Apple developer email"                      false
+_prompt_var APPLE_APP_PASSWORD "App-specific password (appleid.apple.com)" true
+_prompt_var APPLE_TEAM_ID     "Apple Team ID [FG2QS563CD]"                 false
+APPLE_TEAM_ID="${APPLE_TEAM_ID:-FG2QS563CD}"
+echo ""
+# ---------------------------------------------------------------------------
+
 require_var APPLE_CERTIFICATE_B64
 require_var APPLE_CERTIFICATE_PASSWORD
 require_var APPLE_ID
