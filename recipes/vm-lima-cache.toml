@@ -21,4 +21,4 @@ group = true
 
 [test]
 should_match = ["~/Library/Caches/lima/download/by-url-sha256/abc123/data"]
-should_not_match = ["~/.lima/default/lima.yaml"]
+should_not_match = ["~/.lima/default/lima.yaml", "~/.colima/default/colima.yaml", "~/.lima/default/diffdisk"]

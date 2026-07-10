@@ -1,0 +1,24 @@
+[recipe]
+id = "browser-firefox-cache"
+name = "Firefox Cache"
+# Only the ~/Library/Caches/Firefox tree is matched. Profile data (history,
+# bookmarks, logins, cookies) lives under Application Support and never
+# matches here.
+description = "Firefox disk cache under ~/Library/Caches (rebuilt while browsing)"
+category = "apps"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/Library/Caches/Firefox/**"
+min_age_days = 7
+
+[action]
+type = "trash"
+prompt = "Move {size} of Firefox cache to Trash?"
+group = true
+
+[test]
+should_match = ["~/Library/Caches/Firefox/Profiles/abcd1234.default-release/cache2/entries/0123456789ABCDEF"]
+should_not_match = ["~/Library/Application Support/Firefox/Profiles/abcd1234.default-release/places.sqlite", "~/Library/Caches/Mozilla/updates/update.log"]

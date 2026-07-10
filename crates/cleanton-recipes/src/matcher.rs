@@ -81,8 +81,39 @@ pub(crate) fn recipe_matches_entry_full(
     parent_contains: impl Fn(&Path, &str) -> bool,
     newest_in_subtree: impl Fn(&Path) -> Option<SystemTime>,
 ) -> bool {
-    let matcher = &recipe.matcher;
+    // The top-level spec and each `[[match.any_of]]` alternative are full,
+    // independent match specs; the recipe matches when any one of them does.
+    // (Nested alternatives are rejected by the validator, so only the top-level
+    // spec's `any_of` is consulted.)
+    let matched = std::iter::once(&recipe.matcher)
+        .chain(recipe.matcher.any_of.iter())
+        .any(|spec| spec_matches_entry(spec, entry, &parent_contains, &newest_in_subtree));
+    if !matched {
+        return false;
+    }
 
+    // Safety floors, evaluated last so their cost (path normalization for the
+    // protected-roots check; basename scan) only falls on the few entries that
+    // actually match a recipe's pattern — not on every (entry, recipe) pair.
+    // A recipe must never plan an action against a protected path or a
+    // credential/auth/secret/settings file, regardless of how broad its glob is.
+    if DEFAULT_PROTECTED.is_protected_fast(&entry.path) || is_sensitive_basename(&entry.path) {
+        return false;
+    }
+
+    true
+}
+
+/// Evaluate one match spec's own criteria (selectors, context markers, size and
+/// age gates, excludes) against an entry. The recipe-wide safety floors are NOT
+/// applied here — [`recipe_matches_entry_full`] enforces them once, after any
+/// spec has matched.
+fn spec_matches_entry(
+    matcher: &crate::MatchSpec,
+    entry: &FileEntry,
+    parent_contains: &impl Fn(&Path, &str) -> bool,
+    newest_in_subtree: &impl Fn(&Path) -> Option<SystemTime>,
+) -> bool {
     if matcher.exclude.names.iter().any(|name| {
         entry
             .path
@@ -153,7 +184,7 @@ pub(crate) fn recipe_matches_entry_full(
         }
     }
 
-    if !context_markers_hold(matcher, entry, &parent_contains) {
+    if !context_markers_hold(matcher, entry, parent_contains) {
         return false;
     }
 
@@ -172,15 +203,6 @@ pub(crate) fn recipe_matches_entry_full(
         if !is_old_enough(modified, min_age_days) {
             return false;
         }
-    }
-
-    // Safety floors, evaluated last so their cost (path normalization for the
-    // protected-roots check; basename scan) only falls on the few entries that
-    // actually match a recipe's pattern — not on every (entry, recipe) pair.
-    // A recipe must never plan an action against a protected path or a
-    // credential/auth/secret/settings file, regardless of how broad its glob is.
-    if DEFAULT_PROTECTED.is_protected_fast(&entry.path) || is_sensitive_basename(&entry.path) {
-        return false;
     }
 
     true
@@ -440,6 +462,105 @@ mod tests {
             &recipe,
             &entry,
             |_, _| true,
+        ));
+    }
+
+    #[test]
+    fn any_of_alternatives_match_when_primary_does_not() {
+        let recipe = test_recipe(MatchSpec {
+            path_glob: Some("**/*.ckpt".to_owned()),
+            any_of: vec![MatchSpec {
+                path_glob: Some("**/checkpoint-*".to_owned()),
+                self_must_contain: Some(vec!["trainer_state.json".to_owned()]),
+                ..MatchSpec::default()
+            }],
+            ..MatchSpec::default()
+        });
+
+        // Primary spec: a .ckpt file.
+        let ckpt = test_entry("projects/ml/last.ckpt", FileKind::File);
+        assert!(recipe_matches_entry_with_parent_lookup(
+            &recipe,
+            &ckpt,
+            |_, _| true,
+        ));
+
+        // Alternative spec: a checkpoint-* directory with its self marker.
+        let dir = test_entry("projects/ml/out/checkpoint-500", FileKind::Directory);
+        assert!(recipe_matches_entry_with_parent_lookup(
+            &recipe,
+            &dir,
+            |dir, marker| {
+                dir == Path::new("projects/ml/out/checkpoint-500") && marker == "trainer_state.json"
+            },
+        ));
+
+        // Neither spec: an unrelated file.
+        let other = test_entry("projects/ml/train.py", FileKind::File);
+        assert!(!recipe_matches_entry_with_parent_lookup(
+            &recipe,
+            &other,
+            |_, _| true,
+        ));
+    }
+
+    #[test]
+    fn any_of_alternatives_still_respect_safety_floors() {
+        let recipe = test_recipe(MatchSpec {
+            path_glob: Some("**/*.ckpt".to_owned()),
+            any_of: vec![MatchSpec {
+                path_glob: Some("**/checkpoint-*".to_owned()),
+                self_must_contain: Some(vec!["trainer_state.json".to_owned()]),
+                ..MatchSpec::default()
+            }],
+            ..MatchSpec::default()
+        });
+
+        // The alternative's glob matches, but the path sits under a hard-coded
+        // protected root: the recipe-wide floor must refuse it.
+        let protected = test_entry("/Applications/Foo/checkpoint-500", FileKind::Directory);
+        assert!(!recipe_matches_entry_with_parent_lookup(
+            &recipe,
+            &protected,
+            |_, _| true,
+        ));
+    }
+
+    #[test]
+    fn self_must_contain_with_path_glob_never_matches_files() {
+        // A path_glob-selected spec with self_must_contain proves a directory
+        // target: a FILE whose path matches the glob must be refused.
+        let recipe = test_recipe(MatchSpec {
+            path_glob: Some("**/checkpoint-*".to_owned()),
+            self_must_contain: Some(vec!["trainer_state.json".to_owned()]),
+            ..MatchSpec::default()
+        });
+        let file = test_entry("projects/ml/out/checkpoint-500.tar", FileKind::File);
+
+        assert!(!recipe_matches_entry_with_parent_lookup(
+            &recipe,
+            &file,
+            |_, _| true,
+        ));
+    }
+
+    #[test]
+    fn path_glob_semantics_match_absolute_paths_and_span_separators() {
+        // Documents the `glob` crate defaults the matcher relies on: patterns
+        // match absolute scanned paths, and `*` spans `/` (so `dir/*` also
+        // matches nested descendants — recipes must not rely on `*` meaning
+        // "direct child only").
+        assert!(glob_matches_path(
+            "**/*.ckpt",
+            Path::new("/Users/dev/projects/ml/last.ckpt"),
+        ));
+        assert!(glob_matches_path(
+            "**/checkpoint-*",
+            Path::new("/Users/dev/ml/out/checkpoint-500/nested/file.bin"),
+        ));
+        assert!(!glob_matches_path(
+            "**/*.pt",
+            Path::new("/Users/dev/slides/report.ppt"),
         ));
     }
 

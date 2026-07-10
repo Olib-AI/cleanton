@@ -20,4 +20,4 @@ group = true
 
 [test]
 should_match = ["~/Library/Application Support/Code/CachedData/abc/extension.js", "~/Library/Application Support/Code/Code Cache/js/index_0"]
-should_not_match = ["~/Library/Application Support/Code/User/keybindings.json"]
+should_not_match = ["~/Library/Application Support/Code/User/keybindings.json", "~/Library/Application Support/Code/User/globalStorage/state.vscdb"]

@@ -1,7 +1,11 @@
 [recipe]
 id = "node-framework-caches"
 name = "Node Framework Caches"
-description = "Vite, Astro, SvelteKit, and Nuxt build caches"
+# Vite's dependency-optimizer cache lives at node_modules/.vite (the previous
+# package.json parent guard could never hold there, so the recipe was dead).
+# Custom cacheDir locations, and Astro/SvelteKit/Nuxt caches (.astro,
+# .svelte-kit, .nuxt), would need their own recipes.
+description = "Vite cache under node_modules/.vite (rebuilt by the next dev/build run)"
 category = "node"
 safety_level = "safe"
 enabled = true
@@ -9,7 +13,7 @@ priority = 50
 
 [match]
 directory_name = ".vite"
-parent_must_contain = ["package.json"]
+path_glob = "**/node_modules/.vite"
 
 [action]
 type = "trash"
@@ -17,5 +21,5 @@ prompt = "Move {size} of framework caches to Trash?"
 group = true
 
 [test]
-should_match = ["projects/app/.vite"]
-should_not_match = ["projects/app/src", "loose/.vite"]
+should_match = ["projects/app/node_modules/.vite"]
+should_not_match = ["projects/app/.vitepress", "loose/.vite"]

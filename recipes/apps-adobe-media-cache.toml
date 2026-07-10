@@ -1,0 +1,26 @@
+[recipe]
+id = "apps-adobe-media-cache"
+name = "Adobe Media Cache"
+# Matches only the "Media Cache*" dirs under Adobe/Common: "Media Cache Files"
+# (peeked/conformed .cfa/.pek media) and "Media Cache" (the cache database).
+# Premiere/After Effects rebuild both when media is reopened. Project files
+# and app settings live in other subtrees and never match.
+description = "Adobe Premiere/After Effects media caches (rebuilt when media is reopened)"
+category = "apps"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/Library/Application Support/Adobe/Common/Media Cache*/**"
+min_size_mb = 50
+min_age_days = 14
+
+[action]
+type = "trash"
+prompt = "Move {size} of Adobe media caches to Trash?"
+group = true
+
+[test]
+should_match = ["~/Library/Application Support/Adobe/Common/Media Cache Files/clip-audio.cfa", "~/Library/Application Support/Adobe/Common/Media Cache/database.mcdb"]
+should_not_match = ["~/Library/Application Support/Adobe/Common/Plug-ins/7.0/MediaCore/effect.bundle", "~/Library/Application Support/Adobe/Adobe Premiere Pro 2025/Profile-user/Adobe Premiere Pro Prefs"]

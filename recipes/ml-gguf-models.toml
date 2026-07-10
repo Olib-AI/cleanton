@@ -9,11 +9,15 @@ priority = 50
 
 # `.gguf` files are quantized model weights downloaded from registries
 # (llama.cpp / Ollama / LM Studio sideloads). They are large and re-downloadable.
-# Match anywhere above the size/age floors; reversible move to Trash.
+# Match anywhere above the size/age floors; reversible move to Trash. LM Studio's
+# managed model homes are excluded so ml-lmstudio-models keeps attribution there.
 [match]
 path_glob = "**/*.gguf"
 min_size_mb = 500
 min_age_days = 7
+
+[match.exclude]
+paths = ["~/.lmstudio/**", "~/.cache/lm-studio/**"]
 
 [action]
 type = "trash"
@@ -22,4 +26,8 @@ group = true
 
 [test]
 should_match = ["projects/models/llama-3-8b-Q4_K_M.gguf"]
-should_not_match = ["projects/models/config.json"]
+should_not_match = [
+    "projects/models/config.json",
+    "projects/models/llama-3-8b.gguf.json",
+    "~/.lmstudio/models/publisher/llama-3-8b-Q4_K_M.gguf",
+]

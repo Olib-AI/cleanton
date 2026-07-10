@@ -7,6 +7,10 @@ safety_level = "safe"
 enabled = true
 priority = 50
 
+# Everything under DerivedData (per-project dirs, ModuleCache.noindex, index
+# stores) is rebuilt by Xcode. The size floor keeps thousands of tiny build
+# intermediates out of the results; the planner folds nested matches into
+# their largest ancestor.
 [match]
 path_glob = "~/Library/Developer/Xcode/DerivedData/**"
 min_size_mb = 50
@@ -17,5 +21,8 @@ prompt = "Move {size} of Xcode DerivedData to Trash?"
 group = true
 
 [test]
-should_match = ["~/Library/Developer/Xcode/DerivedData/MyApp-abc/Build/Products"]
+should_match = [
+    "~/Library/Developer/Xcode/DerivedData/MyApp-abcdefgh/Build/Products",
+    "~/Library/Developer/Xcode/DerivedData/ModuleCache.noindex",
+]
 should_not_match = ["~/Library/Developer/Xcode/UserData"]

@@ -8,8 +8,18 @@ safety_level = "safe"
 enabled = true
 priority = 50
 
+# Xcode keeps one symbol tree per connected device OS version; watchOS and
+# tvOS have sibling directories with the same layout.
 [match]
 path_glob = "~/Library/Developer/Xcode/iOS DeviceSupport/**"
+min_age_days = 180
+
+[[match.any_of]]
+path_glob = "~/Library/Developer/Xcode/watchOS DeviceSupport/**"
+min_age_days = 180
+
+[[match.any_of]]
+path_glob = "~/Library/Developer/Xcode/tvOS DeviceSupport/**"
 min_age_days = 180
 
 [action]
@@ -18,5 +28,9 @@ prompt = "Move {size} of Xcode Device Support files to Trash?"
 group = true
 
 [test]
-should_match = ["~/Library/Developer/Xcode/iOS DeviceSupport/15.0/Symbols"]
+should_match = [
+    "~/Library/Developer/Xcode/iOS DeviceSupport/iPhone14,2 17.5.1/Symbols",
+    "~/Library/Developer/Xcode/watchOS DeviceSupport/Watch6,9 10.2/Symbols",
+    "~/Library/Developer/Xcode/tvOS DeviceSupport/AppleTV11,1 17.0/Symbols",
+]
 should_not_match = ["~/Library/Developer/Xcode/DerivedData"]

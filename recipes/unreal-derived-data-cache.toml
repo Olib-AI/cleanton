@@ -1,0 +1,25 @@
+[recipe]
+id = "unreal-derived-data-cache"
+name = "Unreal Derived Data Cache"
+# Content or Config beside it proves an Unreal project root; a loose directory
+# named DerivedDataCache never matches on its own.
+description = "DerivedDataCache/ of Unreal Engine projects (rebuilt by the editor on demand)"
+category = "gamedev"
+safety_level = "cautious"
+enabled = true
+priority = 50
+
+[match]
+directory_name = "DerivedDataCache"
+parent_must_contain_any = ["Content", "Config"]
+min_size_mb = 100
+min_age_days = 30
+
+[action]
+type = "trash"
+prompt = "Move {size} of Unreal derived data cache to Trash?"
+group = true
+
+[test]
+should_match = ["projects/MyGame/DerivedDataCache"]
+should_not_match = ["loose/DerivedDataCache"]

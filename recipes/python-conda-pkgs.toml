@@ -1,21 +1,28 @@
 [recipe]
 id = "python-conda-pkgs"
 name = "Conda Packages"
-description = "Conda package cache directory"
+# The old ~/.conda/pkgs glob missed the usual install roots (~/miniconda3,
+# ~/anaconda3). The pkgs dir is now matched as a whole, wherever a *conda*
+# home-level install puts it, and urls.txt inside proves it really is the
+# conda download cache. envs/ is never matched. Miniforge/mamba installs
+# (no "conda" in the dir name) are not covered.
+description = "Conda package download cache (pkgs/, re-downloaded on demand)"
 category = "python"
 safety_level = "cautious"
 enabled = true
 priority = 50
 
 [match]
-path_glob = "~/.conda/pkgs/**"
+directory_name = "pkgs"
+path_glob = "~/*conda*/pkgs"
+self_must_contain = ["urls.txt"]
 min_age_days = 30
 
 [action]
 type = "trash"
-prompt = "Move {size} of Conda packages to Trash?"
+prompt = "Move {size} of the Conda package cache to Trash?"
 group = true
 
 [test]
-should_match = ["~/.conda/pkgs/python-3.10-foo"]
-should_not_match = ["~/.conda/envs"]
+should_match = ["~/miniconda3/pkgs", "~/anaconda3/pkgs", "~/.conda/pkgs"]
+should_not_match = ["~/miniconda3/envs/ml/lib/python3.12/site-packages/numpy/core.py", "~/micromamba/pkgs"]

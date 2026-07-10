@@ -7,9 +7,18 @@ safety_level = "cautious"
 enabled = true
 priority = 50
 
+# Current LM Studio keeps downloads in `~/.lmstudio/models`; older releases
+# used `~/.cache/lm-studio/models` (second alternative). Age gate avoids
+# suggesting a model the user downloaded this month.
 [match]
 path_glob = "~/.lmstudio/models/**"
 min_size_mb = 500
+min_age_days = 30
+
+[[match.any_of]]
+path_glob = "~/.cache/lm-studio/models/**"
+min_size_mb = 500
+min_age_days = 30
 
 [action]
 type = "trash"
@@ -17,5 +26,8 @@ prompt = "Move {size} of LM Studio models to Trash?"
 group = true
 
 [test]
-should_match = ["~/.lmstudio/models/publisher/model-gguf"]
-should_not_match = ["~/.lmstudio/config"]
+should_match = [
+    "~/.lmstudio/models/publisher/model-gguf",
+    "~/.cache/lm-studio/models/publisher/model.gguf",
+]
+should_not_match = ["~/.lmstudio/config", "~/.lmstudio/conversations/chat.json"]

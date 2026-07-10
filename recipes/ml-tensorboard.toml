@@ -7,9 +7,11 @@ safety_level = "cautious"
 enabled = true
 priority = 50
 
+# A `runs` directory is TensorBoard's conventional logdir, but the name is
+# generic — require a training script sibling as proof before offering it.
 [match]
 directory_name = "runs"
-parent_must_contain = ["train.py"]
+parent_must_contain_any = ["train.py", "train.ipynb"]
 min_age_days = 14
 
 [action]

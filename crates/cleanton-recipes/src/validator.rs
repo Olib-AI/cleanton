@@ -14,14 +14,31 @@ use crate::{MatchSpec, RecipeDocument, matcher::recipe_matches_entry_with_parent
 pub fn validate_recipe(path: &Path, document: &RecipeDocument) -> Result<()> {
     validate_id(path, &document.recipe.id)?;
     validate_action(path, document)?;
-    validate_matcher(path, &document.matcher)?;
-    validate_glob(path, document.matcher.path_glob.as_deref())?;
-    for pattern in &document.matcher.exclude.paths {
-        validate_glob(path, Some(pattern))?;
+    validate_spec(path, &document.matcher)?;
+    for alternative in &document.matcher.any_of {
+        if !alternative.any_of.is_empty() {
+            return Err(recipe_error(
+                path,
+                "any_of alternatives must not nest further any_of blocks",
+            ));
+        }
+        validate_spec(path, alternative)?;
     }
     validate_tests(path, document)?;
     validate_protected_test_paths(path, document)?;
     validate_test_fixtures_match(path, document)?;
+    Ok(())
+}
+
+/// Every match spec — the top-level one and each `[[match.any_of]]`
+/// alternative — must independently satisfy the full matcher rules (target
+/// selector, context requirements, glob validity).
+fn validate_spec(path: &Path, matcher: &MatchSpec) -> Result<()> {
+    validate_matcher(path, matcher)?;
+    validate_glob(path, matcher.path_glob.as_deref())?;
+    for pattern in &matcher.exclude.paths {
+        validate_glob(path, Some(pattern))?;
+    }
     Ok(())
 }
 
@@ -77,10 +94,13 @@ fn validate_matcher(path: &Path, matcher: &MatchSpec) -> Result<()> {
     )?;
     validate_numeric_guards(path, matcher)?;
 
-    if matcher.self_must_contain.is_some() && matcher.directory_name.is_none() {
+    if matcher.self_must_contain.is_some()
+        && matcher.directory_name.is_none()
+        && matcher.path_glob.is_none()
+    {
         return Err(recipe_error(
             path,
-            "self_must_contain requires directory_name (it proves a directory target)",
+            "self_must_contain requires directory_name or path_glob (it proves a directory target)",
         ));
     }
 
@@ -361,25 +381,29 @@ fn recipe_error(path: &Path, message: impl Into<String>) -> CleantonError {
 
 fn synthetic_entry(document: &RecipeDocument, fixture: &str) -> FileEntry {
     let path = expand_tilde(&PathBuf::from(fixture));
-    let kind = document
-        .matcher
-        .directory_name
-        .as_deref()
-        .filter(|directory_name| {
-            path.file_name()
-                .is_some_and(|candidate| candidate == *directory_name)
-        })
-        .map_or(FileKind::File, |_| FileKind::Directory);
+    let specs = || std::iter::once(&document.matcher).chain(document.matcher.any_of.iter());
 
-    let min_bytes = document
-        .matcher
-        .min_size_mb
+    // A fixture is synthesized as a directory when any spec targets directories
+    // and selects this path: a literal `directory_name` matching the basename,
+    // or a `self_must_contain` proof whose `path_glob` covers the fixture.
+    let kind = if specs().any(|spec| spec_wants_directory(spec, &path)) {
+        FileKind::Directory
+    } else {
+        FileKind::File
+    };
+
+    // Size/age floors: take the maximum across all specs so a fixture clears
+    // every spec's gate. Larger/older can only ever match MORE specs, so this
+    // stays the strict direction for should_not_match fixtures too.
+    let min_bytes = specs()
+        .map(|spec| spec.min_size_mb.unwrap_or(1))
+        .max()
         .unwrap_or(1)
         .saturating_add(1)
         .saturating_mul(1_048_576);
-    let min_age_days = document
-        .matcher
-        .min_age_days
+    let min_age_days = specs()
+        .map(|spec| spec.min_age_days.unwrap_or(30))
+        .max()
         .unwrap_or(30)
         .saturating_add(1);
 
@@ -402,6 +426,32 @@ fn synthetic_entry(document: &RecipeDocument, fixture: &str) -> FileEntry {
         symlink_target: None,
         ignored_by_git: false,
     }
+}
+
+/// Whether `spec` selects `path` as a *directory* target for fixture synthesis:
+/// either its literal `directory_name` equals the fixture's basename, or the
+/// spec proves a directory via `self_must_contain` and its `path_glob` covers
+/// the fixture path.
+fn spec_wants_directory(spec: &MatchSpec, path: &Path) -> bool {
+    if let Some(directory_name) = &spec.directory_name {
+        return path
+            .file_name()
+            .is_some_and(|candidate| candidate == directory_name.as_str());
+    }
+    if spec.self_must_contain.is_none() {
+        return false;
+    }
+    let Some(path_glob) = &spec.path_glob else {
+        return false;
+    };
+    let expanded = if path_glob.starts_with('~') {
+        expand_tilde(&PathBuf::from(path_glob))
+            .to_string_lossy()
+            .into_owned()
+    } else {
+        path_glob.clone()
+    };
+    Pattern::new(&expanded).is_ok_and(|pattern| pattern.matches_path(path))
 }
 
 fn is_plain_segment(value: &str) -> bool {
@@ -463,7 +513,7 @@ mod tests {
     fn builtin_recipe_self_tests_are_valid() {
         let recipes = RecipeSet::load_builtin().expect("built-in recipes should validate");
 
-        assert_eq!(recipes.len(), 113);
+        assert_eq!(recipes.len(), 130);
     }
 
     #[test]
@@ -601,14 +651,86 @@ mod tests {
     }
 
     #[test]
-    fn rejects_self_must_contain_without_directory_name() {
+    fn rejects_self_must_contain_without_directory_target() {
+        // Neither directory_name nor path_glob: nothing proves a directory.
         let recipe = test_recipe(MatchSpec {
-            path_glob: Some("**/build/**".to_owned()),
+            file_name: Some("cache.bin".to_owned()),
+            parent_must_contain: Some(vec!["package.json".to_owned()]),
             self_must_contain: Some(vec!["CMakeCache.txt".to_owned()]),
             ..MatchSpec::default()
         });
 
         assert_recipe_error_contains(&recipe, "self_must_contain requires directory_name");
+    }
+
+    #[test]
+    fn self_must_contain_with_path_glob_is_valid() {
+        // A glob-selected directory proven by an internal marker (e.g. a
+        // `checkpoint-*` dir containing `trainer_state.json`) is a valid spec;
+        // the matcher enforces the directory kind at match time.
+        let recipe = test_recipe(MatchSpec {
+            path_glob: Some("**/checkpoint-*".to_owned()),
+            self_must_contain: Some(vec!["trainer_state.json".to_owned()]),
+            ..MatchSpec::default()
+        })
+        .with_tests(
+            ["projects/ml/out/checkpoint-500"],
+            ["loose/checkpoint-500", "projects/ml/train.py"],
+        );
+
+        validate_recipe(Path::new("test.toml"), &recipe).expect("glob directory proof is valid");
+    }
+
+    #[test]
+    fn rejects_nested_any_of_alternatives() {
+        let recipe = test_recipe(MatchSpec {
+            path_glob: Some("**/cache/**".to_owned()),
+            any_of: vec![MatchSpec {
+                path_glob: Some("**/tmp-cache/**".to_owned()),
+                any_of: vec![MatchSpec {
+                    path_glob: Some("**/deep-cache/**".to_owned()),
+                    ..MatchSpec::default()
+                }],
+                ..MatchSpec::default()
+            }],
+            ..MatchSpec::default()
+        });
+
+        assert_recipe_error_contains(&recipe, "must not nest");
+    }
+
+    #[test]
+    fn any_of_alternatives_are_validated_like_the_primary_spec() {
+        // An alternative with no target selector is rejected outright.
+        let recipe = test_recipe(MatchSpec {
+            path_glob: Some("**/cache/**".to_owned()),
+            any_of: vec![MatchSpec {
+                min_size_mb: Some(10),
+                ..MatchSpec::default()
+            }],
+            ..MatchSpec::default()
+        });
+
+        assert_recipe_error_contains(&recipe, "target selector");
+    }
+
+    #[test]
+    fn fixtures_may_match_via_an_any_of_alternative() {
+        let recipe = test_recipe(MatchSpec {
+            path_glob: Some("**/*.ckpt".to_owned()),
+            any_of: vec![MatchSpec {
+                path_glob: Some("**/checkpoint-*".to_owned()),
+                self_must_contain: Some(vec!["trainer_state.json".to_owned()]),
+                ..MatchSpec::default()
+            }],
+            ..MatchSpec::default()
+        })
+        .with_tests(
+            ["projects/ml/last.ckpt", "projects/ml/out/checkpoint-500"],
+            ["projects/ml/train.py", "loose/checkpoint-500"],
+        );
+
+        validate_recipe(Path::new("test.toml"), &recipe).expect("alternative fixtures are valid");
     }
 
     #[test]

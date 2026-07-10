@@ -16,5 +16,8 @@ prompt = "Move {size} of SwiftUI Previews cache to Trash?"
 group = true
 
 [test]
-should_match = ["~/Library/Developer/Xcode/UserData/Previews/Product/foo"]
-should_not_match = ["~/Library/Developer/Xcode/DerivedData"]
+should_match = ["~/Library/Developer/Xcode/UserData/Previews/Simulator Devices/1A2B3C4D"]
+should_not_match = [
+    "~/Library/Developer/Xcode/DerivedData",
+    "~/Library/Developer/Xcode/UserData/KeyBindings/Default.idekeybindings",
+]

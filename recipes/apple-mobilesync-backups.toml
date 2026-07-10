@@ -1,0 +1,24 @@
+[recipe]
+id = "apple-mobilesync-backups"
+name = "Old iOS Device Backups"
+# A local backup may be the user's only copy of a device's data, so this is
+# review-only (archive): surfaced for inspection, never trashed automatically.
+description = "Old iPhone/iPad backups made by Finder/iTunes; review before removing"
+category = "system"
+safety_level = "aggressive"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/Library/Application Support/MobileSync/Backup/**"
+min_size_mb = 500
+min_age_days = 90
+
+[action]
+type = "archive"
+prompt = "Review old iOS device backups for manual removal?"
+group = true
+
+[test]
+should_match = ["~/Library/Application Support/MobileSync/Backup/00008101-000E4D3A0EF8001E/Manifest.db"]
+should_not_match = ["~/Library/Application Support/MobileSync/Backup.plist", "~/Library/Application Support/MobileSync/Configuration/defaults.plist"]

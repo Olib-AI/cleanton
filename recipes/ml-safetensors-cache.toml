@@ -11,9 +11,13 @@ priority = 50
 # real weights live in `blobs/<sha>` (no extension) and `snapshots/<rev>/*` are
 # 0-byte symlinks into those blobs. Matching the `*.safetensors` symlinks (the
 # old rule) reclaimed 0 bytes. Match the whole per-model directory instead so the
-# aggregated blob size is captured and the model is trashed as one unit.
+# aggregated blob size is captured and the model is trashed as one unit. The
+# `snapshots` self marker pins the match to the per-model ROOT: glob `*` spans
+# path separators, so without it every nested blob/file matched again and the
+# results double-listed the same bytes.
 [match]
 path_glob = "~/.cache/huggingface/hub/models--*"
+self_must_contain = ["snapshots"]
 min_size_mb = 50
 
 [action]
@@ -23,4 +27,7 @@ group = true
 
 [test]
 should_match = ["~/.cache/huggingface/hub/models--BAAI--bge-small-en-v1.5"]
-should_not_match = ["~/.cache/huggingface/hub/version.txt"]
+should_not_match = [
+    "~/.cache/huggingface/hub/version.txt",
+    "~/.cache/huggingface/hub/models--BAAI--bge-small-en-v1.5/blobs/abc123",
+]

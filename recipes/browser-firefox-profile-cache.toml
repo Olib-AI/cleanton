@@ -1,0 +1,24 @@
+[recipe]
+id = "browser-firefox-profile-cache"
+name = "Firefox Profile Cache"
+# Matches only the cache2 subtree inside a profile. The profile root also
+# holds places.sqlite, key4.db, logins.json, and cookies.sqlite (history,
+# passwords, cookies), which are sibling paths and never match.
+description = "Firefox per-profile cache2 store (rebuilt while browsing)"
+category = "apps"
+safety_level = "cautious"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/Library/Application Support/Firefox/Profiles/*/cache2/**"
+min_age_days = 14
+
+[action]
+type = "trash"
+prompt = "Move {size} of Firefox profile cache to Trash?"
+group = true
+
+[test]
+should_match = ["~/Library/Application Support/Firefox/Profiles/abcd1234.default-release/cache2/entries/0123456789ABCDEF", "~/Library/Application Support/Firefox/Profiles/abcd1234.default-release/cache2/doomed/12345"]
+should_not_match = ["~/Library/Application Support/Firefox/Profiles/abcd1234.default-release/places.sqlite", "~/Library/Application Support/Firefox/Profiles/abcd1234.default-release/key4.db", "~/Library/Application Support/Firefox/Profiles/abcd1234.default-release/logins.json", "~/Library/Application Support/Firefox/Profiles/abcd1234.default-release/cookies.sqlite"]

@@ -1,19 +1,51 @@
 [recipe]
 id = "ml-checkpoints"
 name = "ML Model Checkpoints"
-description = "Large ML training checkpoint files (regenerable)"
+description = "Large ML training checkpoints: .ckpt/.pt/.pth files and Hugging Face Trainer checkpoint directories (regenerable)"
 category = "ml"
 safety_level = "cautious"
 enabled = true
 priority = 50
 
-# `.ckpt` training checkpoints, anywhere, that are large and not recently
-# touched. Reversible move to Trash; protected user folders and credentials are
-# excluded by the matcher's safety floors.
+# Training checkpoints come in several on-disk shapes, so this recipe uses
+# alternatives (any one may match; the matcher's safety floors apply to all):
+#   1. `.ckpt` files — PyTorch Lightning (`lightning_logs/**/checkpoints/`),
+#      legacy TF, Stable Diffusion weights.
+#   2. Hugging Face Trainer `checkpoint-NNNN/` directories, proven by the
+#      `trainer_state.json` the Trainer writes inside every checkpoint. The
+#      whole directory (model + optimizer + rng state) is trashed as one unit.
+#   3-4. Raw `torch.save` checkpoints (`.pt` / `.pth`), guarded by a high size
+#      floor (site-packages `.pth` path hooks are bytes, real weights are not)
+#      and a longer age gate. `~/.cache` is excluded so the torch-hub / HF
+#      cache recipes keep attribution for managed downloads there.
+# Reversible move to Trash; protected user folders and credentials are excluded
+# by the matcher's safety floors.
 [match]
 path_glob = "**/*.ckpt"
 min_size_mb = 100
 min_age_days = 14
+
+[[match.any_of]]
+path_glob = "**/checkpoint-*"
+self_must_contain = ["trainer_state.json"]
+min_size_mb = 100
+min_age_days = 14
+
+[[match.any_of]]
+path_glob = "**/*.pt"
+min_size_mb = 200
+min_age_days = 30
+
+[match.any_of.exclude]
+paths = ["~/.cache/**"]
+
+[[match.any_of]]
+path_glob = "**/*.pth"
+min_size_mb = 200
+min_age_days = 30
+
+[match.any_of.exclude]
+paths = ["~/.cache/**"]
 
 [action]
 type = "trash"
@@ -21,5 +53,16 @@ prompt = "Move {size} of training checkpoints to Trash?"
 group = true
 
 [test]
-should_match = ["projects/ml/epoch-10.ckpt"]
-should_not_match = ["projects/ml/train.py"]
+should_match = [
+    "projects/ml/epoch-10.ckpt",
+    "projects/ml/lightning_logs/version_0/checkpoints/epoch=9-step=1000.ckpt",
+    "projects/ml/output/checkpoint-1000",
+    "projects/ml/weights/model_final.pth",
+    "projects/ml/runs/exp1/best.pt",
+]
+should_not_match = [
+    "projects/ml/train.py",
+    "projects/photos/checkpoint-alpha",
+    "projects/ml/slides/report.ppt",
+    "projects/ml/data/corpus.txt",
+]

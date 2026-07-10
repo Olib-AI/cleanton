@@ -18,5 +18,5 @@ prompt = "Move {size} of Cargo registry cache to Trash?"
 group = true
 
 [test]
-should_match = ["~/.cargo/registry/cache/foo.crate"]
-should_not_match = ["~/.cargo/registry/src/foo"]
+should_match = ["~/.cargo/registry/cache/index.crates.io-6f17d22bba15001f/serde-1.0.200.crate"]
+should_not_match = ["~/.cargo/registry/src/foo", "~/.cargo/registry/index/index.crates.io-6f17d22bba15001f"]

@@ -1,7 +1,10 @@
 [recipe]
 id = "node-deploy-caches"
 name = "Node Deploy Caches"
-description = "Vercel, Netlify, and Wrangler deploy caches"
+# Only .vercel is matched (one directory_name per recipe). The dir holds the
+# project link (project.json) and build output; `vercel link` / the next
+# deploy recreate it. Netlify/Wrangler caches would need their own recipes.
+description = "Vercel .vercel deploy cache (re-created by vercel link and the next deploy)"
 category = "node"
 safety_level = "cautious"
 enabled = true
@@ -13,7 +16,7 @@ parent_must_contain = ["package.json"]
 
 [action]
 type = "trash"
-prompt = "Move {size} of deploy caches to Trash?"
+prompt = "Move {size} of Vercel deploy caches to Trash?"
 group = true
 
 [test]

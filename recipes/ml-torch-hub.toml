@@ -7,6 +7,8 @@ safety_level = "cautious"
 enabled = true
 priority = 50
 
+# `torch.hub` repos and downloaded weights (`hub/checkpoints/*.pth`) under the
+# default torch home; re-downloaded on next `torch.hub.load` / model call.
 [match]
 path_glob = "~/.cache/torch/hub/**"
 min_age_days = 30
@@ -17,5 +19,8 @@ prompt = "Move {size} of PyTorch Hub cache to Trash?"
 group = true
 
 [test]
-should_match = ["~/.cache/torch/hub/checkpoints/resnet.pth"]
-should_not_match = ["~/.cache/other"]
+should_match = [
+    "~/.cache/torch/hub/checkpoints/resnet50-0676ba61.pth",
+    "~/.cache/torch/hub/pytorch_vision_v0.10.0/hubconf.py",
+]
+should_not_match = ["~/.cache/other", "~/.cache/torch/kernels/kernel.so"]

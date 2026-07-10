@@ -7,8 +7,17 @@ safety_level = "cautious"
 enabled = true
 priority = 50
 
+# Xcode keeps one "<platform> Device Logs" directory per device family.
 [match]
 path_glob = "~/Library/Developer/Xcode/iOS Device Logs/**"
+min_age_days = 30
+
+[[match.any_of]]
+path_glob = "~/Library/Developer/Xcode/watchOS Device Logs/**"
+min_age_days = 30
+
+[[match.any_of]]
+path_glob = "~/Library/Developer/Xcode/tvOS Device Logs/**"
 min_age_days = 30
 
 [action]
@@ -17,5 +26,8 @@ prompt = "Move {size} of old Xcode device logs to Trash?"
 group = true
 
 [test]
-should_match = ["~/Library/Developer/Xcode/iOS Device Logs/iPhone/2026-01-01.log"]
+should_match = [
+    "~/Library/Developer/Xcode/iOS Device Logs/iPhone/2026-01-01.log",
+    "~/Library/Developer/Xcode/watchOS Device Logs/Watch/2026-01-01.log",
+]
 should_not_match = ["~/Library/Developer/Xcode/iOS DeviceSupport/17.0/Symbols"]

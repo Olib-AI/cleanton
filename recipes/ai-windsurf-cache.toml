@@ -20,4 +20,4 @@ group = true
 
 [test]
 should_match = ["~/Library/Application Support/Windsurf/CachedData/abc/module.js"]
-should_not_match = ["~/Library/Application Support/Windsurf/User/keybindings.json"]
+should_not_match = ["~/Library/Application Support/Windsurf/User/keybindings.json", "~/Library/Application Support/Windsurf/User/globalStorage/state.vscdb"]

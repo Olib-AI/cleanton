@@ -24,5 +24,9 @@ group = true
 
 [test]
 should_match = ["projects/my-app/target"]
-should_not_match = ["projects/my-app/src", "loose/target"]
+should_not_match = [
+    "projects/my-app/src",
+    "loose/target",
+    "projects/my-app/target/release/MyApp.app",
+]
 

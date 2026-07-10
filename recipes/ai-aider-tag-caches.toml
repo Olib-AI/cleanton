@@ -19,4 +19,4 @@ group = true
 
 [test]
 should_match = ["projects/app/.aider.tags.cache.v4/cache.db"]
-should_not_match = ["projects/app/.aider.chat.history.md"]
+should_not_match = ["projects/app/.aider.chat.history.md", "projects/app/.aider.input.history"]

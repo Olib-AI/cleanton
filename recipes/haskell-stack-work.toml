@@ -9,7 +9,9 @@ priority = 50
 
 [match]
 directory_name = ".stack-work"
-parent_must_contain = ["stack.yaml"]
+# stack.yaml sits at the project root; subpackages of a multi-package stack
+# project carry package.yaml (hpack) instead. Either proves the dir is Stack's.
+parent_must_contain_any = ["stack.yaml", "package.yaml"]
 
 [action]
 type = "trash"
@@ -17,5 +19,5 @@ prompt = "Move {size} of Stack work directories to Trash?"
 group = true
 
 [test]
-should_match = ["projects/hs-app/.stack-work"]
+should_match = ["projects/hs-app/.stack-work", "projects/hs-monorepo/subpkg/.stack-work"]
 should_not_match = ["loose/.stack-work", "projects/hs-app/src"]

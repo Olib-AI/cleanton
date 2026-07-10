@@ -21,4 +21,4 @@ group = true
 
 [test]
 should_match = ["~/Library/Caches/github-copilot/completions/foo"]
-should_not_match = ["~/Library/Caches/Tabnine", "~/Library/Caches/co.tabnine.tabnine"]
+should_not_match = ["~/Library/Caches/Tabnine", "~/Library/Caches/co.tabnine.tabnine", "~/.config/github-copilot/hosts.json", "~/.config/github-copilot/apps.json"]

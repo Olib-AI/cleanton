@@ -1,7 +1,7 @@
 [recipe]
 id = "go-build-cache"
 name = "Go Build Cache"
-description = "Go build cache directory"
+description = "Go build cache (GOCACHE default, rebuilt by the next go build)"
 category = "go"
 safety_level = "safe"
 enabled = true
@@ -17,4 +17,4 @@ group = true
 
 [test]
 should_match = ["~/Library/Caches/go-build/00/0000000000000000000000000000000000000000-d"]
-should_not_match = ["~/Library/Caches/Yarn"]
+should_not_match = ["~/Library/Caches/Yarn", "~/go/bin/gopls"]

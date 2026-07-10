@@ -7,15 +7,18 @@ safety_level = "cautious"
 enabled = true
 priority = 50
 
+# vLLM's cache holds torch.compile artifacts and downloaded weights in nested
+# subdirectories; a 1 GB per-entry floor excluded most of them, so gate on age
+# instead and let grouping aggregate the total.
 [match]
 path_glob = "~/.cache/vllm/**"
-min_size_mb = 1000
+min_age_days = 14
 
 [action]
 type = "trash"
-prompt = "Move {size} of vLLM model cache to Trash?"
+prompt = "Move {size} of vLLM cache to Trash?"
 group = true
 
 [test]
-should_match = ["~/.cache/vllm/foo"]
+should_match = ["~/.cache/vllm/torch_compile_cache/hash/artifact.bin"]
 should_not_match = ["~/.cache/other"]

@@ -7,15 +7,21 @@ safety_level = "cautious"
 enabled = true
 priority = 50
 
+# All per-user logs under ~/Library/Logs (app logs, JetBrains/Homebrew logs,
+# DiagnosticReports past the crash recipe's window). Logs are informational;
+# the age gate keeps anything an app wrote this month out of the results.
 [match]
 path_glob = "~/Library/Logs/**"
 min_age_days = 30
 
 [action]
 type = "trash"
-prompt = "Move {size} of user logs to Trash?"
+prompt = "Move {size} of old user logs to Trash?"
 group = true
 
 [test]
-should_match = ["~/Library/Logs/console.log"]
-should_not_match = ["projects/system.log"]
+should_match = [
+    "~/Library/Logs/console.log",
+    "~/Library/Logs/JetBrains/IntelliJIdea2025.1/idea.log",
+]
+should_not_match = ["projects/system.log", "~/Library/Application Support/app.log"]
