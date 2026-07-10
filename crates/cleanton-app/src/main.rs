@@ -29,8 +29,9 @@ use cleanton_common::{
 };
 use cleanton_engine::{
     AnalyzedFull, AnalyzedPlan, AnnotatedAction, DockerAnalysis, DockerCleaner, DockerCleanupPlan,
-    DuplicateSet, EngineEvent, InstalledApp, LargeItem, Orchestrator, Suggestions, UninstallPlan,
-    cask_token_for, find_leftovers, list_installed_apps,
+    DuplicateSet, EngineEvent, InstalledApp, LargeItem, Orchestrator, SnapshotAnalysis,
+    SnapshotConfirmState, Suggestions, UninstallPlan, cask_token_for, delete_local_snapshots,
+    find_leftovers, format_snapshot_date, list_installed_apps,
 };
 use cleanton_packages::{Inventory, ManagerKind, PackageManagers, plan_removal, scan_usage};
 use cleanton_scanner::ScanOptions;
@@ -69,8 +70,17 @@ static SERVICE_ACTION_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 /// One suggestion trash at a time (same double-fire concern as above).
 static SUGGESTION_DELETE_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 
+/// One snapshot deletion run at a time (deletion is permanent; a double-fire
+/// must never race two tmutil runs against the same review).
+static SNAPSHOT_DELETE_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
+
 /// One application-inventory load at a time.
 static APPS_LOADING: AtomicBool = AtomicBool::new(false);
+
+/// One security scan at a time (the scan itself is read-only; the guard just
+/// prevents wasted duplicate work from rapid clicks). Because at most one scan
+/// is ever in flight, its completion closure can never be stale.
+static SECURITY_SCAN_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 
 /// One uninstall at a time.
 static UNINSTALL_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
@@ -103,6 +113,13 @@ thread_local! {
     /// through `brew uninstall --cask` as well.
     static ALL_CASK_TOKENS: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
 
+    /// The last finished security report, retained on the UI thread so the
+    /// Security tab's "Trust" actions can update the baseline from the exact
+    /// fingerprints that were scanned (UI-thread only, same reasoning as
+    /// ALL_SERVICES). Trusting writes ONLY the baseline metadata file.
+    static SECURITY_REPORT: RefCell<Option<cleanton_engine::SecurityReport>> =
+        const { RefCell::new(None) };
+
     /// The live expandable cleanup-plan row model (group headers + item rows),
     /// retained so selection/expand callbacks can mutate single rows in place.
     static PLAN_ROWS: RefCell<Option<Rc<VecModel<PlanListItem>>>> = const { RefCell::new(None) };
@@ -115,6 +132,12 @@ thread_local! {
     static PLAN_ACTION_BYTES: RefCell<Vec<u64>> = const { RefCell::new(Vec::new()) };
     /// The live Docker row model, retained for the same reason as PLAN_ROWS.
     static DOCKER_MODEL: RefCell<Option<Rc<VecModel<DockerRow>>>> = const { RefCell::new(None) };
+    /// The live Time Machine snapshot row model (Results panel).
+    static SNAPSHOT_MODEL: RefCell<Option<Rc<VecModel<SnapshotRow>>>> = const { RefCell::new(None) };
+    /// Two-step arm → confirm state for the snapshot panel. Snapshot deletion
+    /// is permanent (never Trash), so the armed dates live in the shared engine
+    /// state machine and are handed out exactly once on confirm.
+    static SNAPSHOT_CONFIRM: RefCell<SnapshotConfirmState> = const { RefCell::new(SnapshotConfirmState::Idle) };
 
     /// The active manager's inventory, the user's keep-set, and the live row
     /// model for the Packages tab (UI-thread only).
@@ -844,6 +867,37 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     });
 
+    // ── Wire: Security tab (read-only supply-chain scan, baseline + diff) ──
+    let ui_weak = ui.as_weak();
+    ui.global::<AppCallbacks>().on_start_security_scan(move || {
+        if let Some(ui) = ui_weak.upgrade() {
+            start_security_scan(&ui, false);
+        }
+    });
+
+    let ui_weak = ui.as_weak();
+    ui.global::<AppCallbacks>()
+        .on_security_establish_baseline(move || {
+            if let Some(ui) = ui_weak.upgrade() {
+                start_security_scan(&ui, true);
+            }
+        });
+
+    let ui_weak = ui.as_weak();
+    ui.global::<AppCallbacks>()
+        .on_security_trust_package(move |index| {
+            if let Some(ui) = ui_weak.upgrade() {
+                security_trust(&ui, Some(index));
+            }
+        });
+
+    let ui_weak = ui.as_weak();
+    ui.global::<AppCallbacks>().on_security_trust_all(move || {
+        if let Some(ui) = ui_weak.upgrade() {
+            security_trust(&ui, None);
+        }
+    });
+
     // ── Wire: Applications tab ─────────────────────────────────────────────
     let ui_weak = ui.as_weak();
     ui.global::<AppCallbacks>().on_refresh_apps(move || {
@@ -1183,6 +1237,80 @@ fn main() -> Result<(), slint::PlatformError> {
             });
         });
     });
+
+    // ── Wire: Time Machine snapshot review + confirm-gated deletion ────────
+    // Deleting an APFS snapshot is the one Cleanton flow that cannot go to the
+    // Trash, so it is double-gated: select rows, arm with "Delete selected",
+    // then explicitly confirm the permanent deletion.
+    let ui_weak = ui.as_weak();
+    ui.global::<AppCallbacks>()
+        .on_toggle_snapshot_selection(move |idx| {
+            if let Some(ui) = ui_weak.upgrade() {
+                toggle_snapshot_selection(&ui.global::<AppState>(), idx);
+            }
+        });
+    let ui_weak = ui.as_weak();
+    ui.global::<AppCallbacks>()
+        .on_request_snapshot_delete(move || {
+            if let Some(ui) = ui_weak.upgrade() {
+                request_snapshot_delete(&ui.global::<AppState>());
+            }
+        });
+    let ui_weak = ui.as_weak();
+    ui.global::<AppCallbacks>()
+        .on_cancel_snapshot_delete(move || {
+            if let Some(ui) = ui_weak.upgrade() {
+                let state = ui.global::<AppState>();
+                SNAPSHOT_CONFIRM.with(|cell| cell.borrow_mut().cancel());
+                state.set_snapshot_delete_pending(false);
+                state.set_snapshot_status(
+                    "Snapshot deletion cancelled. Nothing was removed.".into(),
+                );
+            }
+        });
+    let ui_weak = ui.as_weak();
+    let config_clone = shared_config.clone();
+    ui.global::<AppCallbacks>()
+        .on_confirm_snapshot_delete(move || {
+            let ui = ui_weak.unwrap();
+            let state = ui.global::<AppState>();
+            if state.get_snapshot_deleting() || state.get_scanning() || state.get_cleaning() {
+                return;
+            }
+            // Second step of the two-step confirm: take the armed dates exactly
+            // once. If nothing is armed this is a no-op.
+            let Some(dates) = SNAPSHOT_CONFIRM.with(|cell| cell.borrow_mut().confirm()) else {
+                state.set_snapshot_delete_pending(false);
+                return;
+            };
+            if SNAPSHOT_DELETE_IN_FLIGHT.swap(true, Ordering::SeqCst) {
+                state.set_snapshot_status("A snapshot deletion is still running.".into());
+                return;
+            }
+            state.set_snapshot_delete_pending(false);
+            state.set_snapshot_deleting(true);
+            state.set_snapshot_status(
+                format!("Deleting {} snapshot(s) via tmutil…", dates.len()).into(),
+            );
+
+            let ui_weak = ui.as_weak();
+            let config = config_snapshot(&config_clone);
+            std::thread::spawn(move || {
+                // Runs only after the explicit two-step confirmation above; the
+                // engine adapter re-validates every date and never retries.
+                let result = delete_local_snapshots(&dates);
+                // Re-read capacity + snapshot listing so the panel and the
+                // purgeable figure reflect reality, not our expectation.
+                let capacity_view = capacity::read(&capacity_root(&config));
+                let _ = ui_weak.upgrade_in_event_loop(move |ui| {
+                    SNAPSHOT_DELETE_IN_FLIGHT.store(false, Ordering::SeqCst);
+                    let state = ui.global::<AppState>();
+                    state.set_snapshot_deleting(false);
+                    apply_capacity_state(&state, &capacity_view);
+                    state.set_snapshot_status(result.status_message().into());
+                });
+            });
+        });
 
     // ── Wire: Reveal in Finder (review-only; never deletes) ────────────────
     ui.global::<AppCallbacks>()
@@ -1904,20 +2032,138 @@ fn apply_capacity_state(state: &AppState, view: &capacity::CapacityView) {
     }
 
     let snapshot_count = view.snapshot_count();
+    let query_failed = view
+        .snapshots
+        .as_ref()
+        .is_some_and(|snapshots| !snapshots.query_succeeded);
     state.set_snapshot_note(
         if snapshot_count > 0 {
             format!(
-                "{snapshot_count} local Time Machine snapshots may hold ~space until thinned (~24h)."
+                "{snapshot_count} local Time Machine snapshots may hold space until deleted or thinned (~24h). Review them on the Results tab."
             )
+        } else if query_failed {
+            // Distinguish "could not query" from "zero snapshots": never imply a
+            // clean disk we did not actually observe.
+            "Local snapshot state could not be queried (tmutil unavailable or denied); freed space may still be held by snapshots.".to_owned()
         } else {
             String::new()
         }
         .into(),
     );
+    apply_snapshot_state(state, view);
 
     let bars = capacity::normalized_used_series(&view.history, 64);
     state.set_usage_history_ready(bars.len() >= 2);
     state.set_usage_history(ModelRc::from(Rc::new(VecModel::from(bars))));
+}
+
+/// Populate the Results-tab snapshot panel from a fresh capacity view. Every
+/// refresh rebuilds the rows unselected and disarms any pending confirmation:
+/// a confirmation must never survive a change of the underlying snapshot list.
+fn apply_snapshot_state(state: &AppState, view: &capacity::CapacityView) {
+    SNAPSHOT_CONFIRM.with(|cell| cell.borrow_mut().cancel());
+    state.set_snapshot_delete_pending(false);
+    state.set_snapshot_selected_count(0);
+
+    let Some(listing) = view.snapshots.as_ref() else {
+        SNAPSHOT_MODEL.with(|cell| *cell.borrow_mut() = None);
+        state.set_snapshot_rows(ModelRc::from(Rc::new(VecModel::from(
+            Vec::<SnapshotRow>::new(),
+        ))));
+        state.set_snapshot_available(false);
+        state.set_snapshot_status("Not queried".into());
+        return;
+    };
+
+    let purgeable = view
+        .capacity
+        .as_ref()
+        .map_or(0, |cap| cap.purgeable_estimate_bytes);
+    let analysis = SnapshotAnalysis::from_listing(listing, purgeable);
+
+    let rows: Vec<SnapshotRow> = analysis
+        .snapshots
+        .iter()
+        .map(|snapshot| SnapshotRow {
+            date: SharedString::from(snapshot.date.as_str()),
+            label: SharedString::from(format_snapshot_date(&snapshot.date)),
+            identifier: SharedString::from(snapshot.identifier.as_str()),
+            selected: false,
+        })
+        .collect();
+    let available = !rows.is_empty();
+    let model = Rc::new(VecModel::from(rows));
+    SNAPSHOT_MODEL.with(|cell| *cell.borrow_mut() = Some(model.clone()));
+    state.set_snapshot_rows(ModelRc::from(model));
+    state.set_snapshot_available(available);
+    state.set_snapshot_status(
+        if available {
+            format!(
+                "{} local snapshot(s) pin purgeable space (volume purgeable estimate: ~{}). Deleting a snapshot cannot be undone — snapshots never go to the Trash.",
+                analysis.snapshots.len(),
+                display::human_bytes(analysis.purgeable_estimate_bytes)
+            )
+        } else if analysis.query_succeeded {
+            "No local snapshots.".to_owned()
+        } else {
+            "Could not query local snapshots (tmutil unavailable or Full Disk Access denied)."
+                .to_owned()
+        }
+        .into(),
+    );
+}
+
+/// The raw tmutil date tokens of the ticked snapshot rows.
+fn selected_snapshot_dates() -> Vec<String> {
+    let Some(model) = SNAPSHOT_MODEL.with(|cell| cell.borrow().clone()) else {
+        return Vec::new();
+    };
+    (0..model.row_count())
+        .filter_map(|idx| model.row_data(idx))
+        .filter(|row| row.selected)
+        .map(|row| row.date.to_string())
+        .collect()
+}
+
+/// Flip one snapshot row's selection. Any selection change disarms a pending
+/// confirmation so the armed set always matches what the user last reviewed.
+fn toggle_snapshot_selection(state: &AppState, idx: i32) {
+    let Some(model) = SNAPSHOT_MODEL.with(|cell| cell.borrow().clone()) else {
+        return;
+    };
+    let Ok(index) = usize::try_from(idx) else {
+        return;
+    };
+    if let Some(mut row) = model.row_data(index) {
+        row.selected = !row.selected;
+        model.set_row_data(index, row);
+    }
+    SNAPSHOT_CONFIRM.with(|cell| cell.borrow_mut().cancel());
+    state.set_snapshot_delete_pending(false);
+    state.set_snapshot_selected_count(clamp_to_i32(selected_snapshot_dates().len()));
+}
+
+/// First step of the two-step delete: arm the confirmation for the ticked
+/// rows and spell out — before anything runs — that the deletion is permanent.
+fn request_snapshot_delete(state: &AppState) {
+    if state.get_snapshot_deleting() {
+        return;
+    }
+    let dates = selected_snapshot_dates();
+    let armed = SNAPSHOT_CONFIRM.with(|cell| cell.borrow_mut().arm(dates));
+    if !armed {
+        state.set_snapshot_delete_pending(false);
+        state.set_snapshot_status("Select at least one snapshot to delete.".into());
+        return;
+    }
+    let count = SNAPSHOT_CONFIRM.with(|cell| cell.borrow().armed_count());
+    state.set_snapshot_delete_pending(true);
+    state.set_snapshot_status(
+        format!(
+            "Confirm to permanently delete {count} snapshot(s) — this cannot be undone via Trash. Time Machine loses these restore points."
+        )
+        .into(),
+    );
 }
 
 fn initialise_app_state(ui: &AppWindow, config: &CleantonConfig) {
@@ -2402,10 +2648,12 @@ fn large_item_row(item: &LargeItem) -> SuggestionRow {
         .unwrap_or_else(|| path.clone());
     // Re-downloadable git repos carry a note (remote + clean/dirty status); show
     // it as the secondary line and use a branch icon so they read as reclaimable.
-    let detail = if item.note.is_empty() {
-        path.clone()
-    } else {
-        format!("{} — {}", item.note, path)
+    // The advisory ML badge (display only) rides alongside the note.
+    let detail = match (item.note.is_empty(), item.ml_note.is_empty()) {
+        (true, true) => path.clone(),
+        (false, true) => format!("{} — {}", item.note, path),
+        (true, false) => format!("{} — {}", item.ml_note, path),
+        (false, false) => format!("{} · {} — {}", item.note, item.ml_note, path),
     };
     let icon = if item.redownloadable {
         "\u{f126}" // code-branch
@@ -2466,9 +2714,15 @@ fn installer_row(item: &LargeItem) -> SuggestionRow {
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.clone());
+    // Advisory ML badge (display only) on the secondary line.
+    let detail = if item.ml_note.is_empty() {
+        path.clone()
+    } else {
+        format!("{} — {}", item.ml_note, path)
+    };
     SuggestionRow {
         title: SharedString::from(name),
-        detail: SharedString::from(path.clone()),
+        detail: SharedString::from(detail),
         size: SharedString::from(display::human_bytes(item.bytes)),
         icon: SharedString::from("\u{f187}"), // box-archive
         path: SharedString::from(path),
@@ -2489,9 +2743,15 @@ fn screenshot_row(item: &LargeItem) -> SuggestionRow {
     } else {
         "\u{f03e}" // image
     };
+    // Advisory ML badge (display only) on the secondary line.
+    let detail = if item.ml_note.is_empty() {
+        path.clone()
+    } else {
+        format!("{} — {}", item.ml_note, path)
+    };
     SuggestionRow {
         title: SharedString::from(name),
-        detail: SharedString::from(path.clone()),
+        detail: SharedString::from(detail),
         size: SharedString::from(display::human_bytes(item.bytes)),
         icon: SharedString::from(icon),
         path: SharedString::from(path),
@@ -3269,6 +3529,137 @@ fn service_type_label(service_type: ServiceType) -> &'static str {
         ServiceType::SystemLaunchAgent => "System agent",
         ServiceType::SystemLaunchDaemon => "Daemon",
         ServiceType::BrewService => "Brew",
+    }
+}
+
+/// Start the read-only security scan of installed packages on a background
+/// worker thread (the static analyzer is CPU-bound and must never block the
+/// UI). Detection + notification only: findings never become cleanup actions,
+/// and nothing on this path removes, quarantines, or modifies a package. With
+/// `establish` the current package set is recorded as the trusted baseline —
+/// a write to the baseline metadata file only.
+fn start_security_scan(ui: &AppWindow, establish: bool) {
+    if SECURITY_SCAN_IN_FLIGHT.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let state = ui.global::<AppState>();
+    state.set_security_scanning(true);
+    state.set_security_has_report(false);
+    state.set_security_progress("discovering packages…".into());
+    state.set_security_progress_ratio(0.0);
+    state.set_security_rows(ModelRc::from(Rc::new(VecModel::from(
+        Vec::<SecurityRow>::new(),
+    ))));
+
+    let ui_weak = ui.as_weak();
+    std::thread::spawn(move || {
+        let progress_ui = ui_weak.clone();
+        let progress = move |progress: cleanton_engine::SecurityProgress| {
+            // Throttle: pushing every package through the event loop is noise;
+            // every 10th (plus the final one) keeps the counter live.
+            if !progress.scanned.is_multiple_of(10) && progress.scanned != progress.total {
+                return;
+            }
+            let label = format!("{} of {} packages", progress.scanned, progress.total);
+            #[allow(clippy::cast_precision_loss)]
+            let ratio = if progress.total == 0 {
+                0.0f32
+            } else {
+                progress.scanned as f32 / progress.total as f32
+            };
+            let _ = progress_ui.upgrade_in_event_loop(move |ui| {
+                let state = ui.global::<AppState>();
+                state.set_security_progress(label.into());
+                state.set_security_progress_ratio(ratio);
+            });
+        };
+        let options = cleanton_engine::SecurityScanOptions {
+            establish_baseline: establish,
+            ..cleanton_engine::SecurityScanOptions::with_default_baseline()
+        };
+        let report =
+            cleanton_engine::run_security_scan_with_options(&[], &options, None, &progress);
+        let _ = ui_weak.upgrade_in_event_loop(move |ui| {
+            SECURITY_SCAN_IN_FLIGHT.store(false, Ordering::SeqCst);
+            apply_security_report(&ui.global::<AppState>(), &report);
+            SECURITY_REPORT.with(|slot| *slot.borrow_mut() = Some(report));
+        });
+    });
+}
+
+/// Mark one flagged package (`Some(index)`) or every flagged package (`None`)
+/// as reviewed/trusted. Updates ONLY the baseline metadata file — the package
+/// itself is never touched — then re-projects the report into the tab state.
+fn security_trust(ui: &AppWindow, index: Option<i32>) {
+    let Some(baseline_path) = cleanton_engine::default_baseline_path() else {
+        return;
+    };
+    SECURITY_REPORT.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let Some(report) = slot.as_mut() else {
+            return;
+        };
+        let result = match index {
+            Some(index) => usize::try_from(index)
+                .ok()
+                .and_then(|index| report.trust_flagged(index, &baseline_path).ok())
+                .map(|_| ()),
+            None => report.trust_all_flagged(&baseline_path).ok().map(|_| ()),
+        };
+        if result.is_some() {
+            apply_security_report(&ui.global::<AppState>(), report);
+        }
+    });
+}
+
+/// Project a finished [`cleanton_engine::SecurityReport`] into the Security
+/// tab state. Uses the engine's shared copy helpers so the Slint app, the TUI,
+/// and the CLI all render identical summary/finding/change strings.
+fn apply_security_report(state: &AppState, report: &cleanton_engine::SecurityReport) {
+    let count = |value: usize| i32::try_from(value).unwrap_or(i32::MAX);
+    state.set_security_scanning(false);
+    state.set_security_has_report(true);
+    state.set_security_summary(report.summary_message().into());
+    state.set_security_headline(report.banner_headline().into());
+    state.set_security_banner_tone(report.banner_tone().into());
+    state.set_security_baseline_established(report.baseline_established);
+    state.set_security_worst(
+        cleanton_engine::security::verdict_label(report.worst_verdict()).into(),
+    );
+    state.set_security_known_count(count(report.known_unchanged));
+    state.set_security_new_count(count(report.new_packages));
+    state.set_security_updated_count(count(report.updated_packages));
+    state.set_security_tamper_count(count(report.changed_same_version));
+    state.set_security_critical_count(count(report.critical_packages));
+    state.set_security_flagged_count(count(report.flagged.len()));
+    let rows: Vec<SecurityRow> = report.flagged.iter().map(security_row).collect();
+    state.set_security_rows(ModelRc::from(Rc::new(VecModel::from(rows))));
+}
+
+fn security_row(package: &cleanton_engine::PackageReport) -> SecurityRow {
+    use cleanton_engine::security::{severity_label, verdict_label};
+    SecurityRow {
+        name: SharedString::from(package.name.as_str()),
+        version: SharedString::from(package.version.as_deref().unwrap_or("")),
+        verdict: SharedString::from(verdict_label(package.verdict)),
+        // The badge label + tone come from the ASSESSMENT: notice rows show
+        // a neutral "notice" chip, never the raw heuristic verdict.
+        assessment_label: SharedString::from(package.assessment_label()),
+        alert: package.is_alert(),
+        heuristic: SharedString::from(package.heuristic_note().unwrap_or_default()),
+        severity: SharedString::from(package.worst_severity().map_or("-", severity_label)),
+        score: i32::try_from(package.score).unwrap_or(100),
+        path: SharedString::from(package.path.display().to_string()),
+        source: SharedString::from(package.source.label()),
+        findings: SharedString::from(package.finding_lines().join("\n")),
+        change: SharedString::from(package.change_label()),
+        notice: SharedString::from(package.change.notice()),
+        // Recommended review-only next steps (shared engine copy). Advisory —
+        // the "Trust" button updates the baseline; nothing here deletes.
+        action_label: SharedString::from(package.action_label()),
+        actions: SharedString::from(package.action_lines().join("\n")),
+        tamper: package.is_tampered(),
+        critical: package.is_critical_alert(),
     }
 }
 

@@ -305,6 +305,9 @@ name = "arbitrary"
 version = "1.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
+dependencies = [
+ "derive_arbitrary",
+]
 
 [[package]]
 name = "arg_enum_proc_macro"
@@ -1092,8 +1095,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
+name = "cleanton-antivirus"
+version = "0.3.0"
+dependencies = [
+ "base64",
+ "flate2",
+ "hex",
+ "md-5",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha1",
+ "sha2",
+ "tar",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
+ "unicode-normalization",
+ "walkdir",
+ "zip",
+]
+
+[[package]]
 name = "cleanton-app"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "cleanton-common",
  "cleanton-engine",
@@ -1111,7 +1136,7 @@ dependencies = [
 
 [[package]]
 name = "cleanton-cli"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "clap",
  "cleanton-common",
@@ -1129,7 +1154,7 @@ dependencies = [
 
 [[package]]
 name = "cleanton-common"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "humansize",
@@ -1144,10 +1169,11 @@ dependencies = [
 
 [[package]]
 name = "cleanton-engine"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "bollard",
  "chrono",
+ "cleanton-antivirus",
  "cleanton-common",
  "cleanton-ml",
  "cleanton-recipes",
@@ -1155,27 +1181,30 @@ dependencies = [
  "plist",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "tokio",
  "toml 0.9.12+spec-1.1.0",
+ "tracing",
  "trash",
  "walkdir",
 ]
 
 [[package]]
 name = "cleanton-ml"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "cleanton-common",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "tract-onnx",
 ]
 
 [[package]]
 name = "cleanton-packages"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "cleanton-common",
  "serde",
@@ -1187,7 +1216,7 @@ dependencies = [
 
 [[package]]
 name = "cleanton-recipes"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "cleanton-common",
  "glob",
@@ -1199,7 +1228,7 @@ dependencies = [
 
 [[package]]
 name = "cleanton-scanner"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "cleanton-common",
  "glob",
@@ -1213,7 +1242,7 @@ dependencies = [
 
 [[package]]
 name = "cleanton-services"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "cleanton-common",
  "plist",
@@ -1226,7 +1255,7 @@ dependencies = [
 
 [[package]]
 name = "cleanton-ui"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "cleanton-common",
  "cleanton-engine",
@@ -1658,6 +1687,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "derive_arbitrary"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e567bd82dcff979e4b03460c307b3cdc9e96fde3d73bed1496d2bc75d9dd62a"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.118",
 ]
 
 [[package]]
@@ -3989,6 +4029,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "md-5"
+version = "0.10.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d89e7ee0cfbedfc4da3340218492196241d89eefb6dab27de5df917a6d2e78cf"
+dependencies = [
+ "cfg-if",
+ "digest",
+]
+
+[[package]]
 name = "memchr"
 version = "2.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6072,6 +6122,17 @@ dependencies = [
  "itoa",
  "ryu",
  "serde",
+]
+
+[[package]]
+name = "sha1"
+version = "0.10.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3bf829a2d51ab4a5ddf1352d8470c140cadc8301b2ae1789db023f01cedd6ba"
+dependencies = [
+ "cfg-if",
+ "cpufeatures",
+ "digest",
 ]
 
 [[package]]
@@ -8762,10 +8823,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "zip"
+version = "2.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fabe6324e908f85a1c52063ce7aa26b68dcb7eb6dbc83a2d148403c9bc3eba50"
+dependencies = [
+ "arbitrary",
+ "crc32fast",
+ "crossbeam-utils",
+ "displaydoc",
+ "flate2",
+ "indexmap",
+ "memchr",
+ "thiserror 2.0.18",
+ "zopfli",
+]
+
+[[package]]
 name = "zmij"
 version = "1.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
+
+[[package]]
+name = "zopfli"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f05cd8797d63865425ff89b5c4a48804f35ba0ce8d125800027ad6017d2b5249"
+dependencies = [
+ "bumpalo",
+ "crc32fast",
+ "log",
+ "simd-adler32",
+]
 
 [[package]]
 name = "zune-core"

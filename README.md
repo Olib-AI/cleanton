@@ -20,10 +20,11 @@ Rust workspace, edition 2024, resolver 3, MSRV 1.96.
 
 | Crate | Role |
 |---|---|
+| `cleanton-antivirus` | Vendored static malware + supply-chain scanner (multi-engine; pure/static, no network). Backs the Security tab and `cleanton security`. |
 | `cleanton-common` | Shared config, plan, result, and error types. |
 | `cleanton-scanner` | Filesystem scanner and the audited macOS capacity FFI (`statfs`/`pathconf`). |
 | `cleanton-recipes` | TOML recipe registry (about 70 built-in recipes for Rust, Node, Swift, Python, and more). |
-| `cleanton-engine` | Orchestration: `analyze_full`, the planner, the trash-based executor, Docker, and the suggestions engine. |
+| `cleanton-engine` | Orchestration: `analyze_full`, the planner, the trash-based executor, Docker, the suggestions engine, and the read-only `security` supply-chain scan. |
 | `cleanton-packages` | Package-manager facade: Homebrew, npm, pip, MacPorts. Keep-set removal, codebase-usage scan. |
 | `cleanton-services` | launchd and Homebrew service inventory and gated enable/disable. |
 | `cleanton-ml` | Safety-constrained ML advisory (never widens what is removable). |

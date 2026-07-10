@@ -416,11 +416,24 @@ fn get_capacity_lines(app: &App) -> Vec<Line<'static>> {
         }
     }
 
-    // Non-alarming local-snapshot disclosure.
+    // Non-alarming local-snapshot disclosure. Distinguish "could not query"
+    // from "zero snapshots": never imply a clean disk we did not observe.
     let snapshot_count = app.capacity_view.snapshot_count();
+    let snapshot_query_failed = app
+        .capacity_view
+        .snapshots
+        .as_ref()
+        .is_some_and(|snapshots| !snapshots.query_succeeded);
     if snapshot_count > 0 {
         lines.push(Line::from(Span::styled(
-            format!("  ⓘ {snapshot_count} local snapshots may hold space until thinned (~24h)."),
+            format!(
+                "  ⓘ {snapshot_count} local snapshots may hold space until deleted or thinned (~24h). Review on Results (2)."
+            ),
+            Style::default().fg(app.theme.muted),
+        )));
+    } else if snapshot_query_failed {
+        lines.push(Line::from(Span::styled(
+            "  ⓘ Local snapshot state could not be queried (tmutil unavailable or denied).",
             Style::default().fg(app.theme.muted),
         )));
     }

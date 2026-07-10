@@ -155,7 +155,12 @@ impl Orchestrator {
     pub async fn analyze_full(&self, scan: &ScanResult) -> AnalyzedFull {
         let analyzed = self.analyze(scan);
         let docker = analyze_docker().await;
-        let suggestions = detect_suggestions(scan);
+        let mut suggestions = detect_suggestions(scan);
+        // Advisory ML badges on the review-only suggestion items (display
+        // only; suggestions are never auto-removed and this never changes
+        // what is suggested).
+        let classifier = MlEngine::embedded();
+        crate::ml::annotate_suggestions(&classifier, &mut suggestions, scan);
         AnalyzedFull {
             analyzed,
             docker,

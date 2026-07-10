@@ -407,7 +407,7 @@ cleanton-ml/
 │   ├── labels.rs           # Classification label definitions
 │   └── fallback.rs         # Heuristic fallback when ONNX unavailable
 ├── models/
-│   └── file_classifier_v1.onnx  # Pre-trained model (< 5MB)
+│   └── file_classifier_v2.onnx  # Pre-trained model (embedded, ~83 KB)
 ├── training/               # Python training scripts (not compiled)
 │   ├── train.py
 │   ├── export_onnx.py
@@ -785,6 +785,67 @@ impl ServiceManager {
     pub async fn delete_orphaned_plist(&self, service_id: &str) -> Result<(), CleantonError>;
 }
 ```
+
+---
+
+## 8B. `cleanton-antivirus` — Static Supply-Chain Scanner
+
+**Path**: `crates/cleanton-antivirus/`
+**Type**: Library crate (vendored from the rusted-batata workspace's `rb-antivirus`; keep diffs against upstream minimal — it deliberately does NOT opt into the workspace lints)
+**Dependencies**: `serde`, `regex`, `sha2`/`sha1`/`md-5`, `flate2`, `tar`, `zip`, `walkdir`, `unicode-normalization`
+
+A general-purpose, multi-engine **static** malware and supply-chain scanner. It
+loads a target (file, directory tree, or archive such as an npm `.tgz`) into an
+in-memory `FileUnit` set, runs every `DetectionEngine` over it (signatures,
+rules, entropy, IOC, script behavior, binary indicators, supply-chain,
+typosquat, worm propagation), and aggregates the `Finding`s into a scored
+`ScanReport` with a `Verdict` (`Clean` / `Suspicious` / `Malicious`).
+
+Key properties:
+
+1. **Pure/static** — no network access, no execution of scanned code; bounded
+   memory with zip-bomb, file-size, and archive-depth limits (`ScanConfig`).
+2. **Entry point** — the `Scanner` facade: `Scanner::with_default_engines(ScanConfig::default()).scan_path(&dir)`.
+3. **Findings** carry `Severity` (Info..Critical), `Confidence`, a
+   `ThreatCategory` (install script, exfiltration, credential access,
+   typosquatting, dependency confusion, …), and a sanitized evidence snippet.
+
+### 8B.1 The `security` module in `cleanton-engine`
+
+`crates/cleanton-engine/src/security.rs` builds Cleanton's **Security** feature
+on top of this crate: a read-only supply-chain scan of installed packages.
+
+- **Target discovery** (filesystem only — never spawns `npm`/`pip`/`node`):
+  global `node_modules` trees (`/opt/homebrew/lib`, `/usr/local/lib`,
+  `~/.npm-global`, pnpm `~/Library/pnpm/global/*/node_modules`,
+  `~/.bun/install/global`, `~/.yarn/global`), Python site-packages
+  (`~/Library/Python/*/lib/python*/site-packages`, pipx venvs, uv tools),
+  VS Code/Cursor extensions, and — via project roots — project `node_modules`
+  and virtualenv `site-packages` trees. Absent locations are skipped silently.
+- **Orchestration** — each top-level package is one `Scanner` run so findings
+  attribute to a package; identical resolved paths are scanned once; a bounded
+  worker pool (≤4 threads) with progress callbacks and `AtomicBool`
+  cancellation.
+- **Report** — `SecurityReport` (serde-serializable): targets, packages
+  scanned, duration, flagged packages sorted worst-first (name/version from
+  the manifest, path, verdict, score, top findings), and summary counts by
+  verdict/severity. `summary_message()` and `PackageReport::finding_lines()`
+  are the shared copy rendered identically by the CLI, the Slint app, and the
+  TUI.
+- **Policy** — detection + notification ONLY. No `CleanupAction` is ever
+  produced from security findings; the report shows paths so the user can act
+  manually with their package manager.
+
+### 8B.2 CLI
+
+`cleanton security` scans the discovered global/extension targets (add project
+trees with `--root <path>`; `--json` emits the full `SecurityReport`).
+Exit codes: `0` clean, `3` suspicious findings, `5` malicious findings
+(distinct from `plan`/`clean`'s `2` = empty plan and `4` = incomplete scan).
+
+Both UIs surface the same scan as a **Security** tab (Slint screen index 6;
+TUI tab `[6]`), with idle → progress → results states and no destructive
+affordance.
 
 ---
 

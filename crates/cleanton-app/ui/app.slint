@@ -46,6 +46,19 @@ export struct DockerRow {
     has-reclaimable: bool,
 }
 
+// A local Time Machine snapshot surfaced in Results. Deleting a snapshot is
+// permanent (APFS snapshots cannot go to the Trash), so rows are unselected by
+// default and deletion is two-step confirmed.
+export struct SnapshotRow {
+    // Raw tmutil date token, e.g. "2026-06-29-120000" (what deletion runs on).
+    date: string,
+    // Human-formatted date for display, e.g. "2026-06-29 12:00:00".
+    label: string,
+    // Full identifier, e.g. "com.apple.TimeMachine.2026-06-29-120000.local".
+    identifier: string,
+    selected: bool,
+}
+
 // A review-only suggestion row (duplicate set, large file/folder, or screenshot).
 export struct SuggestionRow {
     title: string,
@@ -104,6 +117,52 @@ export struct LeftoverRow {
     selected: bool,
 }
 
+// One surfaced package from the read-only security scan (Security tab):
+// new, updated, or changed since the trusted baseline. The only per-row
+// action is "Trust" which updates the baseline METADATA file — the package
+// itself is never touched.
+export struct SecurityRow {
+    name: string,
+    version: string,
+    // RAW AV verdict "clean" | "suspicious" | "malicious" — kept for
+    // transparency; the BADGE is driven by assessment-label instead.
+    verdict: string,
+    // Assessment badge label (shared engine copy): the verdict for alerts,
+    // "notice" for uncorroborated rows.
+    assessment-label: string,
+    // True for alert rows (tamper or corroborated threat); false for the
+    // neutral "capabilities noted" notices.
+    alert: bool,
+    // Muted secondary detail for notice rows with a non-clean raw verdict,
+    // e.g. "heuristics: malicious (score 95, uncorroborated)". Empty
+    // otherwise.
+    heuristic: string,
+    // Worst finding severity label, e.g. "critical" ("-" when none).
+    severity: string,
+    score: int,
+    path: string,
+    // Which package tree it came from, e.g. "global npm packages".
+    source: string,
+    // Pre-rendered top findings (shared engine copy), newline-separated.
+    findings: string,
+    // Baseline change kind label (shared engine copy), e.g. "new",
+    // "updated", "changed — no version bump", "unchanged".
+    change: string,
+    // Shared one-sentence explanation of the change kind.
+    notice: string,
+    // Short recommended-response verb (shared engine copy), e.g.
+    // "Investigate now" / "Verify then trust".
+    action-label: string,
+    // Concrete review-only next steps (shared engine copy), newline-separated.
+    // Advisory — the user runs these; Cleanton never removes anything.
+    actions: string,
+    // True for the same-version tamper case (the red alarm).
+    tamper: bool,
+    // True for critical alerts (tamper, or a corroborated malicious
+    // assessment).
+    critical: bool,
+}
+
 export struct ServiceRow {
     id: string,
     name: string,
@@ -152,6 +211,15 @@ export global AppState {
     in-out property <string> docker-reclaimable: "0 B";
     in-out property <[DockerRow]> docker-rows;
     in-out property <bool> docker-cleaning: false;
+
+    // ── Time Machine local snapshots (confirm-gated; NOT trash-reversible) ────
+    in-out property <bool> snapshot-available: false;
+    in-out property <string> snapshot-status: "Not queried";
+    in-out property <[SnapshotRow]> snapshot-rows;
+    in-out property <int> snapshot-selected-count: 0;
+    in-out property <bool> snapshot-deleting: false;
+    // Two-step arming: true after "Delete selected", cleared by Confirm/Cancel.
+    in-out property <bool> snapshot-delete-pending: false;
 
     // ── Suggestions (review-only: duplicates + large items) ───────────────────
     in-out property <int> duplicate-count: 0;
@@ -260,6 +328,32 @@ export global AppState {
     // Two-step Remove arming for orphaned startup items (missing executable).
     in-out property <string> service-pending-remove-id;
 
+    // Security tab state (read-only supply-chain scan diffed against the
+    // trusted baseline; never destructive).
+    in-out property <bool> security-scanning: false;
+    in-out property <bool> security-has-report: false;
+    in-out property <string> security-progress: "";
+    in-out property <float> security-progress-ratio: 0.0;
+    // Shared summary copy (SecurityReport::summary_message) — same string in
+    // the TUI and the CLI.
+    in-out property <string> security-summary: "";
+    // Shared banner headline + tone ("danger" | "warning" | "success").
+    in-out property <string> security-headline: "";
+    in-out property <string> security-banner-tone: "success";
+    // True when THIS scan recorded the baseline (first run / re-establish).
+    in-out property <bool> security-baseline-established: false;
+    // Worst verdict across the surfaced packages.
+    in-out property <string> security-worst: "clean";
+    in-out property <[SecurityRow]> security-rows;
+    in-out property <int> security-flagged-count: 0;
+    // Diff counts: known/unchanged (suppressed), new, updated, changed
+    // without a version bump (tamper signature), and critical alerts.
+    in-out property <int> security-known-count: 0;
+    in-out property <int> security-new-count: 0;
+    in-out property <int> security-updated-count: 0;
+    in-out property <int> security-tamper-count: 0;
+    in-out property <int> security-critical-count: 0;
+
     // Applications tab state.
     in-out property <[AppListRow]> app-rows;
     in-out property <string> app-filter;
@@ -313,6 +407,12 @@ export global AppCallbacks {
     // Toggle a Docker category and run the confirmed Docker cleanup.
     callback toggle-docker-selection(int);
     callback clean-docker();
+    // Time Machine snapshot panel: toggle a row, then the two-step permanent
+    // delete (request arms the confirmation, confirm runs tmutil, cancel disarms).
+    callback toggle-snapshot-selection(int);
+    callback request-snapshot-delete();
+    callback confirm-snapshot-delete();
+    callback cancel-snapshot-delete();
     // Reveal a suggestion's path in Finder (review-only; never deletes).
     callback reveal-in-finder(string);
     // Move a single suggestion path (duplicate copy, large item, or screenshot)
@@ -345,6 +445,17 @@ export global AppCallbacks {
     // Remove an orphaned startup item's leftover plist by id (backend only
     // permits this when the referenced executable is missing).
     callback remove-service(string);
+
+    // Security tab: start (or restart) the read-only supply-chain scan of
+    // installed packages. Detection + notification only; never destructive.
+    callback start-security-scan();
+    // Record the CURRENT package set as the trusted baseline (a scan that
+    // ends by writing the baseline metadata file; packages untouched).
+    callback security-establish-baseline();
+    // Mark the flagged package at this row index as reviewed/trusted, or all
+    // of them. Baseline metadata only — never modifies a package.
+    callback security-trust-package(int);
+    callback security-trust-all();
 
     // Applications tab: inventory, leftover review, and two-step uninstall.
     callback refresh-apps();
@@ -468,6 +579,7 @@ export component AppWindow inherits Window {
                 SidebarItem { label: "Packages"; icon-glyph: "\u{f1b3}"; active: AppState.active-screen == 2; clicked => { AppState.active-screen = 2; AppCallbacks.refresh-packages(); } }
                 SidebarItem { label: "Services"; icon-glyph: "\u{f233}"; active: AppState.active-screen == 3; clicked => { AppState.active-screen = 3; AppCallbacks.refresh-services(); } }
                 SidebarItem { label: "Applications"; icon-glyph: "\u{e196}"; active: AppState.active-screen == 5; clicked => { AppState.active-screen = 5; AppCallbacks.refresh-apps(); } }
+                SidebarItem { label: "Security"; icon-glyph: "\u{f132}"; active: AppState.active-screen == 6; clicked => { AppState.active-screen = 6; } }
                 SidebarItem { label: "Settings"; icon-glyph: "\u{f013}"; active: AppState.active-screen == 4; clicked => { AppState.active-screen = 4; } }
 
                 Rectangle { vertical-stretch: 1; }
@@ -1006,6 +1118,90 @@ export component AppWindow inherits Window {
                                             Text { text: d.detail; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; overflow: elide; }
                                         }
                                         Text { text: d.size; color: Theme.palette.text-secondary; font-size: Theme.font-size-sm; font-weight: 600; vertical-alignment: center; horizontal-alignment: right; min-width: RowColumns.size-col; }
+                                    }
+                                }
+                            }
+                        }
+
+                        // ── Time Machine local snapshots ─────────────────────
+                        // The one flow that CANNOT go to the Trash: an APFS
+                        // snapshot is volume metadata, so deletion is permanent.
+                        // Rows start unselected and deletion is two-step confirmed.
+                        if AppState.snapshot-available: Panel {
+                            VerticalLayout {
+                                padding: Theme.spacing-sm;
+                                spacing: 2px;
+
+                                HorizontalLayout {
+                                    padding-left: Theme.spacing-md;
+                                    padding-right: Theme.spacing-md;
+                                    padding-top: Theme.spacing-xs;
+                                    padding-bottom: Theme.spacing-sm;
+                                    spacing: Theme.spacing-sm;
+                                    FaIcon { glyph: "\u{f1da}"; icon-color: Theme.palette.warning; icon-size: Theme.font-size-md; width: 22px; }
+                                    VerticalLayout {
+                                        horizontal-stretch: 1;
+                                        spacing: 2px;
+                                        Text { text: "Time Machine local snapshots"; color: Theme.palette.text-primary; font-size: Theme.font-size-sm; font-weight: 700; }
+                                        Text { text: AppState.snapshot-status; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; wrap: word-wrap; }
+                                    }
+                                    if AppState.snapshot-delete-pending: ActionButton {
+                                        label: "Cancel";
+                                        icon-glyph: "\u{f00d}";
+                                        button-color: Theme.palette.info;
+                                        enabled: !AppState.snapshot-deleting;
+                                        clicked => { AppCallbacks.cancel-snapshot-delete(); }
+                                    }
+                                    ActionButton {
+                                        label: AppState.snapshot-deleting
+                                            ? "Deleting…"
+                                            : AppState.snapshot-delete-pending
+                                                ? "Confirm permanent delete (" + AppState.snapshot-selected-count + ")"
+                                                : "Delete selected (" + AppState.snapshot-selected-count + ")";
+                                        icon-glyph: AppState.snapshot-delete-pending ? "\u{f00c}" : "\u{f1f8}";
+                                        button-color: AppState.snapshot-delete-pending ? Theme.palette.danger : Theme.palette.warning;
+                                        min-width: 130px;
+                                        enabled: !AppState.snapshot-deleting && !AppState.scanning && !AppState.cleaning && (AppState.snapshot-delete-pending || AppState.snapshot-selected-count > 0);
+                                        clicked => {
+                                            if AppState.snapshot-delete-pending {
+                                                AppCallbacks.confirm-snapshot-delete();
+                                            } else {
+                                                AppCallbacks.request-snapshot-delete();
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Rectangle { height: 1px; background: Theme.palette.border-subtle; }
+
+                                for s[idx] in AppState.snapshot-rows: Rectangle {
+                                    height: 50px;
+                                    background: sta.has-hover ? Theme.palette.surface-elevated : transparent;
+                                    border-radius: Theme.radius-sm;
+                                    sta := TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => { AppCallbacks.toggle-snapshot-selection(idx); }
+                                    }
+                                    HorizontalLayout {
+                                        padding-left: Theme.spacing-md;
+                                        padding-right: Theme.spacing-md;
+                                        spacing: Theme.spacing-sm;
+                                        Rectangle {
+                                            width: RowColumns.select-col;
+                                            Checkbox {
+                                                checked: s.selected;
+                                                x: 0;
+                                                y: (parent.height - self.height) / 2;
+                                                toggled => { AppCallbacks.toggle-snapshot-selection(idx); }
+                                            }
+                                        }
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            spacing: 2px;
+                                            Text { text: s.label; color: Theme.palette.text-primary; font-size: Theme.font-size-sm; font-weight: 600; }
+                                            Text { text: s.identifier; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; overflow: elide; }
+                                        }
                                     }
                                 }
                             }
@@ -1768,6 +1964,451 @@ export component AppWindow inherits Window {
 
                                     Rectangle { horizontal-stretch: 1; }
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ── Security: read-only supply-chain scan of installed packages,
+            // diffed against the trusted baseline. Detection + notification
+            // only — this screen has NO destructive affordance; "Trust"
+            // updates the baseline METADATA file, never a package.
+            if AppState.active-screen == 6: VerticalLayout {
+                padding: Theme.spacing-xl;
+                spacing: Theme.spacing-lg;
+
+                HorizontalLayout {
+                    spacing: Theme.spacing-md;
+
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        spacing: Theme.spacing-xs;
+                        Text { text: "Security"; color: Theme.palette.text-primary; font-size: Theme.font-size-xl; font-weight: 700; }
+                        Text {
+                            text: AppState.security-scanning
+                                ? "Scanning installed packages… " + AppState.security-progress
+                                : (AppState.security-has-report
+                                    ? "Changes since your trusted baseline. Read-only — nothing is removed or changed."
+                                    : "First scan records your packages as a trusted baseline; later scans flag only changes.");
+                            color: Theme.palette.text-secondary;
+                            font-size: Theme.font-size-sm;
+                            overflow: elide;
+                        }
+                    }
+
+                    if AppState.security-has-report && !AppState.security-scanning && AppState.security-flagged-count > 0: ActionButton {
+                        label: "Trust all shown";
+                        icon-glyph: "\u{f058}";
+                        primary: false;
+                        clicked => { AppCallbacks.security-trust-all(); }
+                    }
+
+                    if AppState.security-has-report && !AppState.security-scanning: ActionButton {
+                        label: "Re-establish baseline";
+                        icon-glyph: "\u{f021}";
+                        primary: false;
+                        clicked => { AppCallbacks.security-establish-baseline(); }
+                    }
+
+                    ActionButton {
+                        label: AppState.security-scanning
+                            ? "Scanning…"
+                            : (AppState.security-has-report ? "Rescan" : "Scan installed packages");
+                        icon-glyph: "\u{f132}";
+                        enabled: !AppState.security-scanning;
+                        clicked => { AppCallbacks.start-security-scan(); }
+                    }
+                }
+
+                // Idle state: explain the baseline + diff model before the
+                // first run.
+                if !AppState.security-scanning && !AppState.security-has-report: Panel {
+                    vertical-stretch: 1;
+
+                    VerticalLayout {
+                        padding: Theme.spacing-xl;
+                        spacing: Theme.spacing-md;
+                        alignment: center;
+
+                        FaIcon {
+                            glyph: "\u{f132}";
+                            icon-color: Theme.palette.accent;
+                            icon-size: 34px;
+                        }
+                        Text {
+                            text: "Baseline your packages, then watch for changes";
+                            color: Theme.palette.text-primary;
+                            font-size: Theme.font-size-lg;
+                            font-weight: 700;
+                            horizontal-alignment: center;
+                        }
+                        Text {
+                            text: "Your first scan records every installed package — global npm/pnpm/bun/yarn packages, Python site-packages, and VS Code/Cursor extensions — as a trusted baseline, so legitimate tools like npm and pip are not treated as threats.";
+                            color: Theme.palette.text-secondary;
+                            font-size: Theme.font-size-sm;
+                            wrap: word-wrap;
+                            horizontal-alignment: center;
+                        }
+                        Text {
+                            text: "Later scans flag only what changed: new packages, updated packages, and — the highest signal — packages whose contents changed without a version bump (the npm-worm injection signature).";
+                            color: Theme.palette.text-secondary;
+                            font-size: Theme.font-size-sm;
+                            wrap: word-wrap;
+                            horizontal-alignment: center;
+                        }
+                        Text {
+                            text: "The scan is read-only: Cleanton only reports what it finds — it never removes or changes a package.";
+                            color: Theme.palette.text-muted;
+                            font-size: Theme.font-size-xs;
+                            wrap: word-wrap;
+                            horizontal-alignment: center;
+                        }
+                    }
+                }
+
+                // Progress state: packages-scanned counter + live bar.
+                if AppState.security-scanning: Panel {
+                    vertical-stretch: 1;
+
+                    VerticalLayout {
+                        padding: Theme.spacing-xl;
+                        spacing: Theme.spacing-md;
+                        alignment: center;
+
+                        Text {
+                            text: "Scanning… " + AppState.security-progress;
+                            color: Theme.palette.text-primary;
+                            font-size: Theme.font-size-lg;
+                            font-weight: 700;
+                            horizontal-alignment: center;
+                        }
+                        HorizontalLayout {
+                            alignment: center;
+                            ProgressBar {
+                                width: 46%;
+                                progress: AppState.security-progress-ratio;
+                            }
+                        }
+                        Text {
+                            text: "Fingerprinting each package and analyzing it with the static supply-chain scanner. Nothing is removed or modified during the scan.";
+                            color: Theme.palette.text-muted;
+                            font-size: Theme.font-size-sm;
+                            wrap: word-wrap;
+                            horizontal-alignment: center;
+                        }
+                    }
+                }
+
+                // Results state: metric tiles + tone banner + the diff.
+                if !AppState.security-scanning && AppState.security-has-report: VerticalLayout {
+                    vertical-stretch: 1;
+                    spacing: Theme.spacing-md;
+
+                    // Summary counts, same tile row style as the Dashboard.
+                    HorizontalLayout {
+                        spacing: Theme.spacing-md;
+
+                        MetricTile {
+                            horizontal-stretch: 1;
+                            label: "Known";
+                            icon-glyph: "\u{f058}";
+                            accent-color: Theme.palette.success;
+                            value: AppState.security-known-count;
+                            detail: "unchanged since baseline";
+                        }
+                        MetricTile {
+                            horizontal-stretch: 1;
+                            label: "New";
+                            icon-glyph: "\u{f067}";
+                            accent-color: Theme.palette.accent;
+                            value: AppState.security-new-count;
+                            detail: "not in baseline yet";
+                        }
+                        MetricTile {
+                            horizontal-stretch: 1;
+                            label: "Updated";
+                            icon-glyph: "\u{f021}";
+                            accent-color: Theme.palette.info;
+                            value: AppState.security-updated-count;
+                            detail: "version bumped";
+                        }
+                        MetricTile {
+                            horizontal-stretch: 1;
+                            label: "Tampered?";
+                            icon-glyph: "\u{f071}";
+                            accent-color: Theme.palette.danger;
+                            value: AppState.security-tamper-count;
+                            detail: "changed, no version bump";
+                        }
+                        MetricTile {
+                            horizontal-stretch: 1;
+                            label: "Critical";
+                            icon-glyph: "\u{f188}";
+                            accent-color: Theme.palette.danger;
+                            value: AppState.security-critical-count;
+                            detail: "review first";
+                        }
+                    }
+
+                    // Tone banner: green when safe, neutral info for
+                    // uncorroborated notices, colored only for corroborated
+                    // alerts/tampers. Same copy as the TUI and the CLI.
+                    Rectangle {
+                        border-radius: Theme.radius-md;
+                        border-width: 1px;
+                        border-color: (AppState.security-banner-tone == "danger"
+                            ? Theme.palette.danger
+                            : (AppState.security-banner-tone == "warning"
+                                ? Theme.palette.warning
+                                : (AppState.security-banner-tone == "info"
+                                    ? Theme.palette.info
+                                    : Theme.palette.success))).with-alpha(0.35);
+                        background: (AppState.security-banner-tone == "danger"
+                            ? Theme.palette.danger
+                            : (AppState.security-banner-tone == "warning"
+                                ? Theme.palette.warning
+                                : (AppState.security-banner-tone == "info"
+                                    ? Theme.palette.info
+                                    : Theme.palette.success))).with-alpha(0.12);
+                        height: sec-banner-layout.preferred-height;
+
+                        sec-banner-layout := HorizontalLayout {
+                            padding: Theme.spacing-md;
+                            spacing: Theme.spacing-md;
+
+                            FaIcon {
+                                glyph: AppState.security-banner-tone == "danger"
+                                    ? "\u{f071}"
+                                    : (AppState.security-banner-tone == "warning"
+                                        ? "\u{f06a}"
+                                        : (AppState.security-banner-tone == "info" ? "\u{f05a}" : "\u{f058}"));
+                                icon-color: AppState.security-banner-tone == "danger"
+                                    ? Theme.palette.danger
+                                    : (AppState.security-banner-tone == "warning"
+                                        ? Theme.palette.warning
+                                        : (AppState.security-banner-tone == "info"
+                                            ? Theme.palette.info
+                                            : Theme.palette.success));
+                                icon-size: Theme.font-size-lg;
+                                width: 26px;
+                            }
+
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                spacing: 2px;
+
+                                Text {
+                                    text: AppState.security-headline;
+                                    color: AppState.security-banner-tone == "danger"
+                                        ? Theme.palette.danger
+                                        : (AppState.security-banner-tone == "warning"
+                                            ? Theme.palette.warning
+                                            : (AppState.security-banner-tone == "info"
+                                                ? Theme.palette.info
+                                                : Theme.palette.success));
+                                    font-size: Theme.font-size-md;
+                                    font-weight: 700;
+                                    wrap: word-wrap;
+                                }
+                                Text {
+                                    text: AppState.security-summary;
+                                    color: Theme.palette.text-secondary;
+                                    font-size: Theme.font-size-xs;
+                                    wrap: word-wrap;
+                                }
+                            }
+                        }
+                    }
+
+                    // Safe state: nothing surfaced.
+                    if AppState.security-flagged-count == 0: Panel {
+                        vertical-stretch: 1;
+
+                        VerticalLayout {
+                            padding: Theme.spacing-xl;
+                            alignment: center;
+                            spacing: Theme.spacing-sm;
+
+                            FaIcon {
+                                glyph: "\u{f132}";
+                                icon-color: Theme.palette.success;
+                                icon-size: 34px;
+                            }
+                            Text {
+                                text: AppState.security-baseline-established
+                                    ? "Baseline established"
+                                    : "No changes since last baseline";
+                                color: Theme.palette.success;
+                                font-size: Theme.font-size-lg;
+                                font-weight: 700;
+                                horizontal-alignment: center;
+                            }
+                            Text {
+                                text: AppState.security-baseline-established
+                                    ? "Your installed packages are now the trusted reference. Future scans flag only new, updated, or tampered packages."
+                                    : "Every package is byte-identical to the set you trusted (" + AppState.security-known-count + " known). Rescan any time — for example after installing or updating packages.";
+                                color: Theme.palette.text-muted;
+                                font-size: Theme.font-size-sm;
+                                wrap: word-wrap;
+                                horizontal-alignment: center;
+                            }
+                        }
+                    }
+
+                    // The diff: surfaced packages, worst first (same-version
+                    // tampers and malicious verdicts on top).
+                    if AppState.security-flagged-count > 0: Panel {
+                        vertical-stretch: 1;
+
+                        VerticalLayout {
+                            padding: Theme.spacing-sm;
+                            spacing: Theme.spacing-sm;
+
+                            Text {
+                                text: "Surfaced packages (" + AppState.security-flagged-count + ") — corroborated alerts first, neutral notices below. Review each package at its path; if you did not expect it, remove or reinstall it with its package manager. Trusting a package only updates the baseline file.";
+                                color: Theme.palette.text-secondary;
+                                font-size: Theme.font-size-xs;
+                                wrap: word-wrap;
+                            }
+
+                            ScrollView {
+                                vertical-stretch: 1;
+
+                                VerticalLayout {
+                                    spacing: Theme.spacing-sm;
+
+                                    for row[row-index] in AppState.security-rows: Rectangle {
+                                        border-radius: Theme.radius-sm;
+                                        border-width: 1px;
+                                        border-color: row.tamper ? Theme.palette.danger.with-alpha(0.55) : Theme.palette.border-subtle;
+                                        background: Theme.palette.surface-elevated;
+                                        height: sec-row-layout.preferred-height;
+
+                                        sec-row-layout := HorizontalLayout {
+                                            padding: Theme.spacing-sm;
+                                            spacing: Theme.spacing-sm;
+
+                                            VerticalLayout {
+                                                horizontal-stretch: 1;
+                                                spacing: 3px;
+
+                                                HorizontalLayout {
+                                                    spacing: Theme.spacing-sm;
+
+                                                    // Change-kind chip: the same-version tamper is the bold red alarm.
+                                                    Badge {
+                                                        label: row.change;
+                                                        badge-color: row.tamper
+                                                            ? Theme.palette.danger
+                                                            : (row.change == "updated" ? Theme.palette.info : Theme.palette.accent);
+                                                    }
+                                                    // Assessment chip: the verdict for ALERT rows only; notice rows get
+                                                    // the neutral info badge — a raw heuristic verdict never goes red.
+                                                    Badge {
+                                                        label: row.assessment-label;
+                                                        badge-color: !row.alert
+                                                            ? Theme.palette.info
+                                                            : (row.assessment-label == "malicious"
+                                                                ? Theme.palette.danger
+                                                                : (row.assessment-label == "suspicious" ? Theme.palette.warning : Theme.palette.success));
+                                                    }
+                                                    Text {
+                                                        text: row.version == "" ? row.name : row.name + " " + row.version;
+                                                        color: Theme.palette.text-primary;
+                                                        font-size: Theme.font-size-sm;
+                                                        font-weight: 700;
+                                                        vertical-alignment: center;
+                                                        horizontal-stretch: 1;
+                                                        overflow: elide;
+                                                    }
+                                                    Text {
+                                                        text: row.severity == "-" ? "" : "severity " + row.severity + " · score " + row.score;
+                                                        color: row.critical
+                                                            ? Theme.palette.danger
+                                                            : (row.alert ? Theme.palette.warning : Theme.palette.text-muted);
+                                                        font-size: Theme.font-size-xs;
+                                                        vertical-alignment: center;
+                                                    }
+                                                }
+
+                                                Text {
+                                                    text: row.source + " · " + row.path;
+                                                    color: Theme.palette.text-muted;
+                                                    font-size: Theme.font-size-xs;
+                                                    overflow: elide;
+                                                }
+
+                                                // Shared change-kind explanation (engine copy).
+                                                Text {
+                                                    text: row.notice;
+                                                    color: row.tamper ? Theme.palette.danger : Theme.palette.text-secondary;
+                                                    font-size: Theme.font-size-xs;
+                                                    font-weight: row.tamper ? 700 : 400;
+                                                    wrap: word-wrap;
+                                                }
+
+                                                // Notice rows: raw verdict as muted detail only (engine copy).
+                                                if row.heuristic != "": Text {
+                                                    text: row.heuristic;
+                                                    color: Theme.palette.text-muted;
+                                                    font-size: Theme.font-size-xs;
+                                                    wrap: word-wrap;
+                                                }
+
+                                                if row.findings != "": Text {
+                                                    text: row.findings;
+                                                    color: row.alert ? Theme.palette.text-secondary : Theme.palette.text-muted;
+                                                    font-size: Theme.font-size-xs;
+                                                    wrap: word-wrap;
+                                                }
+
+                                                // Recommended next steps (shared engine copy). Advisory:
+                                                // the user runs these; Cleanton removes nothing here.
+                                                Rectangle {
+                                                    border-radius: Theme.radius-sm;
+                                                    background: (row.alert ? Theme.palette.warning : Theme.palette.info).with-alpha(0.08);
+                                                    height: sec-action-layout.preferred-height;
+
+                                                    sec-action-layout := VerticalLayout {
+                                                        padding: Theme.spacing-xs;
+                                                        spacing: 2px;
+
+                                                        Text {
+                                                            text: "Recommended: " + row.action-label;
+                                                            color: row.alert ? Theme.palette.warning : Theme.palette.info;
+                                                            font-size: Theme.font-size-xs;
+                                                            font-weight: 700;
+                                                        }
+                                                        Text {
+                                                            text: row.actions;
+                                                            color: Theme.palette.text-secondary;
+                                                            font-size: Theme.font-size-xs;
+                                                            wrap: word-wrap;
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            VerticalLayout {
+                                                alignment: center;
+
+                                                ActionButton {
+                                                    label: "Trust";
+                                                    icon-glyph: "\u{f058}";
+                                                    primary: false;
+                                                    clicked => { AppCallbacks.security-trust-package(row-index); }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            Text {
+                                text: AppState.security-known-count + " known package(s) unchanged since the baseline are hidden.";
+                                color: Theme.palette.text-muted;
+                                font-size: Theme.font-size-xs;
                             }
                         }
                     }

@@ -8,6 +8,7 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
+cleanton-antivirus.workspace = true
 cleanton-common.workspace = true
 cleanton-ml.workspace = true
 cleanton-recipes.workspace = true
@@ -17,6 +18,8 @@ chrono.workspace = true
 plist = "1"
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
+tracing.workspace = true
 # `net`/`io-util`/`time` are needed for the raw `/system/df` fetch (UnixStream/
 # TcpStream + AsyncRead/Write + timeout); declared explicitly rather than relying
 # on transitive activation through bollard.

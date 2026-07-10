@@ -182,6 +182,12 @@ pub struct LargeItem {
     /// backward compatibility.
     #[serde(default)]
     pub note: String,
+    /// Advisory ML badge (`"ML <label> <confidence>"`) for display only.
+    /// Suggestions are review-only: this never changes what is suggested and
+    /// never triggers any action. Empty when the item was not ML-scored.
+    /// Defaulted on deserialization for backward compatibility.
+    #[serde(default)]
+    pub ml_note: String,
 }
 
 /// The full set of review-only suggestions produced from a single scan.
@@ -365,6 +371,7 @@ fn detect_screenshots(scan: &ScanResult, home: &Path, limits: &Limits) -> Vec<La
             is_dir: false,
             redownloadable: false,
             note: kind.to_owned(),
+            ml_note: String::new(),
         });
     }
     items.sort_by(|a, b| b.bytes.cmp(&a.bytes).then_with(|| a.path.cmp(&b.path)));
@@ -403,6 +410,7 @@ fn detect_installers(scan: &ScanResult, home: &Path, limits: &Limits) -> Vec<Lar
             is_dir: false,
             redownloadable: true,
             note: "installer".to_owned(),
+            ml_note: String::new(),
         });
     }
     items.sort_by(|a, b| b.bytes.cmp(&a.bytes).then_with(|| a.path.cmp(&b.path)));
@@ -664,6 +672,7 @@ fn detect_large_items_with_probe(
             is_dir: false,
             redownloadable: false,
             note: String::new(),
+            ml_note: String::new(),
         });
     }
 
@@ -707,6 +716,7 @@ fn detect_large_items_with_probe(
                 is_dir: true,
                 redownloadable: false,
                 note: String::new(),
+                ml_note: String::new(),
             });
         }
     }
@@ -827,6 +837,7 @@ fn classify_repo(dir: &Path, bytes: u64, probe: &RepoProbe) -> Option<LargeItem>
         is_dir: true,
         redownloadable: true,
         note,
+        ml_note: String::new(),
     })
 }
 
