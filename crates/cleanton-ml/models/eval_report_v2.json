@@ -1,0 +1,188 @@
+{
+  "balanced": {
+    "n": 12000,
+    "accuracy": 0.9913333333333333,
+    "per_class": {
+      "keep": {
+        "precision": 0.9963,
+        "recall": 1.0,
+        "f1": 0.9982,
+        "support": 3000
+      },
+      "safe-to-remove": {
+        "precision": 0.9966,
+        "recall": 0.98,
+        "f1": 0.9882,
+        "support": 3000
+      },
+      "likely-junk": {
+        "precision": 0.9878,
+        "recall": 0.9963,
+        "f1": 0.992,
+        "support": 3000
+      },
+      "uncertain": {
+        "precision": 0.9847,
+        "recall": 0.989,
+        "f1": 0.9869,
+        "support": 3000
+      }
+    },
+    "confusion": [
+      [
+        3000,
+        0,
+        0,
+        0
+      ],
+      [
+        5,
+        2940,
+        20,
+        35
+      ],
+      [
+        0,
+        0,
+        2989,
+        11
+      ],
+      [
+        6,
+        10,
+        17,
+        2967
+      ]
+    ],
+    "class_counts": {
+      "keep": 3000,
+      "safe-to-remove": 3000,
+      "likely-junk": 3000,
+      "uncertain": 3000
+    }
+  },
+  "realistic": {
+    "n": 60000,
+    "accuracy": 0.98635,
+    "per_class": {
+      "keep": {
+        "precision": 0.982,
+        "recall": 0.9999,
+        "f1": 0.9908,
+        "support": 7681
+      },
+      "safe-to-remove": {
+        "precision": 0.9987,
+        "recall": 0.981,
+        "f1": 0.9898,
+        "support": 29661
+      },
+      "likely-junk": {
+        "precision": 0.8967,
+        "recall": 0.9957,
+        "f1": 0.9436,
+        "support": 2581
+      },
+      "uncertain": {
+        "precision": 0.983,
+        "recall": 0.9879,
+        "f1": 0.9854,
+        "support": 20077
+      }
+    },
+    "confusion": [
+      [
+        7680,
+        0,
+        0,
+        1
+      ],
+      [
+        60,
+        29097,
+        172,
+        332
+      ],
+      [
+        0,
+        0,
+        2570,
+        11
+      ],
+      [
+        81,
+        38,
+        124,
+        19834
+      ]
+    ],
+    "class_counts": {
+      "keep": 7681,
+      "safe-to-remove": 29661,
+      "likely-junk": 2581,
+      "uncertain": 20077
+    }
+  },
+  "golden_n": 70,
+  "golden_cleanable": 0,
+  "golden_cleanable_paths": [],
+  "golden_keep_recall": 0.9143,
+  "adversarial_n": 13,
+  "adversarial_cleanable": 0,
+  "adversarial_cleanable_confident": 0,
+  "adversarial_confident_paths": [],
+  "near_miss_n": 500,
+  "near_miss_cleanable_rate": 0.056,
+  "near_miss_confident_rate": 0.034,
+  "fixture_n": 151,
+  "fixture_cleanable_rate": 0.2119,
+  "ece_realistic": 0.0022,
+  "threshold_sweep": [
+    {
+      "threshold": 0.5,
+      "keep_catch_rate": 0.9999,
+      "cleanable_nuisance_rate": 0.0018
+    },
+    {
+      "threshold": 0.6,
+      "keep_catch_rate": 0.9997,
+      "cleanable_nuisance_rate": 0.0016
+    },
+    {
+      "threshold": 0.7,
+      "keep_catch_rate": 0.9997,
+      "cleanable_nuisance_rate": 0.0014
+    },
+    {
+      "threshold": 0.8,
+      "keep_catch_rate": 0.9997,
+      "cleanable_nuisance_rate": 0.0011
+    },
+    {
+      "threshold": 0.85,
+      "keep_catch_rate": 0.9997,
+      "cleanable_nuisance_rate": 0.0009
+    },
+    {
+      "threshold": 0.9,
+      "keep_catch_rate": 0.9996,
+      "cleanable_nuisance_rate": 0.0007
+    },
+    {
+      "threshold": 0.95,
+      "keep_catch_rate": 0.9995,
+      "cleanable_nuisance_rate": 0.0005
+    }
+  ],
+  "gates": {
+    "G1_golden_zero_cleanable": true,
+    "G2_adversarial_zero_confident_cleanable": true,
+    "G2b_near_miss_confident<=0.05": true,
+    "G3_recall_keep>=0.9": true,
+    "G3_recall_safe-to-remove>=0.75": true,
+    "G3_recall_likely-junk>=0.55": true,
+    "G3_recall_uncertain>=0.4": true,
+    "G4_ece<=0.2": true
+  },
+  "passed": true
+}

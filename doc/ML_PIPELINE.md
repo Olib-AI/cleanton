@@ -156,7 +156,7 @@ def export():
     torch.onnx.export(
         model,
         dummy_input,
-        "../models/file_classifier_v1.onnx",
+        "../models/file_classifier_v2.onnx",
         export_params=True,
         opset_version=15,
         do_constant_folding=True,
@@ -184,6 +184,6 @@ def export():
 +------------------+     +--------------------+     +-------------------+
 ```
 
-1. The output `file_classifier_v1.onnx` is saved directly into `crates/cleanton-ml/models/`.
-2. The Rust `cleanton-ml` crate embeds this file using `include_bytes!("models/file_classifier_v1.onnx")`.
+1. The output `file_classifier_v2.onnx` (plus its `file_classifier_v2.json` sidecar and `parity_cases_v2.json` golden cases) is saved directly into `crates/cleanton-ml/models/`.
+2. The Rust `cleanton-ml` crate embeds this file using `include_bytes!("models/file_classifier_v2.onnx")`.
 3. During compilation, the Cargo build script (`build.rs`) performs a test inference pass using the `ort` ONNX Runtime library to ensure runtime compatibility.
