@@ -31,7 +31,7 @@ const JSON_SCHEMA_VERSION: u64 = 2;
 #[command(
     name = "cleanton",
     version,
-    about = "Rust-native macOS disk cleaner — by Olib AI",
+    about = "Rust-native macOS disk cleaner by Olib AI",
     after_help = "Cleanton by Olib AI · https://www.olib.ai"
 )]
 struct Cli {
@@ -307,7 +307,7 @@ fn run_doctor(json: bool) -> Result<i32> {
         return Ok(0);
     }
 
-    println!("Cleanton doctor — Full Disk Access");
+    println!("Cleanton doctor: Full Disk Access");
     println!("  host: {}", fda::headline(context));
     let status_label = match status {
         fda::FdaStatus::Granted => "looks granted (a protected location was readable)",
@@ -681,7 +681,7 @@ fn run_security(
 
     let baseline_path = baseline.or_else(cleanton_engine::default_baseline_path);
     if baseline_path.is_none() && !cli.json {
-        println!("note: HOME is not set, so no baseline can be stored — showing the raw scan.");
+        println!("note: HOME is not set, so no baseline can be stored; showing the raw scan.");
     }
     let options = security::SecurityScanOptions {
         baseline_path: baseline_path.clone(),
@@ -703,7 +703,10 @@ fn run_security(
     }
 
     if !cli.json {
-        println!("Security scan (read-only) — {} location(s):", targets.len());
+        println!(
+            "Security scan (read-only) of {} location(s):",
+            targets.len()
+        );
         for target in &targets {
             println!("  - {} ({})", target.root.display(), target.kind.label());
         }
@@ -1076,7 +1079,7 @@ fn print_docker_section(docker: &DockerAnalysis) {
         return;
     }
     print_docker_analysis(docker);
-    println!("  (clean with: cleanton docker clean --build-cache --dangling-images …)");
+    println!("  (clean with: cleanton docker clean --build-cache --dangling-images ...)");
 }
 
 /// Print the review-only Suggestions section (duplicates + large items). These
@@ -1086,11 +1089,11 @@ fn print_suggestions_section(suggestions: &Suggestions) {
         return;
     }
     println!();
-    println!("Suggestions (review only — not part of the cleanup plan)");
+    println!("Suggestions (review only, not part of the cleanup plan)");
 
     if !suggestions.duplicates.is_empty() {
         let sampled = if suggestions.truncated {
-            " (sampled — budget reached)"
+            " (sampled, budget reached)"
         } else {
             ""
         };
@@ -1110,7 +1113,7 @@ fn print_suggestions_section(suggestions: &Suggestions) {
                     |n| n.to_string_lossy().into_owned(),
                 );
             println!(
-                "    - {} copies of {} ({} each) — save {}",
+                "    - {} copies of {} ({} each), save {}",
                 set.count,
                 name,
                 display::human_bytes(set.file_bytes),
@@ -1199,7 +1202,7 @@ fn print_analyzed_summary(analyzed: &AnalyzedPlan, scan: Option<&ScanResult>) {
             String::new()
         };
         println!(
-            "  - {}  {}{}  ({} items) — {}",
+            "  - {}  {}{}  ({} items): {}",
             display::human_bytes(group.total_reclaimable),
             group.recipe_id,
             category,

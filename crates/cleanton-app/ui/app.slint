@@ -296,11 +296,11 @@ export global AppState {
 
     // Honest disk capacity (statfs-backed; available is an approximate lower bound).
     in-out property <bool> capacity-ready: false;
-    in-out property <string> disk-total: "—";
-    in-out property <string> disk-used: "—";
+    in-out property <string> disk-total: "--";
+    in-out property <string> disk-used: "--";
     in-out property <float> disk-used-ratio: 0.0;
-    in-out property <string> disk-available: "—";
-    in-out property <string> disk-purgeable: "—";
+    in-out property <string> disk-available: "--";
+    in-out property <string> disk-purgeable: "--";
     in-out property <string> snapshot-note: "";
     // Real disk-usage history (normalized 0..1 bars). Empty => collecting state.
     in-out property <[float]> usage-history;
@@ -647,7 +647,7 @@ export component AppWindow inherits Window {
                     }
 
                     ActionButton {
-                        label: AppState.scanning ? "Scanning…" : "Start Scan";
+                        label: AppState.scanning ? "Scanning..." : "Start Scan";
                         icon-glyph: "\u{f002}";
                         enabled: !AppState.scanning && !AppState.cleaning;
                         clicked => { AppCallbacks.start-scan(); }
@@ -858,7 +858,7 @@ export component AppWindow inherits Window {
                                     }
 
                                     if !AppState.usage-history-ready: Text {
-                                        text: "Collecting usage history… (need ≥2 samples)";
+                                        text: "Collecting usage history... (need ≥2 samples)";
                                         color: Theme.palette.text-muted;
                                         font-size: Theme.font-size-sm;
                                         vertical-alignment: center;
@@ -1026,7 +1026,7 @@ export component AppWindow inherits Window {
                                         icon-size: Theme.font-size-xl;
                                     }
                                     Text {
-                                        text: AppState.scanning || AppState.cleaning ? "Working…" : "No actions yet";
+                                        text: AppState.scanning || AppState.cleaning ? "Working..." : "No actions yet";
                                         color: Theme.palette.text-secondary;
                                         font-size: Theme.font-size-md;
                                         font-weight: 600;
@@ -1078,7 +1078,7 @@ export component AppWindow inherits Window {
                                     }
                                     Text { text: AppState.docker-reclaimable; color: Theme.palette.success; font-size: Theme.font-size-sm; font-weight: 700; vertical-alignment: center; }
                                     ActionButton {
-                                        label: AppState.docker-cleaning ? "Cleaning…" : "Clean Docker";
+                                        label: AppState.docker-cleaning ? "Cleaning..." : "Clean Docker";
                                         icon-glyph: "\u{f2ed}";
                                         button-color: Theme.palette.warning;
                                         min-width: 130px;
@@ -1154,7 +1154,7 @@ export component AppWindow inherits Window {
                                     }
                                     ActionButton {
                                         label: AppState.snapshot-deleting
-                                            ? "Deleting…"
+                                            ? "Deleting..."
                                             : AppState.snapshot-delete-pending
                                                 ? "Confirm permanent delete (" + AppState.snapshot-selected-count + ")"
                                                 : "Delete selected (" + AppState.snapshot-selected-count + ")";
@@ -1224,14 +1224,14 @@ export component AppWindow inherits Window {
                                         horizontal-stretch: 1;
                                         spacing: 2px;
                                         Text { text: "Suggestions"; color: Theme.palette.text-primary; font-size: Theme.font-size-sm; font-weight: 700; }
-                                        Text { text: "Review only — not part of the cleanup plan. Click a row to reveal it in Finder, or use Trash to move a single item to the Trash."; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; wrap: word-wrap; }
+                                        Text { text: "Review only: not part of the cleanup plan. Click a row to reveal it in Finder, or use Trash to move a single item to the Trash."; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; wrap: word-wrap; }
                                     }
                                 }
 
                                 Rectangle { height: 1px; background: Theme.palette.border-subtle; }
 
                                 if AppState.duplicate-count > 0: Text {
-                                    text: "Duplicate files — " + AppState.duplicate-reclaimable + " across " + AppState.duplicate-count + " sets";
+                                    text: "Duplicate files: " + AppState.duplicate-reclaimable + " across " + AppState.duplicate-count + " sets";
                                     color: Theme.palette.text-secondary;
                                     font-size: Theme.font-size-xs;
                                     font-weight: 700;
@@ -1252,7 +1252,7 @@ export component AppWindow inherits Window {
                                 }
 
                                 if AppState.screenshot-count > 0: Text {
-                                    text: "Screenshots & recordings — " + AppState.screenshot-reclaimable + " across " + AppState.screenshot-count + " files";
+                                    text: "Screenshots & recordings: " + AppState.screenshot-reclaimable + " across " + AppState.screenshot-count + " files";
                                     color: Theme.palette.text-secondary;
                                     font-size: Theme.font-size-xs;
                                     font-weight: 700;
@@ -1273,7 +1273,7 @@ export component AppWindow inherits Window {
                                 }
 
                                 if AppState.installer-count > 0: Text {
-                                    text: "Old installers in Downloads — " + AppState.installer-reclaimable + " across " + AppState.installer-count + " files (re-downloadable)";
+                                    text: "Old installers in Downloads: " + AppState.installer-reclaimable + " across " + AppState.installer-count + " files (re-downloadable)";
                                     color: Theme.palette.text-secondary;
                                     font-size: Theme.font-size-xs;
                                     font-weight: 700;
@@ -1374,7 +1374,7 @@ export component AppWindow inherits Window {
                         Text { text: "Packages"; color: Theme.palette.text-primary; font-size: Theme.font-size-xl; font-weight: 700; }
                         Text { text: AppState.package-status; color: Theme.palette.text-secondary; font-size: Theme.font-size-sm; overflow: elide; }
                     }
-                    ActionButton { label: AppState.package-loading ? "Loading…" : "Refresh"; icon-glyph: "\u{f021}"; enabled: !AppState.package-loading && !AppState.package-acting; clicked => { AppCallbacks.refresh-packages(); } }
+                    ActionButton { label: AppState.package-loading ? "Loading..." : "Refresh"; icon-glyph: "\u{f021}"; enabled: !AppState.package-loading && !AppState.package-acting; clicked => { AppCallbacks.refresh-packages(); } }
                 }
 
                 // Manager selector.
@@ -1502,7 +1502,7 @@ export component AppWindow inherits Window {
                             alignment: center;
                             spacing: Theme.spacing-sm;
                             FaIcon { glyph: AppState.package-loading ? "\u{f110}" : "\u{f1b3}"; icon-color: Theme.palette.text-muted; icon-size: Theme.font-size-xl; }
-                            Text { text: AppState.package-loading ? "Reading inventory…" : (AppState.package-note != "" ? AppState.package-note : "No packages found"); color: Theme.palette.text-secondary; font-size: Theme.font-size-md; font-weight: 600; horizontal-alignment: center; }
+                            Text { text: AppState.package-loading ? "Reading inventory..." : (AppState.package-note != "" ? AppState.package-note : "No packages found"); color: Theme.palette.text-secondary; font-size: Theme.font-size-md; font-weight: 600; horizontal-alignment: center; }
                         }
 
                         ScrollView {
@@ -1561,7 +1561,7 @@ export component AppWindow inherits Window {
 
                     LineEdit {
                         horizontal-stretch: 1;
-                        placeholder-text: "Filter by name or path…";
+                        placeholder-text: "Filter by name or path...";
                         text <=> AppState.service-filter;
                         edited => { AppCallbacks.apply-service-filter(); }
                     }
@@ -1655,7 +1655,7 @@ export component AppWindow inherits Window {
                                         icon-size: Theme.font-size-xl;
                                     }
                                     Text {
-                                        text: AppState.loading-services ? "Discovering services…" : "No services loaded";
+                                        text: AppState.loading-services ? "Discovering services..." : "No services loaded";
                                         color: Theme.palette.text-secondary;
                                         font-size: Theme.font-size-md;
                                         font-weight: 600;
@@ -1720,7 +1720,7 @@ export component AppWindow inherits Window {
                     }
 
                     ActionButton {
-                        label: AppState.apps-loading ? "Loading…" : "Refresh";
+                        label: AppState.apps-loading ? "Loading..." : "Refresh";
                         icon-glyph: "\u{f021}";
                         enabled: !AppState.apps-loading;
                         clicked => { AppCallbacks.refresh-apps(); }
@@ -1743,7 +1743,7 @@ export component AppWindow inherits Window {
                             spacing: Theme.spacing-sm;
 
                             LineEdit {
-                                placeholder-text: "Filter by name or bundle id…";
+                                placeholder-text: "Filter by name or bundle id...";
                                 text <=> AppState.app-filter;
                                 edited => { AppCallbacks.apply-app-filter(); }
                             }
@@ -1799,7 +1799,7 @@ export component AppWindow inherits Window {
                                                         min-width: 42px;
                                                     }
                                                 }
-                                                Text { text: a.version == "" ? a.bundle-id : a.version + " — " + a.bundle-id; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; overflow: elide; }
+                                                Text { text: a.version == "" ? a.bundle-id : a.version + " · " + a.bundle-id; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; overflow: elide; }
                                             }
 
                                             Rectangle {
@@ -1840,7 +1840,7 @@ export component AppWindow inherits Window {
                                 vertical-stretch: 1;
                                 alignment: center;
                                 Text {
-                                    text: "Select an application to review everything it would leave behind — support files, caches, preferences, launch items, containers, and helpers.";
+                                    text: "Select an application to review everything it would leave behind: support files, caches, preferences, launch items, containers, and helpers.";
                                     color: Theme.palette.text-muted;
                                     font-size: Theme.font-size-sm;
                                     wrap: word-wrap;
@@ -1855,7 +1855,7 @@ export component AppWindow inherits Window {
                                 HorizontalLayout {
                                     spacing: Theme.spacing-sm;
                                     Text { text: "Uninstall " + AppState.selected-app-name; color: Theme.palette.text-primary; font-size: Theme.font-size-lg; font-weight: 700; horizontal-stretch: 1; overflow: elide; }
-                                    Text { text: AppState.leftover-loading ? "Scanning leftovers…" : AppState.leftover-total + " across " + AppState.leftover-count + " items"; color: Theme.palette.text-secondary; font-size: Theme.font-size-sm; vertical-alignment: center; }
+                                    Text { text: AppState.leftover-loading ? "Scanning leftovers..." : AppState.leftover-total + " across " + AppState.leftover-count + " items"; color: Theme.palette.text-secondary; font-size: Theme.font-size-sm; vertical-alignment: center; }
                                 }
 
                                 Text {
@@ -1940,7 +1940,7 @@ export component AppWindow inherits Window {
                                     spacing: Theme.spacing-md;
 
                                     if !AppState.uninstall-pending: ActionButton {
-                                        label: AppState.uninstalling ? "Uninstalling…" : "Uninstall…";
+                                        label: AppState.uninstalling ? "Uninstalling..." : "Uninstall...";
                                         icon-glyph: "\u{f2ed}";
                                         button-color: Theme.palette.danger;
                                         enabled: AppState.leftover-count > 0 && !AppState.leftover-loading && !AppState.uninstalling;
@@ -1987,9 +1987,9 @@ export component AppWindow inherits Window {
                         Text { text: "Security"; color: Theme.palette.text-primary; font-size: Theme.font-size-xl; font-weight: 700; }
                         Text {
                             text: AppState.security-scanning
-                                ? "Scanning installed packages… " + AppState.security-progress
+                                ? "Scanning installed packages... " + AppState.security-progress
                                 : (AppState.security-has-report
-                                    ? "Changes since your trusted baseline. Read-only — nothing is removed or changed."
+                                    ? "Changes since your trusted baseline. Read-only: nothing is removed or changed."
                                     : "First scan records your packages as a trusted baseline; later scans flag only changes.");
                             color: Theme.palette.text-secondary;
                             font-size: Theme.font-size-sm;
@@ -2013,7 +2013,7 @@ export component AppWindow inherits Window {
 
                     ActionButton {
                         label: AppState.security-scanning
-                            ? "Scanning…"
+                            ? "Scanning..."
                             : (AppState.security-has-report ? "Rescan" : "Scan installed packages");
                         icon-glyph: "\u{f132}";
                         enabled: !AppState.security-scanning;
@@ -2044,21 +2044,21 @@ export component AppWindow inherits Window {
                             horizontal-alignment: center;
                         }
                         Text {
-                            text: "Your first scan records every installed package — global npm/pnpm/bun/yarn packages, Python site-packages, and VS Code/Cursor extensions — as a trusted baseline, so legitimate tools like npm and pip are not treated as threats.";
+                            text: "Your first scan records every installed package (global npm/pnpm/bun/yarn packages, Python site-packages, and VS Code/Cursor extensions) as a trusted baseline, so legitimate tools like npm and pip are not treated as threats.";
                             color: Theme.palette.text-secondary;
                             font-size: Theme.font-size-sm;
                             wrap: word-wrap;
                             horizontal-alignment: center;
                         }
                         Text {
-                            text: "Later scans flag only what changed: new packages, updated packages, and — the highest signal — packages whose contents changed without a version bump (the npm-worm injection signature).";
+                            text: "Later scans flag only what changed: new packages, updated packages, and, the highest signal, packages whose contents changed without a version bump (the npm-worm injection signature).";
                             color: Theme.palette.text-secondary;
                             font-size: Theme.font-size-sm;
                             wrap: word-wrap;
                             horizontal-alignment: center;
                         }
                         Text {
-                            text: "The scan is read-only: Cleanton only reports what it finds — it never removes or changes a package.";
+                            text: "The scan is read-only: Cleanton only reports what it finds; it never removes or changes a package.";
                             color: Theme.palette.text-muted;
                             font-size: Theme.font-size-xs;
                             wrap: word-wrap;
@@ -2077,7 +2077,7 @@ export component AppWindow inherits Window {
                         alignment: center;
 
                         Text {
-                            text: "Scanning… " + AppState.security-progress;
+                            text: "Scanning... " + AppState.security-progress;
                             color: Theme.palette.text-primary;
                             font-size: Theme.font-size-lg;
                             font-weight: 700;
@@ -2247,7 +2247,7 @@ export component AppWindow inherits Window {
                             Text {
                                 text: AppState.security-baseline-established
                                     ? "Your installed packages are now the trusted reference. Future scans flag only new, updated, or tampered packages."
-                                    : "Every package is byte-identical to the set you trusted (" + AppState.security-known-count + " known). Rescan any time — for example after installing or updating packages.";
+                                    : "Every package is byte-identical to the set you trusted (" + AppState.security-known-count + " known). Rescan any time, for example after installing or updating packages.";
                                 color: Theme.palette.text-muted;
                                 font-size: Theme.font-size-sm;
                                 wrap: word-wrap;
@@ -2266,7 +2266,7 @@ export component AppWindow inherits Window {
                             spacing: Theme.spacing-sm;
 
                             Text {
-                                text: "Surfaced packages (" + AppState.security-flagged-count + ") — corroborated alerts first, neutral notices below. Review each package at its path; if you did not expect it, remove or reinstall it with its package manager. Trusting a package only updates the baseline file.";
+                                text: "Surfaced packages (" + AppState.security-flagged-count + "): corroborated alerts first, neutral notices below. Review each package at its path; if you did not expect it, remove or reinstall it with its package manager. Trusting a package only updates the baseline file.";
                                 color: Theme.palette.text-secondary;
                                 font-size: Theme.font-size-xs;
                                 wrap: word-wrap;

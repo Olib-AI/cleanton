@@ -326,7 +326,7 @@ fn interpret_delete_output(
     };
     if needs_fda_hint {
         message.push_str(
-            " — tmutil may require Full Disk Access (System Settings → Privacy & Security).",
+            "; tmutil may require Full Disk Access (System Settings > Privacy & Security).",
         );
     }
     Err(message)

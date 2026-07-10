@@ -827,8 +827,8 @@ fn classify_repo(dir: &Path, bytes: u64, probe: &RepoProbe) -> Option<LargeItem>
         .filter(|remote| !remote.is_empty())?;
     let label = summarize_remote(remote);
     let note = match probe.clean {
-        Some(true) => format!("git · {label} · clean — re-clonable"),
-        Some(false) => format!("git · {label} · has local changes — review"),
+        Some(true) => format!("git · {label} · clean, re-clonable"),
+        Some(false) => format!("git · {label} · has local changes, review first"),
         None => format!("git · {label} · couldn't verify changes"),
     };
     Some(LargeItem {
@@ -1370,7 +1370,7 @@ mod tests {
         assert!(item.is_dir);
         assert!(item.redownloadable);
         assert_eq!(item.bytes, 4_096);
-        assert_eq!(item.note, "git · github.com/torvalds · clean — re-clonable");
+        assert_eq!(item.note, "git · github.com/torvalds · clean, re-clonable");
     }
 
     #[test]
@@ -1392,7 +1392,7 @@ mod tests {
         assert!(item.redownloadable);
         assert_eq!(
             item.note,
-            "git · github.com/torvalds · has local changes — review"
+            "git · github.com/torvalds · has local changes, review first"
         );
     }
 
@@ -1526,7 +1526,7 @@ mod tests {
         // A successful measurement must NOT add the approximate marker.
         assert_eq!(
             item.note,
-            "git · chromium.googlesource.com/chromium · clean — re-clonable"
+            "git · chromium.googlesource.com/chromium · clean, re-clonable"
         );
     }
 
@@ -1549,7 +1549,7 @@ mod tests {
         assert_eq!(item.bytes, 4_096, "floor retained on du failure");
         assert_eq!(
             item.note,
-            "git · github.com/torvalds · clean — re-clonable · size approx"
+            "git · github.com/torvalds · clean, re-clonable · size approx"
         );
     }
 

@@ -67,7 +67,7 @@ fn render_banner(f: &mut Frame, app: &App, area: Rect) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.border))
         .title(Span::styled(
-            "Security — baseline + diff supply-chain scan (read-only)",
+            "Security: baseline + diff supply-chain scan (read-only)",
             Style::default()
                 .add_modifier(Modifier::BOLD)
                 .fg(app.theme.accent),
@@ -79,7 +79,7 @@ fn render_banner(f: &mut Frame, app: &App, area: Rect) {
         let (scanned, total) = app.security_progress;
         vec![
             Line::from(Span::styled(
-                format!("  Scanning… {scanned} of {total} packages"),
+                format!("  Scanning... {scanned} of {total} packages"),
                 Style::default().fg(app.theme.highlight),
             )),
             Line::from(Span::styled(
@@ -125,7 +125,7 @@ fn render_empty_body(f: &mut Frame, app: &App, area: Rect) {
         vec![
             Line::from(""),
             Line::from(Span::styled(
-                "  Fingerprinting and analyzing your installed packages…",
+                "  Fingerprinting and analyzing your installed packages...",
                 Style::default().fg(app.theme.fg),
             )),
         ]
@@ -141,7 +141,7 @@ fn render_empty_body(f: &mut Frame, app: &App, area: Rect) {
         } else {
             (
                 "  ✓ No changes since last baseline".to_owned(),
-                "  Every package is byte-identical to the set you trusted. Rescan any time — for example after installing or updating packages.",
+                "  Every package is byte-identical to the set you trusted. Rescan any time, for example after installing or updating packages.",
             )
         };
         vec![
@@ -174,7 +174,7 @@ fn render_empty_body(f: &mut Frame, app: &App, area: Rect) {
                 Style::default().fg(app.theme.muted),
             )),
             Line::from(Span::styled(
-                "  Python site-packages, VS Code/Cursor extensions) as a trusted baseline —",
+                "  Python site-packages, VS Code/Cursor extensions) as a trusted baseline, so",
                 Style::default().fg(app.theme.muted),
             )),
             Line::from(Span::styled(
@@ -183,11 +183,11 @@ fn render_empty_body(f: &mut Frame, app: &App, area: Rect) {
             )),
             Line::from(""),
             Line::from(Span::styled(
-                "  Later scans flag only what changed: NEW packages, UPDATED packages, and —",
+                "  Later scans flag only what changed: NEW packages, UPDATED packages, and,",
                 Style::default().fg(app.theme.muted),
             )),
             Line::from(Span::styled(
-                "  the highest signal — packages whose contents changed WITHOUT a version",
+                "  the highest signal, packages whose contents changed WITHOUT a version",
                 Style::default().fg(app.theme.muted),
             )),
             Line::from(Span::styled(
@@ -196,7 +196,7 @@ fn render_empty_body(f: &mut Frame, app: &App, area: Rect) {
             )),
             Line::from(""),
             Line::from(Span::styled(
-                "  Read-only: Cleanton only reports — it never removes or changes a package.",
+                "  Read-only: Cleanton only reports; it never removes or changes a package.",
                 Style::default().fg(app.theme.muted),
             )),
         ]
@@ -268,7 +268,7 @@ fn render_flagged_list(f: &mut Frame, app: &App, area: Rect) {
         .collect();
 
     let title = format!(
-        "Flagged ({}) — worst first · {} known unchanged",
+        "Flagged ({}): worst first · {} known unchanged",
         report.flagged.len(),
         report.known_unchanged
     );
@@ -289,7 +289,7 @@ fn render_findings(f: &mut Frame, app: &App, area: Rect) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.border))
         .title(Span::styled(
-            "Findings — review this package",
+            "Findings: review this package",
             Style::default().add_modifier(Modifier::BOLD),
         ));
     let inner = block.inner(area);
@@ -317,7 +317,7 @@ fn render_findings(f: &mut Frame, app: &App, area: Rect) {
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                format!("— {}", package.headline()),
+                format!("· {}", package.headline()),
                 Style::default().fg(app.theme.highlight),
             ),
         ]),
@@ -364,14 +364,14 @@ fn render_findings(f: &mut Frame, app: &App, area: Rect) {
     }
     if package.top_findings.is_empty() {
         lines.push(Line::from(Span::styled(
-            "  No static-analysis findings — flagged only because it changed.",
+            "  No static-analysis findings; flagged only because it changed.",
             Style::default().fg(app.theme.muted),
         )));
     }
     if package.finding_count > package.top_findings.len() {
         lines.push(Line::from(Span::styled(
             format!(
-                "  … {} more finding(s); worst severity {}",
+                "  ... {} more finding(s); worst severity {}",
                 package.finding_count - package.top_findings.len(),
                 package.worst_severity().map_or("-", severity_label)
             ),
@@ -412,7 +412,7 @@ fn render_findings(f: &mut Frame, app: &App, area: Rect) {
 
 fn render_help(f: &mut Frame, app: &App, area: Rect) {
     let scan_label = if app.security_scanning {
-        "Scanning…   [x] Cancel scan"
+        "Scanning...   [x] Cancel scan"
     } else if app.security_report.is_some() {
         "Rescan for changes"
     } else {

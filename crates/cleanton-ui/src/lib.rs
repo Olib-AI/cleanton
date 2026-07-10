@@ -546,13 +546,13 @@ async fn run_tui_async<B: ratatui::backend::Backend>(
                             app.refresh_capacity();
                             if was_cancelled {
                                 app.set_status(&format!(
-                                    "Cleanup cancelled — {} item(s) ({}) were already moved to Trash before stopping.",
+                                    "Cleanup cancelled: {} item(s) ({}) were already moved to Trash before stopping.",
                                     moved_actions,
                                     cleanton_common::display::human_bytes(moved)
                                 ));
                             } else if moved > 0 {
                                 app.set_status(&format!(
-                                    "Moved {} items to Trash ({}) — press E to Empty Trash and reclaim.",
+                                    "Moved {} items to Trash ({}). Press E to Empty Trash and reclaim.",
                                     moved_actions,
                                     cleanton_common::display::human_bytes(moved)
                                 ));
@@ -622,7 +622,7 @@ async fn run_tui_async<B: ratatui::backend::Backend>(
                     match plan {
                         Some(plan) => {
                             app.set_status(&format!(
-                                "{}: {} item(s), {} — [ and ] move, Space toggles, u uninstalls.",
+                                "{}: {} item(s), {}. [ and ] move, Space toggles, u uninstalls.",
                                 plan.app.name,
                                 plan.items.len(),
                                 cleanton_common::display::human_bytes(plan.total_bytes)
@@ -642,7 +642,7 @@ async fn run_tui_async<B: ratatui::backend::Backend>(
                     app.set_tab(5);
                     app.pending_uninstall = false;
                     app.set_status(&format!(
-                        "\"{}\" was removed — reviewing its leftovers…",
+                        "\"{}\" was removed; reviewing its leftovers...",
                         removed_app.name
                     ));
                     load_leftovers_for_app(&mut app, removed_app, &tui_tx);
@@ -1128,7 +1128,7 @@ async fn handle_key_event(
                 }
                 crossterm::event::KeyCode::Char('x') if app.security_scanning => {
                     app.security_cancel.store(true, Ordering::Relaxed);
-                    app.set_status("Cancelling security scan…");
+                    app.set_status("Cancelling security scan...");
                 }
                 _ => {}
             },
@@ -1532,9 +1532,9 @@ fn trigger_security_scan(app: &mut App, tx: &mpsc::Sender<TuiEvent>, establish: 
     app.security_report = None;
     app.security_selected = 0;
     app.set_status(if establish {
-        "Re-establishing the trusted baseline from the current packages (read-only scan)…"
+        "Re-establishing the trusted baseline from the current packages (read-only scan)..."
     } else {
-        "Scanning installed packages for changes since the trusted baseline (read-only)…"
+        "Scanning installed packages for changes since the trusted baseline (read-only)..."
     });
 
     let scan_id = app.security_scan_id;
@@ -1579,11 +1579,11 @@ fn trust_selected_security_package(app: &mut App) {
     };
     let selected = app.security_selected;
     let Some(report) = app.security_report.as_mut() else {
-        app.set_status("Nothing to trust — run a scan first.");
+        app.set_status("Nothing to trust: run a scan first.");
         return;
     };
     if report.flagged.is_empty() {
-        app.set_status("Nothing to trust — no flagged packages.");
+        app.set_status("Nothing to trust: no flagged packages.");
         return;
     }
     match report.trust_flagged(selected, &path) {
@@ -1591,7 +1591,7 @@ fn trust_selected_security_package(app: &mut App) {
             let remaining = report.flagged.len();
             app.security_selected = selected.min(remaining.saturating_sub(1));
             app.set_status(&format!(
-                "Trusted {name} — it stays quiet until it changes again. Baseline updated; the package was not touched."
+                "Trusted {name}. It stays quiet until it changes again. Baseline updated; the package was not touched."
             ));
         }
         Err(err) => app.set_status(&format!("Could not update the baseline: {err}")),
@@ -1605,18 +1605,18 @@ fn trust_all_security_packages(app: &mut App) {
         return;
     };
     let Some(report) = app.security_report.as_mut() else {
-        app.set_status("Nothing to trust — run a scan first.");
+        app.set_status("Nothing to trust: run a scan first.");
         return;
     };
     if report.flagged.is_empty() {
-        app.set_status("Nothing to trust — no flagged packages.");
+        app.set_status("Nothing to trust: no flagged packages.");
         return;
     }
     match report.trust_all_flagged(&path) {
         Ok(trusted) => {
             app.security_selected = 0;
             app.set_status(&format!(
-                "Trusted {trusted} package(s) — baseline updated; no package was touched."
+                "Trusted {trusted} package(s). Baseline updated; no package was touched."
             ));
         }
         Err(err) => app.set_status(&format!("Could not update the baseline: {err}")),
@@ -1625,7 +1625,7 @@ fn trust_all_security_packages(app: &mut App) {
 
 fn trigger_empty_trash(app: &mut App, tx: &mpsc::Sender<TuiEvent>) {
     app.pending_empty_trash_confirmation = false;
-    app.set_status("Emptying Trash…");
+    app.set_status("Emptying Trash...");
     let tx = tx.clone();
     tokio::spawn(async move {
         let result = tokio::task::spawn_blocking(crate::trash_ops::empty_trash)
@@ -1672,7 +1672,7 @@ fn arm_snapshot_delete(app: &mut App) {
     app.pending_cleanup_confirmation = None;
     app.pending_suggestion_trash = None;
     app.set_status(&format!(
-        "Confirm to permanently delete {} snapshot(s) — this cannot be undone via Trash. Time Machine loses these restore points. Press y to confirm, n to cancel.",
+        "Confirm to permanently delete {} snapshot(s). This cannot be undone via Trash. Time Machine loses these restore points. Press y to confirm, n to cancel.",
         app.snapshot_confirm.armed_count()
     ));
 }
@@ -1688,7 +1688,10 @@ fn trigger_snapshot_delete(app: &mut App, tx: &mpsc::Sender<TuiEvent>) {
         return;
     }
     app.snapshot_deleting = true;
-    app.set_status(&format!("Deleting {} snapshot(s) via tmutil…", dates.len()));
+    app.set_status(&format!(
+        "Deleting {} snapshot(s) via tmutil...",
+        dates.len()
+    ));
     let tx = tx.clone();
     tokio::spawn(async move {
         let result =
@@ -1732,7 +1735,7 @@ fn trigger_suggestion_trash(app: &mut App, tx: &mpsc::Sender<TuiEvent>) {
     let Some(path) = app.pending_suggestion_trash.take() else {
         return;
     };
-    app.set_status(&format!("Moving {} to Trash…", path.display()));
+    app.set_status(&format!("Moving {} to Trash...", path.display()));
     let orchestrator = app.orchestrator.clone();
     let tx = tx.clone();
     tokio::spawn(async move {
@@ -1910,7 +1913,7 @@ fn load_installed_apps(app: &mut App, tx: &mpsc::Sender<TuiEvent>) {
     }
     app.apps_loading = true;
     app.apps_load_attempted = true;
-    app.set_status("Loading applications…");
+    app.set_status("Loading applications...");
     let tx = tx.clone();
     tokio::spawn(async move {
         let apps = tokio::task::spawn_blocking(cleanton_engine::list_installed_apps)
@@ -1968,7 +1971,7 @@ fn load_leftovers_for_app(
     app.leftover_target_path = Some(target.path.clone());
     app.leftover_selected = 0;
     app.leftover_excluded.clear();
-    app.set_status(&format!("Scanning leftovers of {}…", target.name));
+    app.set_status(&format!("Scanning leftovers of {}...", target.name));
     let tx = tx.clone();
     tokio::spawn(async move {
         let app_path = target.path.clone();
@@ -2078,7 +2081,7 @@ fn trigger_app_uninstall(app: &mut App, tx: &mpsc::Sender<TuiEvent>) {
 
     let app_name = plan.app.name.clone();
     app.uninstalling = true;
-    app.set_status(&format!("Uninstalling {app_name}…"));
+    app.set_status(&format!("Uninstalling {app_name}..."));
     let orchestrator = app.orchestrator.clone();
     let config = app.config.clone();
     let tx = tx.clone();
@@ -2503,7 +2506,7 @@ fn trigger_package_load(app: &mut App, tx: &mpsc::Sender<TuiEvent>) {
     app.package_selected_idx = 0;
     app.package_note = None;
     app.package_action_status.clear();
-    let status = format!("Reading {} inventory…", kind.label());
+    let status = format!("Reading {} inventory...", kind.label());
     app.set_status(&status);
     app.package_status = status;
 
@@ -2597,9 +2600,9 @@ fn apply_package_inventory(app: &mut App, load_id: u64, manager_idx: usize, inve
     if any {
         app.package_phase2 = true;
         app.package_action_status = if app.package_supports_keepset {
-            "Checking for updates and which packages your codebases use…".to_owned()
+            "Checking for updates and which packages your codebases use...".to_owned()
         } else {
-            "Checking for available updates…".to_owned()
+            "Checking for available updates...".to_owned()
         };
     }
     app.set_status(&status);
@@ -2638,7 +2641,7 @@ fn apply_package_enriched(
         format!("{update_count} updates available")
     };
     app.package_action_status = if flagged > 0 {
-        format!("{updates} · {flagged} package(s) referenced by your codebases — see warnings.")
+        format!("{updates} · {flagged} package(s) referenced by your codebases; see warnings.")
     } else {
         updates
     };
@@ -2812,7 +2815,7 @@ fn arm_package_confirmation(app: &mut App, action: PackageActionKind) {
             };
             if plan.removable.is_empty() {
                 app.set_status(
-                    "Nothing to remove — press Space to uncheck packages and mark them removable.",
+                    "Nothing to remove: press Space to uncheck packages and mark them removable.",
                 );
                 return;
             }
@@ -2857,18 +2860,18 @@ fn confirm_package_action(app: &mut App, tx: &mpsc::Sender<TuiEvent>) {
             if order.is_empty() {
                 return;
             }
-            let msg = format!("Uninstalling {} package(s)…", order.len());
+            let msg = format!("Uninstalling {} package(s)...", order.len());
             (PkgAction::Uninstall(order), msg)
         }
         PackageActionKind::UpdateAll => (
             PkgAction::Update(Vec::new()),
-            "Updating all outdated packages… (this can take a while)".to_owned(),
+            "Updating all outdated packages... (this can take a while)".to_owned(),
         ),
         PackageActionKind::UpdateSelected(name) => {
-            let msg = format!("Updating {name}… (this can take a while)");
+            let msg = format!("Updating {name}... (this can take a while)");
             (PkgAction::Update(vec![name]), msg)
         }
-        PackageActionKind::CleanCache => (PkgAction::CleanCache, "Cleaning cache…".to_owned()),
+        PackageActionKind::CleanCache => (PkgAction::CleanCache, "Cleaning cache...".to_owned()),
     };
 
     app.package_acting = true;

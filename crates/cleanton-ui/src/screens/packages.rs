@@ -57,7 +57,7 @@ fn render_manager_tabs(f: &mut Frame, app: &App, area: Rect) {
             .borders(Borders::ALL)
             .border_style(Style::default().fg(app.theme.border))
             .title(Span::styled(
-                "Package Managers  ([←/→] switch)",
+                "Package Managers  ([Left/Right] switch)",
                 Style::default().add_modifier(Modifier::BOLD),
             )),
     );
@@ -67,7 +67,7 @@ fn render_manager_tabs(f: &mut Frame, app: &App, area: Rect) {
 fn render_summary(f: &mut Frame, app: &App, area: Rect) {
     let Some(inv) = app.package_inventory.as_ref() else {
         let msg = if app.package_loading {
-            "Loading inventory…"
+            "Loading inventory..."
         } else {
             "No inventory loaded."
         };
@@ -117,7 +117,7 @@ fn render_summary(f: &mut Frame, app: &App, area: Rect) {
     top_tiles.extend(tile(
         "Outdated",
         if app.package_phase2 {
-            "checking…".to_owned()
+            "checking...".to_owned()
         } else {
             outdated.to_string()
         },
@@ -185,7 +185,7 @@ fn render_list(f: &mut Frame, app: &App, area: Rect) {
         let para = Paragraph::new(vec![
             Line::from(""),
             Line::from(Span::styled(
-                "   Loading package inventory…",
+                "   Loading package inventory...",
                 Style::default().fg(app.theme.muted),
             )),
         ]);
@@ -238,7 +238,7 @@ fn render_list(f: &mut Frame, app: &App, area: Rect) {
         let kept = app.package_keep.contains(name);
 
         let (marker, marker_color) = if !app.package_supports_keepset {
-            ("•", app.theme.fg)
+            ("·", app.theme.fg)
         } else if kept {
             ("[x]", app.theme.success)
         } else if removable.contains(name) {
@@ -252,7 +252,7 @@ fn render_list(f: &mut Frame, app: &App, area: Rect) {
         let size = if pkg.size_bytes > 0 {
             human_bytes(pkg.size_bytes)
         } else {
-            "—".to_owned()
+            "--".to_owned()
         };
 
         let base = if is_selected {
@@ -315,7 +315,7 @@ fn render_controls(f: &mut Frame, app: &App, area: Rect) {
     let txt = |t: &str| Span::styled(t.to_owned(), Style::default().fg(app.theme.fg));
 
     let nav = Line::from(vec![
-        key("  [←/→] "),
+        key("  [Left/Right] "),
         txt("Manager  "),
         key("[↑/↓] "),
         txt("Navigate  "),
@@ -392,8 +392,8 @@ fn trunc(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         s.to_owned()
     } else {
-        let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
-        out.push('…');
+        let mut out: String = s.chars().take(max.saturating_sub(3)).collect();
+        out.push_str("...");
         out
     }
 }

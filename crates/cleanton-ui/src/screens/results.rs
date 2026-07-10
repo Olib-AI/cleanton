@@ -148,7 +148,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
         }
         if app.held_actions.len() > 4 {
             held_lines.push(Line::from(Span::styled(
-                format!("  … {} more held items", app.held_actions.len() - 4),
+                format!("  ... {} more held items", app.held_actions.len() - 4),
                 Style::default().fg(app.theme.muted),
             )));
         }
@@ -325,7 +325,7 @@ fn render_snapshots(f: &mut Frame, app: &App, area: Rect) {
     // Status line: armed confirmation copy wins over the ambient summary.
     if app.snapshot_deleting {
         lines.push(Line::from(Span::styled(
-            "  Deleting snapshot(s) via tmutil…",
+            "  Deleting snapshot(s) via tmutil...",
             Style::default().fg(app.theme.warning),
         )));
     } else if armed {
@@ -341,7 +341,7 @@ fn render_snapshots(f: &mut Frame, app: &App, area: Rect) {
     } else {
         lines.push(Line::from(Span::styled(
             format!(
-                "  {} snapshot(s) pin purgeable space (est ~{}) — delete is NOT undoable",
+                "  {} snapshot(s) pin purgeable space (est ~{}); delete is NOT undoable",
                 analysis.snapshots.len(),
                 human_bytes(analysis.purgeable_estimate_bytes)
             ),
@@ -386,7 +386,7 @@ fn render_snapshots(f: &mut Frame, app: &App, area: Rect) {
 
     if count > SNAPSHOT_ROWS_SHOWN {
         lines.push(Line::from(Span::styled(
-            format!("  … {count} total · {{ }} scroll · [S] tick · [D] delete"),
+            format!("  ... {count} total · {{ }} scroll · [S] tick · [D] delete"),
             Style::default().fg(app.theme.muted),
         )));
     } else {
@@ -562,7 +562,7 @@ fn render_suggestions(f: &mut Frame, app: &App, area: Rect) {
             );
             lines.push(Line::from(Span::styled(
                 format!(
-                    "    {}× {} ({} each) — save {}",
+                    "    {}× {} ({} each), save {}",
                     set.count,
                     name,
                     human_bytes(set.file_bytes),
@@ -708,7 +708,7 @@ fn path_tail(path: &std::path::Path) -> String {
         .collect();
     let s = tail.display().to_string();
     if comps.len() > 2 {
-        format!("…/{s}")
+        format!(".../{s}")
     } else {
         path.display().to_string()
     }

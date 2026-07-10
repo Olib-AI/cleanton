@@ -28,7 +28,7 @@ fn render_app_list(f: &mut Frame, app: &App, area: Rect) {
 
     let visible = app.visible_app_indices();
     let title = if app.apps_loading {
-        "Installed Applications (loading…)".to_string()
+        "Installed Applications (loading...)".to_string()
     } else if app.apps_hide_system {
         format!(
             "Installed Applications ({} of {}, system hidden)",
@@ -102,7 +102,7 @@ fn render_leftovers(f: &mut Frame, app: &App, area: Rect) {
     if app.leftover_loading {
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
-                "  Scanning leftovers…",
+                "  Scanning leftovers...",
                 Style::default().fg(app.theme.muted),
             ))),
             inner,
@@ -142,7 +142,7 @@ fn render_leftovers(f: &mut Frame, app: &App, area: Rect) {
         ),
         Span::styled(
             format!(
-                "— {} across {} item(s)",
+                "· {} across {} item(s)",
                 human_bytes(plan.total_bytes),
                 plan.items.len()
             ),
@@ -276,7 +276,7 @@ fn render_help(f: &mut Frame, app: &App, area: Rect) {
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                "Include/exclude item (⚿ needs admin — see Services)",
+                "Include/exclude item (⚿ needs admin; see Services)",
                 Style::default().fg(app.theme.fg),
             ),
         ]),
@@ -296,8 +296,8 @@ fn truncate(text: &str, max: usize) -> String {
     if text.chars().count() <= max {
         text.to_owned()
     } else {
-        let head: String = text.chars().take(max.saturating_sub(1)).collect();
-        format!("{head}…")
+        let head: String = text.chars().take(max.saturating_sub(3)).collect();
+        format!("{head}...")
     }
 }
 
@@ -313,7 +313,7 @@ fn path_tail(path: &std::path::Path) -> String {
         .collect();
     let s = tail.display().to_string();
     if comps.len() > 2 {
-        format!("…/{s}")
+        format!(".../{s}")
     } else {
         path.display().to_string()
     }
