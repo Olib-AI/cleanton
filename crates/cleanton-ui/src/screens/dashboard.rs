@@ -22,7 +22,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     // Donut Chart Pane (Left)
     let sectors = get_sectors(app);
     let chart_title = if app.is_scanning {
-        "Scanning… (Press [x] to Cancel)"
+        "Scanning... (Press [x] to Cancel)"
     } else if app.cleanup_plan.is_some() {
         "Reclaimable Space Distribution"
     } else {
@@ -210,7 +210,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     } else {
         // Never synthesize data: show a clean "collecting" state instead.
         let collecting = Paragraph::new(Line::from(Span::styled(
-            "  Collecting usage history… (need ≥2 samples)",
+            "  Collecting usage history... (need ≥2 samples)",
             Style::default().fg(app.theme.muted),
         )));
         f.render_widget(collecting, spark_inner);
@@ -305,7 +305,7 @@ fn live_scan_lines(app: &App) -> Vec<Line<'static>> {
         ]),
         Line::from(""),
         Line::from(Span::styled(
-            "  Walking the filesystem… press [x] to cancel.",
+            "  Walking the filesystem... press [x] to cancel.",
             Style::default().fg(app.theme.muted),
         )),
     ]

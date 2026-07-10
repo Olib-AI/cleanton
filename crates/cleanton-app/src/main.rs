@@ -217,7 +217,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let state = ui.global::<AppState>();
         let cancel_token = begin_cancellable_operation(&current_operation_clone);
         state.set_scanning(true);
-        state.set_scan_status("Scanning…".into());
+        state.set_scan_status("Scanning...".into());
         state.set_scan_warning_count("0".into());
         state.set_scan_coverage_status("Scanning".into());
         state.set_scan_progress(0.0);
@@ -580,7 +580,7 @@ fn main() -> Result<(), slint::PlatformError> {
                             prune_executed_actions(&state, &latest_plan_for_prune, &result);
                             if was_cancelled {
                                 state.set_clean_status(
-                                    "Cleanup cancelled — remaining items were skipped; anything already moved to Trash stays out of the list."
+                                    "Cleanup cancelled: remaining items were skipped; anything already moved to Trash stays out of the list."
                                         .into(),
                                 );
                                 state.set_result_mode("Cancelled".into());
@@ -616,7 +616,7 @@ fn main() -> Result<(), slint::PlatformError> {
             state.set_scan_status("Cancelled".into());
             state.set_scan_coverage_status("Cancelled".into());
             state.set_clean_status(
-                "Cancelling… the in-flight item finishes, remaining items are skipped.".into(),
+                "Cancelling... the in-flight item finishes, remaining items are skipped.".into(),
             );
             state.set_result_mode("Cancelled".into());
         }
@@ -645,7 +645,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let ui = ui_weak.unwrap();
         let state = ui.global::<AppState>();
         state.set_empty_trash_pending(false);
-        state.set_trash_status("Emptying Trash…".into());
+        state.set_trash_status("Emptying Trash...".into());
 
         let ui_weak = ui.as_weak();
         let config = config_snapshot(&config_clone);
@@ -752,7 +752,7 @@ fn main() -> Result<(), slint::PlatformError> {
             state.set_services_status("Another service action is still running.".into());
             return;
         }
-        state.set_services_status(format!("Disabling {id}…").into());
+        state.set_services_status(format!("Disabling {id}...").into());
 
         let ui_weak = ui.as_weak();
         let config = config_snapshot(&config_clone);
@@ -798,7 +798,7 @@ fn main() -> Result<(), slint::PlatformError> {
             state.set_services_status("Another service action is still running.".into());
             return;
         }
-        state.set_services_status(format!("Enabling {id}…").into());
+        state.set_services_status(format!("Enabling {id}...").into());
 
         let ui_weak = ui.as_weak();
         let config = config_snapshot(&config_clone);
@@ -839,7 +839,7 @@ fn main() -> Result<(), slint::PlatformError> {
             state.set_services_status("Another service action is still running.".into());
             return;
         }
-        state.set_services_status(format!("Removing {id}…").into());
+        state.set_services_status(format!("Removing {id}...").into());
 
         let ui_weak = ui.as_weak();
         let config = config_snapshot(&config_clone);
@@ -1007,7 +1007,7 @@ fn main() -> Result<(), slint::PlatformError> {
 
         let app_name = state.get_selected_app_name().to_string();
         state.set_uninstalling(true);
-        state.set_apps_status(format!("Uninstalling {app_name}…").into());
+        state.set_apps_status(format!("Uninstalling {app_name}...").into());
 
         let ui_weak = ui.as_weak();
         let config = config_snapshot(&config_clone);
@@ -1035,7 +1035,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     if outcome.ok {
                         " (also removed via Homebrew)"
                     } else {
-                        " (Homebrew removal failed — trashed directly)"
+                        " (Homebrew removal failed; trashed directly)"
                     }
                 } else {
                     ""
@@ -1153,7 +1153,7 @@ fn main() -> Result<(), slint::PlatformError> {
         store_config(&config_clone, defaults.clone());
         populate_settings(&state, &defaults);
         state.set_scan_root(defaults.general.default_root.display().to_string().into());
-        state.set_setting_save_status("Defaults restored — click Save to persist.".into());
+        state.set_setting_save_status("Defaults restored. Click Save to persist.".into());
     });
 
     // ── Wire: cleanup-plan expand / selection callbacks ────────────────────
@@ -1198,7 +1198,7 @@ fn main() -> Result<(), slint::PlatformError> {
             return;
         };
         state.set_docker_cleaning(true);
-        state.set_docker_status("Cleaning Docker…".into());
+        state.set_docker_status("Cleaning Docker...".into());
 
         let ui_weak = ui.as_weak();
         let config = config_snapshot(&config_clone);
@@ -1290,7 +1290,7 @@ fn main() -> Result<(), slint::PlatformError> {
             state.set_snapshot_delete_pending(false);
             state.set_snapshot_deleting(true);
             state.set_snapshot_status(
-                format!("Deleting {} snapshot(s) via tmutil…", dates.len()).into(),
+                format!("Deleting {} snapshot(s) via tmutil...", dates.len()).into(),
             );
 
             let ui_weak = ui.as_weak();
@@ -1334,7 +1334,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 state.set_trash_status("A suggestion trash is still running.".into());
                 return;
             }
-            state.set_trash_status(format!("Moving {path} to the Trash…").into());
+            state.set_trash_status(format!("Moving {path} to the Trash...").into());
 
             let ui_weak = ui.as_weak();
             let config = config_snapshot(&config_clone);
@@ -1404,7 +1404,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 if state.get_package_removable_count() > 0 && !state.get_package_acting() {
                     state.set_package_remove_pending(true);
                     state.set_package_action_status(
-                        "Confirm to uninstall the unkept packages — this cannot be undone via Trash."
+                        "Confirm to uninstall the unkept packages. This cannot be undone via Trash."
                             .into(),
                     );
                 }
@@ -1548,7 +1548,7 @@ fn start_package_load(ui: &AppWindow, idx: i32, config: &SharedConfig) {
     state.set_package_remove_pending(false);
     state.set_package_action_status(String::new().into());
     state.set_package_note(String::new().into());
-    state.set_package_status(format!("Reading {} inventory…", kind.label()).into());
+    state.set_package_status(format!("Reading {} inventory...", kind.label()).into());
 
     // Clear the previous manager's list immediately so it doesn't linger while
     // the new inventory loads.
@@ -1589,9 +1589,9 @@ fn start_package_load(ui: &AppWindow, idx: i32, config: &SharedConfig) {
                     state.set_package_usage_scanning(true);
                     state.set_package_action_status(
                         if do_usage {
-                            "Checking for updates and which packages your codebases use…"
+                            "Checking for updates and which packages your codebases use..."
                         } else {
-                            "Checking for available updates…"
+                            "Checking for available updates..."
                         }
                         .into(),
                     );
@@ -1625,7 +1625,7 @@ fn start_package_load(ui: &AppWindow, idx: i32, config: &SharedConfig) {
                 };
                 state.set_package_action_status(
                     if flagged > 0 {
-                        format!("{updates} · {flagged} package(s) referenced by your codebases — see warnings.")
+                        format!("{updates} · {flagged} package(s) referenced by your codebases; see warnings.")
                     } else {
                         updates
                     }
@@ -1700,14 +1700,14 @@ fn run_package_action(ui: &AppWindow, config: &SharedConfig, action: PkgAction) 
     let kind = active_package_manager(idx);
     state.set_package_acting(true);
     let acting_msg = match &action {
-        PkgAction::Uninstall(names) => format!("Uninstalling {} package(s)…", names.len()),
+        PkgAction::Uninstall(names) => format!("Uninstalling {} package(s)...", names.len()),
         PkgAction::Update(names) if names.is_empty() => {
-            "Updating all outdated packages… (this can take a while)".to_owned()
+            "Updating all outdated packages... (this can take a while)".to_owned()
         }
         PkgAction::Update(names) => {
-            format!("Updating {}… (this can take a while)", names.join(", "))
+            format!("Updating {}... (this can take a while)", names.join(", "))
         }
-        PkgAction::CleanCache => "Cleaning cache…".to_owned(),
+        PkgAction::CleanCache => "Cleaning cache...".to_owned(),
     };
     // Surface in both the action line (with spinner) and the header status.
     state.set_package_action_status(acting_msg.clone().into());
@@ -1790,7 +1790,7 @@ fn package_row(pkg: &cleanton_packages::Package) -> PackageRow {
     let size = if pkg.size_bytes > 0 {
         display::human_bytes(pkg.size_bytes)
     } else {
-        "—".to_owned()
+        "--".to_owned()
     };
     let used_by = pkg
         .used_by
@@ -2024,11 +2024,11 @@ fn apply_capacity_state(state: &AppState, view: &capacity::CapacityView) {
             .clone()
             .unwrap_or_else(|| "capacity unavailable".to_owned());
         state.set_capacity_ready(false);
-        state.set_disk_total("—".into());
+        state.set_disk_total("--".into());
         state.set_disk_used(reason.into());
         state.set_disk_used_ratio(0.0);
-        state.set_disk_available("—".into());
-        state.set_disk_purgeable("—".into());
+        state.set_disk_available("--".into());
+        state.set_disk_purgeable("--".into());
     }
 
     let snapshot_count = view.snapshot_count();
@@ -2099,7 +2099,7 @@ fn apply_snapshot_state(state: &AppState, view: &capacity::CapacityView) {
     state.set_snapshot_status(
         if available {
             format!(
-                "{} local snapshot(s) pin purgeable space (volume purgeable estimate: ~{}). Deleting a snapshot cannot be undone — snapshots never go to the Trash.",
+                "{} local snapshot(s) pin purgeable space (volume purgeable estimate: ~{}). Deleting a snapshot cannot be undone; snapshots never go to the Trash.",
                 analysis.snapshots.len(),
                 display::human_bytes(analysis.purgeable_estimate_bytes)
             )
@@ -2160,7 +2160,7 @@ fn request_snapshot_delete(state: &AppState) {
     state.set_snapshot_delete_pending(true);
     state.set_snapshot_status(
         format!(
-            "Confirm to permanently delete {count} snapshot(s) — this cannot be undone via Trash. Time Machine loses these restore points."
+            "Confirm to permanently delete {count} snapshot(s). This cannot be undone via Trash. Time Machine loses these restore points."
         )
         .into(),
     );
@@ -2651,9 +2651,9 @@ fn large_item_row(item: &LargeItem) -> SuggestionRow {
     // The advisory ML badge (display only) rides alongside the note.
     let detail = match (item.note.is_empty(), item.ml_note.is_empty()) {
         (true, true) => path.clone(),
-        (false, true) => format!("{} — {}", item.note, path),
-        (true, false) => format!("{} — {}", item.ml_note, path),
-        (false, false) => format!("{} · {} — {}", item.note, item.ml_note, path),
+        (false, true) => format!("{} · {}", item.note, path),
+        (true, false) => format!("{} · {}", item.ml_note, path),
+        (false, false) => format!("{} · {} · {}", item.note, item.ml_note, path),
     };
     let icon = if item.redownloadable {
         "\u{f126}" // code-branch
@@ -2718,7 +2718,7 @@ fn installer_row(item: &LargeItem) -> SuggestionRow {
     let detail = if item.ml_note.is_empty() {
         path.clone()
     } else {
-        format!("{} — {}", item.ml_note, path)
+        format!("{} · {}", item.ml_note, path)
     };
     SuggestionRow {
         title: SharedString::from(name),
@@ -2747,7 +2747,7 @@ fn screenshot_row(item: &LargeItem) -> SuggestionRow {
     let detail = if item.ml_note.is_empty() {
         path.clone()
     } else {
-        format!("{} — {}", item.ml_note, path)
+        format!("{} · {}", item.ml_note, path)
     };
     SuggestionRow {
         title: SharedString::from(name),
@@ -2833,7 +2833,7 @@ fn apply_execution_result(state: &AppState, result: &ExecutionResult) {
             .count();
         state.set_trash_status(
             format!(
-                "Moved {moved_actions} items to Trash ({}) — Empty Trash to reclaim.",
+                "Moved {moved_actions} items to Trash ({}). Empty Trash to reclaim.",
                 display::human_bytes(result.moved_to_trash_bytes)
             )
             .into(),
@@ -3545,7 +3545,7 @@ fn start_security_scan(ui: &AppWindow, establish: bool) {
     let state = ui.global::<AppState>();
     state.set_security_scanning(true);
     state.set_security_has_report(false);
-    state.set_security_progress("discovering packages…".into());
+    state.set_security_progress("discovering packages...".into());
     state.set_security_progress_ratio(0.0);
     state.set_security_rows(ModelRc::from(Rc::new(VecModel::from(
         Vec::<SecurityRow>::new(),
@@ -3672,7 +3672,7 @@ fn start_apps_load(ui: &AppWindow) {
     }
     let state = ui.global::<AppState>();
     state.set_apps_loading(true);
-    state.set_apps_status("Loading applications…".into());
+    state.set_apps_status("Loading applications...".into());
 
     let ui_weak = ui.as_weak();
     std::thread::spawn(move || {
@@ -3788,8 +3788,9 @@ fn handle_external_removal(ui: &AppWindow, app: InstalledApp) {
     }
     let state = ui.global::<AppState>();
     state.set_active_screen(5);
-    state
-        .set_apps_status(format!("\"{}\" was removed — reviewing its leftovers…", app.name).into());
+    state.set_apps_status(
+        format!("\"{}\" was removed; reviewing its leftovers...", app.name).into(),
+    );
     // Refresh the inventory so the removed app drops off the list, then load
     // its leftovers from the retained identity.
     start_apps_load(ui);

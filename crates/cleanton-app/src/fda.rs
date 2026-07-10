@@ -209,8 +209,8 @@ fn home_dir() -> Option<PathBuf> {
 pub fn lead(context: HostContext) -> String {
     match context {
         HostContext::Terminal => format!(
-            "You can scan now, but macOS grants Full Disk Access to {} — the terminal that \
-             launched Cleanton — so some protected folders are skipped until you turn it on.",
+            "You can scan now, but macOS grants Full Disk Access to {} (the terminal that \
+             launched Cleanton), so some protected folders are skipped until you turn it on.",
             terminal_label()
         ),
         HostContext::AppBundle => "You can scan now, but macOS keeps some protected folders \
@@ -228,7 +228,7 @@ pub fn steps(context: HostContext) -> Vec<String> {
         HostContext::Terminal => {
             let term = terminal_label();
             vec![
-                "Open System Settings → Privacy & Security → Full Disk Access (the button below \
+                "Open System Settings > Privacy & Security > Full Disk Access (the button below \
                  takes you there)."
                     .to_owned(),
                 format!("Turn on {term}. If it isn't listed, click + and add it."),
@@ -236,7 +236,7 @@ pub fn steps(context: HostContext) -> Vec<String> {
             ]
         }
         HostContext::AppBundle => vec![
-            "Open System Settings → Privacy & Security → Full Disk Access (the button below takes \
+            "Open System Settings > Privacy & Security > Full Disk Access (the button below takes \
              you there)."
                 .to_owned(),
             "Turn on Cleanton. If it isn't listed, click + and choose Cleanton.".to_owned(),

@@ -1,7 +1,7 @@
 [recipe]
 id = "system-time-machine-local-snapshots"
 name = "Time Machine Local Snapshots"
-description = "APFS local Time Machine snapshots; review-only here — delete via the confirm-gated snapshot panel on Results, never by trashing files"
+description = "APFS local Time Machine snapshots; review-only here; delete via the confirm-gated snapshot panel on Results, never by trashing files"
 category = "system"
 safety_level = "aggressive"
 enabled = true

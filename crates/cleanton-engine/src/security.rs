@@ -149,7 +149,7 @@ impl ChangeKind {
     #[must_use]
     pub fn label(self) -> &'static str {
         match self {
-            Self::ChangedSameVersion => "changed — no version bump",
+            Self::ChangedSameVersion => "changed (no version bump)",
             Self::New => "new",
             Self::Updated => "updated",
             Self::Unchanged => "unchanged",
@@ -163,7 +163,7 @@ impl ChangeKind {
     pub fn notice(self) -> &'static str {
         match self {
             Self::ChangedSameVersion => {
-                "Contents changed since your baseline WITHOUT a version bump — a \
+                "Contents changed since your baseline WITHOUT a version bump; a \
                  legitimate package almost never mutates without a new version. \
                  Verify it with its package manager and reinstall if unexpected."
             }
@@ -172,7 +172,7 @@ impl ChangeKind {
                  reviewed to trust this exact content."
             }
             Self::Updated => {
-                "Version changed since your baseline — expected after an \
+                "Version changed since your baseline; expected after an \
                  upgrade. Glance over it, then mark it reviewed."
             }
             Self::Unchanged => "Byte-identical to your reviewed baseline.",
@@ -521,18 +521,13 @@ impl PackageReport {
             .map_or("no detail", |finding| finding.title.as_str());
         match self.assessment {
             Assessment::Alert(verdict) => {
-                format!(
-                    "{} (score {}) — {}",
-                    verdict_label(verdict),
-                    self.score,
-                    top
-                )
+                format!("{} (score {}): {}", verdict_label(verdict), self.score, top)
             }
             Assessment::Notice if self.finding_count == 0 => {
-                format!("{} — no static findings", self.change.label())
+                format!("{}, no static findings", self.change.label())
             }
             Assessment::Notice => {
-                format!("{} — capabilities noted — {}", self.change.label(), top)
+                format!("{}, capabilities noted: {}", self.change.label(), top)
             }
         }
     }
@@ -573,7 +568,7 @@ impl PackageReport {
         let mut lines = Vec::new();
         for finding in &self.top_findings {
             lines.push(format!(
-                "[{}] {} — {}",
+                "[{}] {}: {}",
                 severity_label(finding.severity),
                 finding.title,
                 finding.description
@@ -750,7 +745,7 @@ impl PackageReport {
             }
         } else if self.is_alert() {
             lines.push(
-                "Corroborated threat indicators — review the flagged install/lifecycle code."
+                "Corroborated threat indicators: review the flagged install/lifecycle code."
                     .to_owned(),
             );
             if let Some(file) = self.primary_evidence_file() {
@@ -763,7 +758,7 @@ impl PackageReport {
             }
         } else {
             lines.push(
-                "No corroborated threat — uncorroborated heuristics are normal for dev tooling."
+                "No corroborated threat; uncorroborated heuristics are normal for dev tooling."
                     .to_owned(),
             );
             lines.push(
@@ -789,6 +784,27 @@ fn version_or_latest(version: Option<&str>) -> String {
 /// Display a package-relative evidence file under the package's on-disk path.
 fn join_rel(base: &Path, rel: &str) -> String {
     base.join(rel).display().to_string()
+}
+
+/// Normalize typographic punctuation (em/en dashes, smart quotes, arrows,
+/// bullets, ellipses) to plain ASCII. Applied at the boundary where finding
+/// text sourced from the vendored antivirus crate is copied into the report,
+/// so every surface (CLI table and both UIs) shows clean copy without
+/// editing the vendored crate itself.
+fn sanitize_display(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            '\u{2014}' | '\u{2013}' | '\u{2022}' => out.push('-'),
+            '\u{2018}' | '\u{2019}' => out.push('\''),
+            '\u{201C}' | '\u{201D}' => out.push('"'),
+            '\u{2192}' | '\u{21D2}' => out.push_str("->"),
+            '\u{2190}' => out.push_str("<-"),
+            '\u{2026}' => out.push_str("..."),
+            _ => out.push(ch),
+        }
+    }
+    out
 }
 
 /// Finding counts bucketed by severity (across all flagged packages).
@@ -936,7 +952,7 @@ impl SecurityReport {
         if self.baseline_established {
             let callout = if self.alert_packages > 0 {
                 format!(
-                    " {} package(s) show corroborated threat indicators — \
+                    " {} package(s) show corroborated threat indicators; \
                      review them below before trusting.",
                     self.alert_packages
                 )
@@ -945,7 +961,7 @@ impl SecurityReport {
             };
             let notes = if self.baseline_capability_notes > 0 {
                 format!(
-                    " Capabilities noted in {} package(s) (uncorroborated heuristics — \
+                    " Capabilities noted in {} package(s) (uncorroborated heuristics, \
                      normal for dev tooling; details in the JSON report or with --all).",
                     self.baseline_capability_notes
                 )
@@ -953,29 +969,29 @@ impl SecurityReport {
                 String::new()
             };
             return format!(
-                "Baseline established: {} package(s) recorded as trusted — scanned {scope}. \
+                "Baseline established: {} package(s) recorded as trusted; scanned {scope}. \
                  Future scans flag only new or changed packages.{suffix}{callout}{notes}",
                 self.packages_scanned
             );
         }
         if self.change_count() == 0 {
             return format!(
-                "No changes since last baseline — {} known package(s) unchanged; \
+                "No changes since last baseline: {} known package(s) unchanged; \
                  scanned {scope}.{suffix}",
                 self.known_unchanged
             );
         }
         if self.alert_packages == 0 {
             return format!(
-                "Baseline: {} known, {} new, {} updated (no corroborated threats — \
-                 capabilities noted only) — scanned {scope}. \
+                "Baseline: {} known, {} new, {} updated (no corroborated threats, \
+                 capabilities noted only); scanned {scope}. \
                  Cleanton never removes packages automatically.{suffix}",
                 self.known_unchanged, self.new_packages, self.updated_packages
             );
         }
         format!(
             "Baseline: {} known, {} new, {} updated, {} changed without a version bump \
-             ({} critical, {} corroborated alert(s)) — scanned {scope}. Review the flagged \
+             ({} critical, {} corroborated alert(s)); scanned {scope}. Review the flagged \
              packages below; Cleanton never removes packages automatically.{suffix}",
             self.known_unchanged,
             self.new_packages,
@@ -992,7 +1008,7 @@ impl SecurityReport {
     fn raw_summary_message(&self, scope: &str, suffix: &str) -> String {
         let notes = if self.notice_packages > 0 {
             format!(
-                " Capabilities noted in {} package(s) (uncorroborated heuristics — \
+                " Capabilities noted in {} package(s) (uncorroborated heuristics, \
                  normal for dev tooling).",
                 self.notice_packages
             )
@@ -1001,21 +1017,21 @@ impl SecurityReport {
         };
         match (self.malicious_packages, self.suspicious_packages) {
             (0, 0) if self.notice_packages > 0 => {
-                format!("No corroborated threats — scanned {scope}.{suffix}{notes}")
+                format!("No corroborated threats; scanned {scope}.{suffix}{notes}")
             }
-            (0, 0) => format!("No threats found — scanned {scope}.{suffix}"),
+            (0, 0) => format!("No threats found; scanned {scope}.{suffix}"),
             (0, suspicious) => format!(
-                "{suspicious} suspicious package(s) found — scanned {scope}. \
+                "{suspicious} suspicious package(s) found; scanned {scope}. \
                  Review each package below; Cleanton never removes packages \
                  automatically.{suffix}{notes}"
             ),
             (malicious, 0) => format!(
-                "{malicious} malicious package(s) found — scanned {scope}. \
+                "{malicious} malicious package(s) found; scanned {scope}. \
                  Review each package below; Cleanton never removes packages \
                  automatically.{suffix}{notes}"
             ),
             (malicious, suspicious) => format!(
-                "{malicious} malicious and {suspicious} suspicious package(s) found — \
+                "{malicious} malicious and {suspicious} suspicious package(s) found; \
                  scanned {scope}. Review each package below; Cleanton never removes \
                  packages automatically.{suffix}{notes}"
             ),
@@ -1028,7 +1044,7 @@ impl SecurityReport {
         if self.baseline_established {
             if self.alert_packages > 0 {
                 return format!(
-                    "Baseline established — {} corroborated threat(s) to review",
+                    "Baseline established: {} corroborated threat(s) to review",
                     self.alert_packages
                 );
             }
@@ -1059,12 +1075,12 @@ impl SecurityReport {
         if self.alert_packages == 0 {
             if self.new_packages == 0 {
                 return format!(
-                    "{} package(s) updated — no corroborated threats",
+                    "{} package(s) updated, no corroborated threats",
                     self.updated_packages
                 );
             }
             return format!(
-                "{} package change(s) — no corroborated threats",
+                "{} package change(s), no corroborated threats",
                 self.change_count()
             );
         }
@@ -1762,15 +1778,15 @@ fn build_package_report(
             severity: finding.severity,
             confidence: finding.confidence,
             category: finding.category,
-            title: finding.title.clone(),
-            description: finding.description.clone(),
+            title: sanitize_display(&finding.title),
+            description: sanitize_display(&finding.description),
             file: finding.location.as_ref().map(|loc| loc.path.clone()),
             evidence: finding.evidence.as_ref().map(|snippet| {
                 let mut end = snippet.len().min(EVIDENCE_SNIPPET_MAX);
                 while end > 0 && !snippet.is_char_boundary(end) {
                     end = end.saturating_sub(1);
                 }
-                snippet.get(..end).unwrap_or_default().to_owned()
+                sanitize_display(snippet.get(..end).unwrap_or_default())
             }),
         })
         .collect();
@@ -2315,7 +2331,7 @@ execSync('npm publish --access public', { env: { ...process.env, NPM_TOKEN } });
         assert_eq!(severity_label(Severity::Critical), "critical");
         assert_eq!(
             change_kind_label(ChangeKind::ChangedSameVersion),
-            "changed — no version bump"
+            "changed (no version bump)"
         );
         let package = PackageReport {
             name: "evil".to_owned(),
@@ -2684,6 +2700,50 @@ module.exports = token;
             "synthetic",
         )
         .with_location(FileLocation::file(file))
+    }
+
+    /// Finding text sourced from the vendored antivirus crate is sanitized at
+    /// the projection boundary: typographic symbols never reach the report.
+    #[test]
+    fn antivirus_finding_text_is_sanitized_for_display() {
+        let candidate = PackageCandidate {
+            name: "pkg".to_owned(),
+            version: Some("1.0.0".to_owned()),
+            display_path: PathBuf::from("/tmp/pkg"),
+            scan_path: PathBuf::from("/tmp/pkg"),
+            source: SecurityTargetKind::NodeGlobal,
+        };
+        let mut finding = strong_finding(ThreatCategory::SupplyChain, "package.json");
+        finding.title = "Token harvest \u{2014} \u{201C}quoted\u{201D}".to_owned();
+        finding.description =
+            "reads ~/.npmrc \u{2192} exfiltrates\u{2026} \u{2022} badly".to_owned();
+        finding.evidence = Some("token \u{2013} \u{2018}stolen\u{2019}".to_owned());
+        let av_report = cleanton_antivirus::ScanReport {
+            target: "/tmp/pkg".to_owned(),
+            verdict: AvVerdict::Malicious,
+            score: 95,
+            findings: vec![finding],
+            files_scanned: 1,
+            bytes_scanned: 10,
+            duration_ms: 1,
+            engine_stats: Vec::new(),
+            errors: Vec::new(),
+        };
+        let report = build_package_report(&candidate, &av_report, "fp".to_owned());
+        let top = report.top_findings.first().expect("one finding retained");
+        assert_eq!(top.title, "Token harvest - \"quoted\"");
+        assert_eq!(top.description, "reads ~/.npmrc -> exfiltrates... - badly");
+        assert_eq!(top.evidence.as_deref(), Some("token - 'stolen'"));
+        let symbols = [
+            '\u{2014}', '\u{2013}', '\u{2018}', '\u{2019}', '\u{201C}', '\u{201D}', '\u{2192}',
+            '\u{2190}', '\u{21D2}', '\u{2022}', '\u{2026}',
+        ];
+        for line in report.finding_lines() {
+            assert!(
+                !line.chars().any(|ch| symbols.contains(&ch)),
+                "finding line still carries a typographic symbol: {line}"
+            );
+        }
     }
 
     #[test]

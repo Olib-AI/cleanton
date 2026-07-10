@@ -230,12 +230,12 @@ pub fn guidance_lines(context: HostContext) -> Vec<String> {
         HostContext::Terminal => {
             let term = terminal_label();
             lines.push(format!(
-                "macOS evaluates Full Disk Access against {term} — the terminal that launched \
-                 cleanton — not against the cleanton binary itself."
+                "macOS evaluates Full Disk Access against {term} (the terminal that launched \
+                 cleanton), not against the cleanton binary itself."
             ));
             lines.push("To grant it:".to_owned());
             lines.push(
-                "  1. Open System Settings → Privacy & Security → Full Disk Access.".to_owned(),
+                "  1. Open System Settings > Privacy & Security > Full Disk Access.".to_owned(),
             );
             lines.push(format!("     (or run: open \"{SETTINGS_FDA_URL}\")"));
             lines.push(format!(
@@ -252,13 +252,13 @@ pub fn guidance_lines(context: HostContext) -> Vec<String> {
         }
         HostContext::AppBundle => {
             lines.push(
-                "The Cleanton app has its own Full Disk Access identity, tied to its bundle id — \
+                "The Cleanton app has its own Full Disk Access identity, tied to its bundle id, \
                  separate from any terminal."
                     .to_owned(),
             );
             lines.push("To grant it:".to_owned());
             lines.push(
-                "  1. Open System Settings → Privacy & Security → Full Disk Access.".to_owned(),
+                "  1. Open System Settings > Privacy & Security > Full Disk Access.".to_owned(),
             );
             lines.push(format!("     (or run: open \"{SETTINGS_FDA_URL}\")"));
             lines.push(
