@@ -130,6 +130,11 @@ pub enum TuiEvent {
         path: std::path::PathBuf,
         result: Result<(), String>,
     },
+    /// Result of a user-confirmed Time Machine snapshot deletion run
+    /// (Results screen). Deletion is permanent — this only reports outcomes.
+    SnapshotsDeleted {
+        result: cleanton_engine::SnapshotCleanupResult,
+    },
     /// Installed-application inventory finished loading (Applications screen).
     AppsLoaded {
         apps: Vec<cleanton_engine::InstalledApp>,
@@ -148,6 +153,18 @@ pub enum TuiEvent {
     AppUninstallFinished {
         app_name: String,
         result: Result<ExecutionResult, cleanton_common::CleantonError>,
+    },
+    /// Progress of the in-flight security scan (Security screen).
+    SecurityProgress {
+        scan_id: u64,
+        scanned: usize,
+        total: usize,
+    },
+    /// The read-only security scan finished. Informational only: the report
+    /// never produces cleanup actions. Boxed to keep the enum small.
+    SecurityFinished {
+        scan_id: u64,
+        report: Box<cleanton_engine::SecurityReport>,
     },
 }
 
@@ -363,6 +380,9 @@ async fn run_tui_async<B: ratatui::backend::Backend>(
                         ActiveScreen::Applications => {
                             screens::applications::render(f, &app, main_layout[1])
                         }
+                        ActiveScreen::Security => {
+                            screens::security::render(f, &app, main_layout[1])
+                        }
                         ActiveScreen::Settings => {
                             screens::settings::render(f, &app, main_layout[1])
                         }
@@ -568,6 +588,13 @@ async fn run_tui_async<B: ratatui::backend::Backend>(
                         app.set_status(&format!("Could not trash {}: {err}", path.display()));
                     }
                 },
+                TuiEvent::SnapshotsDeleted { result } => {
+                    app.snapshot_deleting = false;
+                    // Re-read capacity + the snapshot listing so the panel and
+                    // the purgeable figure reflect reality, not our expectation.
+                    app.refresh_capacity();
+                    app.set_status(&result.status_message());
+                }
                 TuiEvent::AppsLoaded { apps, cask_tokens } => {
                     app.apps_loading = false;
                     app.installed_apps = apps;
@@ -656,6 +683,24 @@ async fn run_tui_async<B: ratatui::backend::Backend>(
                         }
                     }
                 }
+                TuiEvent::SecurityProgress {
+                    scan_id,
+                    scanned,
+                    total,
+                } => {
+                    if scan_id == app.security_scan_id {
+                        app.security_progress = (scanned, total);
+                    }
+                }
+                TuiEvent::SecurityFinished { scan_id, report } => {
+                    if scan_id == app.security_scan_id {
+                        app.security_scanning = false;
+                        app.security_selected = 0;
+                        // Shared status copy: identical wording in the Slint app.
+                        app.set_status(&report.summary_message());
+                        app.security_report = Some(*report);
+                    }
+                }
             }
         }
     }
@@ -694,8 +739,9 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
         (ActiveScreen::Packages, " [3] Packages "),
         (ActiveScreen::Services, " [4] Services "),
         (ActiveScreen::Applications, " [5] Apps "),
-        (ActiveScreen::Settings, " [6] Settings "),
-        (ActiveScreen::Execution, " [7] Execution "),
+        (ActiveScreen::Security, " [6] Security "),
+        (ActiveScreen::Settings, " [7] Settings "),
+        (ActiveScreen::Execution, " [8] Execution "),
     ];
 
     let mut tab_spans = Vec::new();
@@ -777,6 +823,10 @@ async fn handle_key_event(
         crossterm::event::KeyCode::Char('7') => {
             clear_pending_confirmations(app);
             app.set_tab(7);
+        }
+        crossterm::event::KeyCode::Char('8') => {
+            clear_pending_confirmations(app);
+            app.set_tab(8);
         }
         crossterm::event::KeyCode::Char('y') if app.pending_empty_trash_confirmation => {
             trigger_empty_trash(app, tui_tx);
@@ -868,15 +918,44 @@ async fn handle_key_event(
                 crossterm::event::KeyCode::Char('t') => {
                     arm_suggestion_trash(app);
                 }
+                // Time Machine snapshot review (mirrors the Slint app's
+                // snapshot panel): { } move the cursor, S ticks a row, D arms
+                // the permanent delete for the ticked set, y/n confirm/cancel.
+                crossterm::event::KeyCode::Char('{') => {
+                    app.snapshot_confirm.cancel();
+                    let count = app.snapshot_count();
+                    if count > 0 {
+                        app.snapshot_cursor =
+                            app.snapshot_cursor.checked_sub(1).unwrap_or(count - 1);
+                    }
+                }
+                crossterm::event::KeyCode::Char('}') => {
+                    app.snapshot_confirm.cancel();
+                    let count = app.snapshot_count();
+                    if count > 0 {
+                        app.snapshot_cursor = (app.snapshot_cursor + 1) % count;
+                    }
+                }
+                crossterm::event::KeyCode::Char('S') => {
+                    toggle_snapshot_selected(app);
+                }
+                crossterm::event::KeyCode::Char('D') => {
+                    arm_snapshot_delete(app);
+                }
                 crossterm::event::KeyCode::Char('y') => {
-                    if app.pending_suggestion_trash.is_some() {
+                    if app.snapshot_confirm.is_armed() {
+                        trigger_snapshot_delete(app, tui_tx);
+                    } else if app.pending_suggestion_trash.is_some() {
                         trigger_suggestion_trash(app, tui_tx);
                     } else {
                         trigger_cleanup(app, tui_tx);
                     }
                 }
                 crossterm::event::KeyCode::Char('n') => {
-                    if app.pending_suggestion_trash.take().is_some() {
+                    if app.snapshot_confirm.is_armed() {
+                        app.snapshot_confirm.cancel();
+                        app.set_status("Snapshot deletion cancelled. Nothing was removed.");
+                    } else if app.pending_suggestion_trash.take().is_some() {
                         app.set_status("Suggestion trash cancelled.");
                     } else {
                         app.pending_cleanup_confirmation = None;
@@ -1015,6 +1094,41 @@ async fn handle_key_event(
                 crossterm::event::KeyCode::Char('n') if app.pending_uninstall => {
                     app.pending_uninstall = false;
                     app.set_status("Uninstall cancelled.");
+                }
+                _ => {}
+            },
+            ActiveScreen::Security => match key.code {
+                crossterm::event::KeyCode::Char('s' | ' ') => {
+                    trigger_security_scan(app, tui_tx, false);
+                }
+                crossterm::event::KeyCode::Char('b') if !app.security_scanning => {
+                    // Re-establish: record the CURRENT package set as the
+                    // trusted baseline (metadata only; packages untouched).
+                    trigger_security_scan(app, tui_tx, true);
+                }
+                crossterm::event::KeyCode::Char('t') if !app.security_scanning => {
+                    trust_selected_security_package(app);
+                }
+                crossterm::event::KeyCode::Char('T') if !app.security_scanning => {
+                    trust_all_security_packages(app);
+                }
+                crossterm::event::KeyCode::Up => {
+                    if app.security_selected > 0 {
+                        app.security_selected -= 1;
+                    }
+                }
+                crossterm::event::KeyCode::Down => {
+                    let count = app
+                        .security_report
+                        .as_ref()
+                        .map_or(0, |report| report.flagged.len());
+                    if app.security_selected + 1 < count {
+                        app.security_selected += 1;
+                    }
+                }
+                crossterm::event::KeyCode::Char('x') if app.security_scanning => {
+                    app.security_cancel.store(true, Ordering::Relaxed);
+                    app.set_status("Cancelling security scan…");
                 }
                 _ => {}
             },
@@ -1389,6 +1503,7 @@ fn clear_pending_confirmations(app: &mut App) {
     app.pending_empty_trash_confirmation = false;
     app.pending_package_confirmation = None;
     app.pending_suggestion_trash = None;
+    app.snapshot_confirm.cancel();
 }
 
 fn request_empty_trash_confirmation(app: &mut App) {
@@ -1400,6 +1515,114 @@ fn request_empty_trash_confirmation(app: &mut App) {
     );
 }
 
+/// Start the read-only security scan on a dedicated background thread (the
+/// antivirus scanner is CPU-bound blocking work). Mirrors the Slint app's
+/// Security tab: detection + notification only — the report can never trigger
+/// a removal. With `establish` the CURRENT package set is recorded as the
+/// trusted baseline (a metadata write to the baseline file only).
+fn trigger_security_scan(app: &mut App, tx: &mpsc::Sender<TuiEvent>, establish: bool) {
+    if app.security_scanning {
+        app.set_status("A security scan is already running.");
+        return;
+    }
+    app.security_scan_id = app.security_scan_id.wrapping_add(1);
+    app.security_cancel = Arc::new(AtomicBool::new(false));
+    app.security_scanning = true;
+    app.security_progress = (0, 0);
+    app.security_report = None;
+    app.security_selected = 0;
+    app.set_status(if establish {
+        "Re-establishing the trusted baseline from the current packages (read-only scan)…"
+    } else {
+        "Scanning installed packages for changes since the trusted baseline (read-only)…"
+    });
+
+    let scan_id = app.security_scan_id;
+    let cancel = app.security_cancel.clone();
+    let tx = tx.clone();
+    std::thread::spawn(move || {
+        let progress_tx = tx.clone();
+        let progress = move |progress: cleanton_engine::SecurityProgress| {
+            // Throttle: every few packages (and at completion) is plenty for a
+            // 30 fps TUI and keeps the channel quiet.
+            if progress.scanned.is_multiple_of(5) || progress.scanned == progress.total {
+                let _ = progress_tx.blocking_send(TuiEvent::SecurityProgress {
+                    scan_id,
+                    scanned: progress.scanned,
+                    total: progress.total,
+                });
+            }
+        };
+        let options = cleanton_engine::SecurityScanOptions {
+            establish_baseline: establish,
+            ..cleanton_engine::SecurityScanOptions::with_default_baseline()
+        };
+        let report = cleanton_engine::run_security_scan_with_options(
+            &[],
+            &options,
+            Some(&cancel),
+            &progress,
+        );
+        let _ = tx.blocking_send(TuiEvent::SecurityFinished {
+            scan_id,
+            report: Box::new(report),
+        });
+    });
+}
+
+/// Mark the selected flagged package as reviewed/trusted: updates ONLY the
+/// baseline metadata file (never the package) and drops the row.
+fn trust_selected_security_package(app: &mut App) {
+    let Some(path) = cleanton_engine::default_baseline_path() else {
+        app.set_status("Cannot update the baseline: HOME is not set.");
+        return;
+    };
+    let selected = app.security_selected;
+    let Some(report) = app.security_report.as_mut() else {
+        app.set_status("Nothing to trust — run a scan first.");
+        return;
+    };
+    if report.flagged.is_empty() {
+        app.set_status("Nothing to trust — no flagged packages.");
+        return;
+    }
+    match report.trust_flagged(selected, &path) {
+        Ok(name) => {
+            let remaining = report.flagged.len();
+            app.security_selected = selected.min(remaining.saturating_sub(1));
+            app.set_status(&format!(
+                "Trusted {name} — it stays quiet until it changes again. Baseline updated; the package was not touched."
+            ));
+        }
+        Err(err) => app.set_status(&format!("Could not update the baseline: {err}")),
+    }
+}
+
+/// Mark every flagged package as reviewed/trusted (one baseline write).
+fn trust_all_security_packages(app: &mut App) {
+    let Some(path) = cleanton_engine::default_baseline_path() else {
+        app.set_status("Cannot update the baseline: HOME is not set.");
+        return;
+    };
+    let Some(report) = app.security_report.as_mut() else {
+        app.set_status("Nothing to trust — run a scan first.");
+        return;
+    };
+    if report.flagged.is_empty() {
+        app.set_status("Nothing to trust — no flagged packages.");
+        return;
+    }
+    match report.trust_all_flagged(&path) {
+        Ok(trusted) => {
+            app.security_selected = 0;
+            app.set_status(&format!(
+                "Trusted {trusted} package(s) — baseline updated; no package was touched."
+            ));
+        }
+        Err(err) => app.set_status(&format!("Could not update the baseline: {err}")),
+    }
+}
+
 fn trigger_empty_trash(app: &mut App, tx: &mpsc::Sender<TuiEvent>) {
     app.pending_empty_trash_confirmation = false;
     app.set_status("Emptying Trash…");
@@ -1409,6 +1632,76 @@ fn trigger_empty_trash(app: &mut App, tx: &mpsc::Sender<TuiEvent>) {
             .await
             .unwrap_or_else(|join_err| Err(format!("empty-trash task failed: {join_err}")));
         let _ = tx.send(TuiEvent::TrashEmptied { result }).await;
+    });
+}
+
+/// Toggle the tick on the snapshot row under the cursor. Any selection change
+/// disarms a pending confirmation so the armed set always matches what the
+/// user last reviewed.
+fn toggle_snapshot_selected(app: &mut App) {
+    app.snapshot_confirm.cancel();
+    let count = app.snapshot_count();
+    if count == 0 {
+        app.set_status("No local Time Machine snapshots to select.");
+        return;
+    }
+    let idx = app.snapshot_cursor.min(count.saturating_sub(1));
+    if !app.snapshot_selected.remove(&idx) {
+        app.snapshot_selected.insert(idx);
+    }
+    app.set_status(&format!(
+        "{} snapshot(s) selected for permanent deletion. Press D to review, then y to confirm.",
+        app.selected_snapshot_dates().len()
+    ));
+}
+
+/// First step of the two-step snapshot delete: arm the shared engine confirm
+/// state for the ticked rows and spell out — before anything runs — that the
+/// deletion is permanent (snapshots never go to the Trash). Mirrors the Slint
+/// app's "Delete selected → Confirm permanent delete" flow.
+fn arm_snapshot_delete(app: &mut App) {
+    if app.snapshot_deleting {
+        app.set_status("A snapshot deletion is still running.");
+        return;
+    }
+    let dates = app.selected_snapshot_dates();
+    if !app.snapshot_confirm.arm(dates) {
+        app.set_status("Select at least one snapshot to delete (S ticks the row under { }).");
+        return;
+    }
+    app.pending_cleanup_confirmation = None;
+    app.pending_suggestion_trash = None;
+    app.set_status(&format!(
+        "Confirm to permanently delete {} snapshot(s) — this cannot be undone via Trash. Time Machine loses these restore points. Press y to confirm, n to cancel.",
+        app.snapshot_confirm.armed_count()
+    ));
+}
+
+/// Execute a user-confirmed snapshot deletion on a blocking worker. The engine
+/// adapter re-validates every date, runs one precise
+/// `tmutil deletelocalsnapshots <date>` per snapshot, and never retries.
+fn trigger_snapshot_delete(app: &mut App, tx: &mpsc::Sender<TuiEvent>) {
+    let Some(dates) = app.snapshot_confirm.confirm() else {
+        return;
+    };
+    if app.snapshot_deleting {
+        return;
+    }
+    app.snapshot_deleting = true;
+    app.set_status(&format!("Deleting {} snapshot(s) via tmutil…", dates.len()));
+    let tx = tx.clone();
+    tokio::spawn(async move {
+        let result =
+            tokio::task::spawn_blocking(move || cleanton_engine::delete_local_snapshots(&dates))
+                .await
+                .unwrap_or_else(|join_err| cleanton_engine::SnapshotCleanupResult {
+                    deleted: Vec::new(),
+                    failures: vec![cleanton_engine::SnapshotDeleteFailure {
+                        date: "(task)".to_owned(),
+                        message: format!("snapshot-delete task failed: {join_err}"),
+                    }],
+                });
+        let _ = tx.send(TuiEvent::SnapshotsDeleted { result }).await;
     });
 }
 
@@ -2655,7 +2948,8 @@ mod tests {
     }
 
     /// Numeric jumps and Tab cycling must map onto Dashboard / Results /
-    /// Packages / Services / Applications / Settings with no off-by-one gap.
+    /// Packages / Services / Applications / Security / Settings with no
+    /// off-by-one gap.
     #[test]
     fn tab_navigation_matches_app_screen_order() {
         let mut app = test_app();
@@ -2665,7 +2959,8 @@ mod tests {
             (3, ActiveScreen::Packages),
             (4, ActiveScreen::Services),
             (5, ActiveScreen::Applications),
-            (6, ActiveScreen::Settings),
+            (6, ActiveScreen::Security),
+            (7, ActiveScreen::Settings),
         ] {
             app.set_tab(idx);
             assert_eq!(app.active_screen, expected, "numeric jump {idx}");
@@ -2677,6 +2972,7 @@ mod tests {
             ActiveScreen::Packages,
             ActiveScreen::Services,
             ActiveScreen::Applications,
+            ActiveScreen::Security,
             ActiveScreen::Settings,
             ActiveScreen::Dashboard,
         ];

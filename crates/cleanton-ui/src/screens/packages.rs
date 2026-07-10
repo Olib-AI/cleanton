@@ -86,12 +86,13 @@ fn render_summary(f: &mut Frame, app: &App, area: Rect) {
         .iter()
         .filter(|p| p.outdated_to.is_some())
         .count();
-    let (removable, reclaimable, kept_dep) = app
-        .package_plan
-        .as_ref()
-        .map_or((0, 0, 0), |p| {
-            (p.removable.len(), p.reclaimable_bytes, p.kept_as_dependency.len())
-        });
+    let (removable, reclaimable, kept_dep) = app.package_plan.as_ref().map_or((0, 0, 0), |p| {
+        (
+            p.removable.len(),
+            p.reclaimable_bytes,
+            p.kept_as_dependency.len(),
+        )
+    });
 
     let tile = |label: &str, value: String, color| {
         vec![
@@ -103,8 +104,16 @@ fn render_summary(f: &mut Frame, app: &App, area: Rect) {
         ]
     };
 
-    let mut top_tiles = tile("Installed", inv.packages.len().to_string(), app.theme.highlight);
-    top_tiles.extend(tile("Total size", human_bytes(total_size), app.theme.accent));
+    let mut top_tiles = tile(
+        "Installed",
+        inv.packages.len().to_string(),
+        app.theme.highlight,
+    );
+    top_tiles.extend(tile(
+        "Total size",
+        human_bytes(total_size),
+        app.theme.accent,
+    ));
     top_tiles.extend(tile(
         "Outdated",
         if app.package_phase2 {
@@ -112,14 +121,34 @@ fn render_summary(f: &mut Frame, app: &App, area: Rect) {
         } else {
             outdated.to_string()
         },
-        if outdated > 0 { app.theme.warning } else { app.theme.muted },
+        if outdated > 0 {
+            app.theme.warning
+        } else {
+            app.theme.muted
+        },
     ));
 
     let mut lines = vec![Line::from(top_tiles)];
     if app.package_supports_keepset {
-        let mut bottom_tiles = tile("Removable", removable.to_string(), if removable > 0 { app.theme.danger } else { app.theme.muted });
-        bottom_tiles.extend(tile("Reclaimable", human_bytes(reclaimable), app.theme.success));
-        bottom_tiles.extend(tile("Kept as dependency", kept_dep.to_string(), app.theme.muted));
+        let mut bottom_tiles = tile(
+            "Removable",
+            removable.to_string(),
+            if removable > 0 {
+                app.theme.danger
+            } else {
+                app.theme.muted
+            },
+        );
+        bottom_tiles.extend(tile(
+            "Reclaimable",
+            human_bytes(reclaimable),
+            app.theme.success,
+        ));
+        bottom_tiles.extend(tile(
+            "Kept as dependency",
+            kept_dep.to_string(),
+            app.theme.muted,
+        ));
         lines.push(Line::from(bottom_tiles));
     } else {
         lines.push(Line::from(Span::styled(
@@ -242,7 +271,10 @@ fn render_list(f: &mut Frame, app: &App, area: Rect) {
                 format!("{:<12} ", trunc(&pkg.version, 11)),
                 Style::default().fg(app.theme.muted),
             ),
-            Span::styled(format!("{size:>9}  "), Style::default().fg(app.theme.highlight)),
+            Span::styled(
+                format!("{size:>9}  "),
+                Style::default().fg(app.theme.highlight),
+            ),
         ];
 
         if let Some(latest) = pkg.outdated_to.as_ref() {
@@ -322,10 +354,7 @@ fn render_controls(f: &mut Frame, app: &App, area: Rect) {
     } else {
         let mut spans = Vec::new();
         if app.package_acting || app.package_loading || app.package_phase2 {
-            spans.push(Span::styled(
-                "  ⟳ ",
-                Style::default().fg(app.theme.warning),
-            ));
+            spans.push(Span::styled("  ⟳ ", Style::default().fg(app.theme.warning)));
         } else {
             spans.push(Span::raw("  "));
         }

@@ -4,7 +4,8 @@ use crate::theme::{DARK_THEME, Theme};
 use crate::widgets::FileTreeState;
 use cleanton_common::{CleantonConfig, CleanupPlan, ExecutionResult, ScanResult};
 use cleanton_engine::{
-    AnnotatedAction, DockerAnalysis, InstalledApp, Orchestrator, Suggestions, UninstallPlan,
+    AnnotatedAction, DockerAnalysis, InstalledApp, Orchestrator, SnapshotAnalysis,
+    SnapshotConfirmState, Suggestions, UninstallPlan,
 };
 use cleanton_packages::{Inventory, ManagerKind, RemovalPlan};
 use cleanton_services::Service;
@@ -31,6 +32,7 @@ pub enum ActiveScreen {
     Packages,
     Services,
     Applications,
+    Security,
     Settings,
     Execution,
 }
@@ -139,6 +141,19 @@ pub struct App {
     pub suggestion_selected: usize,
     pub pending_suggestion_trash: Option<std::path::PathBuf>,
 
+    // Time Machine local snapshot review state (Results screen). Derived from
+    // `capacity_view` on every [`Self::refresh_capacity`]. Deleting a snapshot
+    // is permanent (never Trash), so the armed dates live in the shared engine
+    // two-step state machine, mirroring the Slint app's snapshot panel.
+    pub snapshot_analysis: Option<SnapshotAnalysis>,
+    /// Cursor into `snapshot_analysis.snapshots`.
+    pub snapshot_cursor: usize,
+    /// Ticked snapshot indices (unselected by default; the user must opt in).
+    pub snapshot_selected: HashSet<usize>,
+    pub snapshot_confirm: SnapshotConfirmState,
+    /// A confirmed deletion run is in flight.
+    pub snapshot_deleting: bool,
+
     // Applications screen state (mirrors the Slint app's Applications tab).
     pub installed_apps: Vec<InstalledApp>,
     pub apps_loading: bool,
@@ -170,6 +185,20 @@ pub struct App {
     /// Two-step confirm armed for the loaded plan.
     pub pending_uninstall: bool,
     pub uninstalling: bool,
+
+    // Security screen state (mirrors the Slint app's Security tab). The scan
+    // is detection + notification only: findings never become cleanup actions
+    // and nothing on this screen can remove or modify a package.
+    pub security_report: Option<cleanton_engine::SecurityReport>,
+    pub security_scanning: bool,
+    /// (packages scanned, total) while a scan is in flight.
+    pub security_progress: (usize, usize),
+    /// Cursor into `security_report.flagged`.
+    pub security_selected: usize,
+    /// Monotonic scan generation; stale background results are discarded.
+    pub security_scan_id: u64,
+    /// Cooperative cancellation for the in-flight security scan.
+    pub security_cancel: Arc<AtomicBool>,
 
     // Execution state
     pub execution_progress: f32,
@@ -238,6 +267,11 @@ impl App {
             service_startup_only: false,
             suggestion_selected: 0,
             pending_suggestion_trash: None,
+            snapshot_analysis: None,
+            snapshot_cursor: 0,
+            snapshot_selected: HashSet::new(),
+            snapshot_confirm: SnapshotConfirmState::Idle,
+            snapshot_deleting: false,
             installed_apps: Vec::new(),
             apps_loading: false,
             apps_hide_system: false,
@@ -252,6 +286,12 @@ impl App {
             leftover_excluded: HashSet::new(),
             pending_uninstall: false,
             uninstalling: false,
+            security_report: None,
+            security_scanning: false,
+            security_progress: (0, 0),
+            security_selected: 0,
+            security_scan_id: 0,
+            security_cancel: Arc::new(AtomicBool::new(false)),
             execution_progress: 0.0,
             execution_logs: Vec::new(),
             execution_result: None,
@@ -274,6 +314,50 @@ impl App {
     pub fn refresh_capacity(&mut self) {
         let root = cleanton_common::paths::expand_tilde(&self.config.general.default_root);
         self.capacity_view = capacity::read(&root);
+        self.rebuild_snapshot_review();
+    }
+
+    /// Derives the Results-screen snapshot review model from the freshly read
+    /// capacity view. Every rebuild clears the selection and disarms any
+    /// pending confirmation: a confirmation must never survive a change of the
+    /// underlying snapshot list.
+    fn rebuild_snapshot_review(&mut self) {
+        let purgeable = self
+            .capacity_view
+            .capacity
+            .as_ref()
+            .map_or(0, |cap| cap.purgeable_estimate_bytes);
+        self.snapshot_analysis = self
+            .capacity_view
+            .snapshots
+            .as_ref()
+            .map(|listing| SnapshotAnalysis::from_listing(listing, purgeable));
+        self.snapshot_cursor = 0;
+        self.snapshot_selected.clear();
+        self.snapshot_confirm.cancel();
+    }
+
+    /// Number of snapshots offered for review on the Results screen.
+    #[must_use]
+    pub fn snapshot_count(&self) -> usize {
+        self.snapshot_analysis
+            .as_ref()
+            .map_or(0, |analysis| analysis.snapshots.len())
+    }
+
+    /// The raw tmutil date tokens of the ticked snapshot rows, in list order.
+    #[must_use]
+    pub fn selected_snapshot_dates(&self) -> Vec<String> {
+        let Some(analysis) = self.snapshot_analysis.as_ref() else {
+            return Vec::new();
+        };
+        analysis
+            .snapshots
+            .iter()
+            .enumerate()
+            .filter(|(idx, _)| self.snapshot_selected.contains(idx))
+            .map(|(_, snapshot)| snapshot.date.clone())
+            .collect()
     }
 
     pub fn cycle_tab(&mut self) {
@@ -282,7 +366,8 @@ impl App {
             ActiveScreen::Results => ActiveScreen::Packages,
             ActiveScreen::Packages => ActiveScreen::Services,
             ActiveScreen::Services => ActiveScreen::Applications,
-            ActiveScreen::Applications => ActiveScreen::Settings,
+            ActiveScreen::Applications => ActiveScreen::Security,
+            ActiveScreen::Security => ActiveScreen::Settings,
             ActiveScreen::Settings => {
                 if self.is_executing || self.execution_result.is_some() {
                     ActiveScreen::Execution
@@ -301,8 +386,9 @@ impl App {
             3 => ActiveScreen::Packages,
             4 => ActiveScreen::Services,
             5 => ActiveScreen::Applications,
-            6 => ActiveScreen::Settings,
-            7 => ActiveScreen::Execution,
+            6 => ActiveScreen::Security,
+            7 => ActiveScreen::Settings,
+            8 => ActiveScreen::Execution,
             _ => self.active_screen,
         };
     }

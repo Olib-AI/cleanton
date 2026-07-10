@@ -234,17 +234,169 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     f.render_widget(actions_para, controls_chunk);
 }
 
-/// Render the review-only panel: Docker reclaimable accounting (top) and
-/// large-item / duplicate suggestions (bottom). Both are advisory — they are
-/// never part of the executable cleanup plan and offer no delete affordance.
+/// Render the review panel: Docker reclaimable accounting (top), the
+/// confirm-gated Time Machine snapshot review (middle, only when there is
+/// something to disclose), and large-item / duplicate suggestions (bottom).
+/// Docker and suggestions are advisory; snapshot rows carry the one explicitly
+/// confirm-gated permanent-delete affordance (never part of the cleanup plan).
 fn render_review_panel(f: &mut Frame, app: &App, area: Rect) {
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(7), Constraint::Min(3)])
-        .split(area);
+    let snapshot_height = snapshot_panel_height(app);
+    if snapshot_height > 0 {
+        let rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(7),
+                Constraint::Length(snapshot_height),
+                Constraint::Min(3),
+            ])
+            .split(area);
+        render_docker(f, app, rows[0]);
+        render_snapshots(f, app, rows[1]);
+        render_suggestions(f, app, rows[2]);
+    } else {
+        let rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(7), Constraint::Min(3)])
+            .split(area);
+        render_docker(f, app, rows[0]);
+        render_suggestions(f, app, rows[1]);
+    }
+}
 
-    render_docker(f, app, rows[0]);
-    render_suggestions(f, app, rows[1]);
+/// How many snapshot rows the review panel shows at once.
+const SNAPSHOT_ROWS_SHOWN: usize = 3;
+
+/// Panel height for the snapshot block: 0 hides it entirely (query succeeded
+/// with zero snapshots), a short block discloses a failed query, and the full
+/// block fits the status line, up to [`SNAPSHOT_ROWS_SHOWN`] rows and the key
+/// hint inside the borders.
+fn snapshot_panel_height(app: &App) -> u16 {
+    let Some(analysis) = app.snapshot_analysis.as_ref() else {
+        return 0;
+    };
+    if analysis.snapshots.is_empty() {
+        // Distinguish "could not query" from "zero snapshots": the failed
+        // query is disclosed, a clean result needs no panel.
+        return if analysis.query_succeeded { 0 } else { 3 };
+    }
+    let shown = analysis.snapshots.len().min(SNAPSHOT_ROWS_SHOWN);
+    // borders (2) + status line + rows + overflow/hint line.
+    u16::try_from(shown).unwrap_or(3).saturating_add(4)
+}
+
+/// Render the Time Machine snapshot review block. Deleting a snapshot is
+/// permanent — it cannot go to the Trash — so rows start unticked and the
+/// delete affordance is the shared two-step arm → confirm state machine.
+fn render_snapshots(f: &mut Frame, app: &App, area: Rect) {
+    use cleanton_common::display::human_bytes;
+
+    let armed = app.snapshot_confirm.is_armed();
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(if armed {
+            app.theme.danger
+        } else {
+            app.theme.border
+        }))
+        .title(Span::styled(
+            "Time Machine snapshots (permanent delete)",
+            Style::default().add_modifier(Modifier::BOLD),
+        ));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let Some(analysis) = app.snapshot_analysis.as_ref() else {
+        return;
+    };
+
+    if analysis.snapshots.is_empty() {
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                "  Could not query local snapshots (tmutil unavailable or denied).",
+                Style::default().fg(app.theme.warning),
+            ))),
+            inner,
+        );
+        return;
+    }
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+
+    // Status line: armed confirmation copy wins over the ambient summary.
+    if app.snapshot_deleting {
+        lines.push(Line::from(Span::styled(
+            "  Deleting snapshot(s) via tmutil…",
+            Style::default().fg(app.theme.warning),
+        )));
+    } else if armed {
+        lines.push(Line::from(Span::styled(
+            format!(
+                "  Confirm permanent delete of {} snapshot(s): y / n",
+                app.snapshot_confirm.armed_count()
+            ),
+            Style::default()
+                .fg(app.theme.danger)
+                .add_modifier(Modifier::BOLD),
+        )));
+    } else {
+        lines.push(Line::from(Span::styled(
+            format!(
+                "  {} snapshot(s) pin purgeable space (est ~{}) — delete is NOT undoable",
+                analysis.snapshots.len(),
+                human_bytes(analysis.purgeable_estimate_bytes)
+            ),
+            Style::default().fg(app.theme.warning),
+        )));
+    }
+
+    // Visible window: keep the cursor in view when the list overflows.
+    let count = analysis.snapshots.len();
+    let cursor = app.snapshot_cursor.min(count.saturating_sub(1));
+    let start = cursor
+        .saturating_add(1)
+        .saturating_sub(SNAPSHOT_ROWS_SHOWN)
+        .min(count.saturating_sub(SNAPSHOT_ROWS_SHOWN.min(count)));
+    for (idx, snapshot) in analysis
+        .snapshots
+        .iter()
+        .enumerate()
+        .skip(start)
+        .take(SNAPSHOT_ROWS_SHOWN)
+    {
+        let is_cursor = idx == cursor;
+        let ticked = app.snapshot_selected.contains(&idx);
+        let marker = if is_cursor { "▸" } else { " " };
+        let tick = if ticked { "[x]" } else { "[ ]" };
+        let style = if ticked {
+            Style::default()
+                .fg(app.theme.warning)
+                .add_modifier(Modifier::BOLD)
+        } else if is_cursor {
+            Style::default()
+                .fg(app.theme.accent)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(app.theme.fg)
+        };
+        lines.push(Line::from(vec![
+            Span::styled(format!("  {marker} {tick} "), style),
+            Span::styled(cleanton_engine::format_snapshot_date(&snapshot.date), style),
+        ]));
+    }
+
+    if count > SNAPSHOT_ROWS_SHOWN {
+        lines.push(Line::from(Span::styled(
+            format!("  … {count} total · {{ }} scroll · [S] tick · [D] delete"),
+            Style::default().fg(app.theme.muted),
+        )));
+    } else {
+        lines.push(Line::from(Span::styled(
+            "  { } select · [S] tick · [D] delete ticked",
+            Style::default().fg(app.theme.muted),
+        )));
+    }
+
+    f.render_widget(Paragraph::new(lines), inner);
 }
 
 fn render_docker(f: &mut Frame, app: &App, area: Rect) {
@@ -446,7 +598,10 @@ fn render_suggestions(f: &mut Frame, app: &App, area: Rect) {
                         .fg(app.theme.accent)
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(path_tail(&item.path), style),
+                Span::styled(
+                    format!("{}{}", path_tail(&item.path), ml_tag(&item.ml_note)),
+                    style,
+                ),
             ]));
         }
     }
@@ -476,7 +631,10 @@ fn render_suggestions(f: &mut Frame, app: &App, area: Rect) {
                         .fg(app.theme.accent)
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(path_tail(&item.path), style),
+                Span::styled(
+                    format!("{}{}", path_tail(&item.path), ml_tag(&item.ml_note)),
+                    style,
+                ),
             ]));
         }
     }
@@ -499,6 +657,7 @@ fn render_suggestions(f: &mut Frame, app: &App, area: Rect) {
             } else {
                 ""
             };
+            let ml = ml_tag(&item.ml_note);
             let (prefix, style) = selectable_prefix(&item.path);
             lines.push(Line::from(vec![
                 Span::styled(prefix, style),
@@ -508,7 +667,10 @@ fn render_suggestions(f: &mut Frame, app: &App, area: Rect) {
                         .fg(app.theme.accent)
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(format!("{}{}{}", path_tail(&item.path), kind, tag), style),
+                Span::styled(
+                    format!("{}{}{}{}", path_tail(&item.path), kind, tag, ml),
+                    style,
+                ),
             ]));
         }
     }
@@ -521,6 +683,17 @@ fn render_suggestions(f: &mut Frame, app: &App, area: Rect) {
     }
 
     f.render_widget(Paragraph::new(lines), inner);
+}
+
+/// Advisory ML badge suffix (" · ML <label> <confidence>") for a suggestion
+/// row, empty when the item was not ML-scored. Display only — suggestions stay
+/// review-only regardless of the verdict.
+fn ml_tag(ml_note: &str) -> String {
+    if ml_note.is_empty() {
+        String::new()
+    } else {
+        format!(" · {ml_note}")
+    }
 }
 
 /// Compact a path to its last two components for the narrow review panel.

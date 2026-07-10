@@ -1,9 +1,11 @@
 //! Local APFS / Time Machine snapshot disclosure.
 //!
 //! APFS local snapshots pin "deleted" blocks as *purgeable* until they are thinned (see
-//! `PLATFORM.md` §1.2). Cleanton never deletes snapshots; it only *discloses* them so the
-//! UI can warn that freed bytes may not be immediately available. This module shells out
-//! to `tmutil listlocalsnapshots <volume>` and parses the identifiers. Absence of
+//! `PLATFORM.md` §1.2). This module only *discloses* them so the UI can warn that freed
+//! bytes may not be immediately available; a scan never deletes anything. Deletion exists
+//! solely behind the confirm-gated adapter in `cleanton-engine/src/snapshots.rs`. This
+//! module shells out to `tmutil listlocalsnapshots <volume>` and parses the identifiers.
+//! Absence of
 //! `tmutil`, a non-zero exit, or a permission error are all handled as "no snapshots
 //! observed" — the query never panics and never propagates an error.
 

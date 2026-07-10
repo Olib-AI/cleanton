@@ -426,13 +426,23 @@ pub(crate) fn trash_uninstall_paths(
 }
 
 fn validate_plan(config: &CleantonConfig, plan: &CleanupPlan) -> Result<()> {
-    if let Ok(age) = std::time::SystemTime::now().duration_since(plan.created_at)
-        && age > Duration::from_mins(15)
-    {
-        return Err(CleantonError::ExecutionRefused(format!(
-            "plan is stale (created {} seconds ago, max age is 15 minutes)",
-            age.as_secs()
-        )));
+    // Staleness gate. A `created_at` in the future means the wall clock moved
+    // backwards since the plan was built; the plan's fingerprints can no longer
+    // be trusted as fresh, so refuse instead of silently bypassing the check.
+    match std::time::SystemTime::now().duration_since(plan.created_at) {
+        Ok(age) if age > Duration::from_mins(15) => {
+            return Err(CleantonError::ExecutionRefused(format!(
+                "plan is stale (created {} seconds ago, max age is 15 minutes)",
+                age.as_secs()
+            )));
+        }
+        Ok(_) => {}
+        Err(_) => {
+            return Err(CleantonError::ExecutionRefused(
+                "plan creation time is in the future (system clock moved backwards); rescan and try again"
+                    .to_owned(),
+            ));
+        }
     }
 
     if plan.incomplete_scan {
@@ -709,7 +719,8 @@ fn write_execution_log(
     fs::write(&log_path, encoded).map_err(|source| CleantonError::io(&log_path, source))?;
 
     let max_count = config.general.log_retention_count;
-    let max_age = Duration::from_secs(u64::from(config.general.log_retention_days) * 24 * 3600);
+    let max_age =
+        Duration::from_secs(u64::from(config.general.log_retention_days).saturating_mul(24 * 3600));
     let _ = rotate_logs(&log_dir, max_count, max_age);
 
     Ok(Some(log_path))

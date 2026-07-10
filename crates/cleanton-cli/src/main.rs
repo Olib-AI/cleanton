@@ -91,6 +91,47 @@ enum Command {
     },
     /// Diagnose Full Disk Access and print first-run permission guidance.
     Doctor,
+    /// Read-only supply-chain security scan of installed packages (npm/pnpm/
+    /// bun/yarn globals, Python site-packages, VS Code/Cursor extensions;
+    /// `--root` adds project `node_modules`/venv trees under that root).
+    /// The first run records the installed set as a trusted baseline; later
+    /// runs show the DIFF: new, updated, and — the high signal — packages
+    /// changed WITHOUT a version bump. Known unchanged packages are suppressed,
+    /// and heuristic verdicts alert only when CORROBORATED (a known-malware
+    /// signature, or critical findings across two distinct attack categories
+    /// with at least one anchored in an install/lifecycle script — runtime
+    /// bundles and CI/test/docs contexts never corroborate by themselves);
+    /// everything else is a neutral notice.
+    /// Detection and notification only — nothing is removed or modified; only
+    /// the baseline metadata file is ever written.
+    /// Exit codes: 0 = no alerts (notices and a fresh baseline are fine),
+    /// 3 = a corroborated suspicious alert, 5 = a corroborated malicious
+    /// alert or any package changed without a version bump.
+    Security {
+        /// Record the CURRENT package set as the trusted baseline (even when
+        /// a baseline already exists).
+        #[arg(long)]
+        establish_baseline: bool,
+
+        /// Also list AV-flagged packages that are unchanged since the
+        /// baseline (the raw pre-baseline view; never affects the exit code).
+        #[arg(long)]
+        all: bool,
+
+        /// Mark a flagged package as reviewed/trusted (repeatable). Updates
+        /// only the baseline file — the package itself is never touched.
+        #[arg(long, value_name = "PACKAGE")]
+        review: Vec<String>,
+
+        /// Mark EVERY flagged package as reviewed/trusted.
+        #[arg(long)]
+        review_all: bool,
+
+        /// Override the baseline file location
+        /// (default: `~/.config/cleanton/security_baseline.json`).
+        #[arg(long, value_name = "PATH")]
+        baseline: Option<PathBuf>,
+    },
     Interactive,
 }
 
@@ -218,6 +259,13 @@ async fn run_app(cli: Cli) -> Result<i32> {
             command: Some(ConfigCommand::Path),
         } => unreachable!("config path is handled before config loading"),
         Command::Doctor => unreachable!("doctor is handled before config loading"),
+        Command::Security {
+            establish_baseline,
+            all,
+            review,
+            review_all,
+            baseline,
+        } => run_security(&cli, establish_baseline, all, &review, review_all, baseline),
         Command::Interactive => run_interactive(&cli, &config).await,
     }
 }
@@ -608,6 +656,201 @@ async fn run_clean(cli: &Cli, config: &CleantonConfig, dry_run: bool, yes: bool)
     Ok(0)
 }
 
+/// `cleanton security`: read-only supply-chain scan of installed packages,
+/// interpreted through the trusted baseline (first run establishes it; later
+/// runs show only the diff). Detection + notification only — no path in this
+/// command removes, modifies, or quarantines anything; `--review`/
+/// `--review-all` write ONLY the baseline metadata file.
+///
+/// Exit codes (distinct from plan/clean's 2 = empty and 4 = incomplete):
+/// 0 = no alerts (uncorroborated notices and a fresh baseline are fine),
+/// 3 = a new/updated package has a CORROBORATED suspicious verdict, 5 = a
+/// new/updated package has a CORROBORATED malicious verdict OR any package
+/// changed without a version bump (same-version tamper). Reviews are applied
+/// BEFORE the exit code is computed, so `--review-all` on a surfaced set
+/// exits 0.
+fn run_security(
+    cli: &Cli,
+    establish_baseline: bool,
+    all: bool,
+    review: &[String],
+    review_all: bool,
+    baseline: Option<PathBuf>,
+) -> Result<i32> {
+    use cleanton_engine::security;
+
+    let baseline_path = baseline.or_else(cleanton_engine::default_baseline_path);
+    if baseline_path.is_none() && !cli.json {
+        println!("note: HOME is not set, so no baseline can be stored — showing the raw scan.");
+    }
+    let options = security::SecurityScanOptions {
+        baseline_path: baseline_path.clone(),
+        establish_baseline,
+        include_unchanged: all,
+    };
+
+    let targets = security::discover_targets(&cli.root);
+    if targets.is_empty() {
+        if cli.json {
+            print_json(&security::SecurityReport::empty())?;
+        } else {
+            println!(
+                "No package locations found to scan (no global node_modules, \
+                 site-packages, or editor extension directories exist)."
+            );
+        }
+        return Ok(0);
+    }
+
+    if !cli.json {
+        println!("Security scan (read-only) — {} location(s):", targets.len());
+        for target in &targets {
+            println!("  - {} ({})", target.root.display(), target.kind.label());
+        }
+    }
+
+    // Live progress goes to stderr (throttled) so `--json` stdout stays clean.
+    let progress = |progress: cleanton_engine::SecurityProgress| {
+        if progress.total > 0
+            && (progress.scanned.is_multiple_of(25) || progress.scanned == progress.total)
+        {
+            eprint!("\rscanned {}/{} packages", progress.scanned, progress.total);
+            if progress.scanned == progress.total {
+                eprintln!();
+            }
+        }
+    };
+    let mut report = security::scan_targets_with_options(targets, &options, None, &progress);
+
+    // Apply requested reviews (baseline metadata only; packages untouched),
+    // then report the post-review state.
+    let mut review_notes: Vec<String> = Vec::new();
+    if review_all || !review.is_empty() {
+        let Some(path) = baseline_path.as_deref() else {
+            return Err(CleantonError::Config(
+                "cannot mark packages reviewed: no baseline path (HOME is not set)".to_owned(),
+            ));
+        };
+        if review_all {
+            let trusted = report.trust_all_flagged(path)?;
+            review_notes.push(format!(
+                "Marked {trusted} package(s) as reviewed/trusted in the baseline."
+            ));
+        } else {
+            for name in review {
+                // Trust every flagged row matching the requested name (a name
+                // can appear in more than one tree kind).
+                let mut trusted_names = Vec::new();
+                while let Some(index) = report
+                    .flagged
+                    .iter()
+                    .position(|pkg| &pkg.name == name || pkg.display_name() == *name)
+                {
+                    trusted_names.push(report.trust_flagged(index, path)?);
+                }
+                if trusted_names.is_empty() {
+                    review_notes.push(format!(
+                        "warning: '{name}' is not in the flagged list; nothing to review."
+                    ));
+                } else {
+                    review_notes.push(format!(
+                        "Marked {} as reviewed/trusted in the baseline.",
+                        trusted_names.join(", ")
+                    ));
+                }
+            }
+        }
+    }
+
+    if cli.json {
+        print_json(&report)?;
+        for note in &review_notes {
+            eprintln!("{note}");
+        }
+    } else {
+        print_security_report(&report);
+        for note in &review_notes {
+            println!("{note}");
+        }
+    }
+    Ok(report.exit_code())
+}
+
+/// Human-readable security report: the diff table (worst-first: same-version
+/// tampers and corroborated alerts on top, neutral notices below) followed by
+/// the shared summary line. The STATUS column is the ASSESSMENT — notice rows
+/// show "notice", never a raw heuristic verdict; the raw verdict appears only
+/// as an indented "heuristics: … (uncorroborated)" detail. Wording is
+/// deliberately review-only ("review this package") — there is no auto-fix
+/// and never will be.
+fn print_security_report(report: &cleanton_engine::SecurityReport) {
+    use cleanton_engine::security::severity_label;
+
+    println!();
+    if report.flagged.is_empty() {
+        println!("{}", report.summary_message());
+        return;
+    }
+
+    println!(
+        "{:<26} {:<10} {:>5}  {:<9} {:<32} TOP FINDING",
+        "CHANGE", "STATUS", "SCORE", "SEVERITY", "PACKAGE",
+    );
+    for package in &report.flagged {
+        let severity = package.worst_severity().map_or("-", severity_label);
+        let top = package
+            .top_findings
+            .first()
+            .map_or("(no detail)", |finding| finding.title.as_str());
+        println!(
+            "{:<26} {:<10} {:>5}  {:<9} {:<32} {}",
+            package.change_label(),
+            package.assessment_label(),
+            package.score,
+            severity,
+            package.display_name(),
+            top
+        );
+        println!(
+            "{:<26} {:<10} {:>5}  {:<9} path: {}",
+            "",
+            "",
+            "",
+            "",
+            package.path.display()
+        );
+        if let Some(note) = package.heuristic_note() {
+            println!("{:<26} {:<10} {:>5}  {:<9} {note}", "", "", "", "");
+        }
+        if package.is_tampered() {
+            println!(
+                "{:<26} {:<10} {:>5}  {:<9} ⚠ {}",
+                "",
+                "",
+                "",
+                "",
+                package.change.notice()
+            );
+        }
+        // Recommended next steps (advisory; the user runs these, not Cleanton).
+        for (idx, step) in package.action_lines().iter().enumerate() {
+            let label = if idx == 0 { "next:" } else { "" };
+            println!("{:<26} {:<10} {:>5}  {label:<9} {step}", "", "", "");
+        }
+    }
+    println!();
+    for error in report.errors.iter().take(WARNING_PRINT_LIMIT) {
+        eprintln!("warning: could not scan {error}");
+    }
+    println!("{}", report.summary_message());
+    println!(
+        "Review each flagged package at its path above and remove or reinstall it \
+         with its package manager if you did not expect it. Cleanton only reports; \
+         it never changes packages. Use --review <package> (or --review-all) to \
+         trust what you have reviewed."
+    );
+}
+
 async fn run_interactive(_cli: &Cli, config: &CleantonConfig) -> Result<i32> {
     cleanton_ui::run_tui(config).await?;
     Ok(0)
@@ -732,14 +975,13 @@ fn is_orphan_action(action: &CleanupAction) -> bool {
 }
 
 /// A compact ML badge ("ML <label> <confidence>") when the annotation carries a
-/// label + confidence, otherwise `None` (e.g. orphan or not-evaluated actions).
+/// label + confidence, otherwise `None` (not-evaluated actions). Uses the
+/// kebab-case `Display` text so it matches the TUI badge and the `[ML ...]`
+/// reason suffix.
 fn ml_badge(annotation: &ActionAnnotation) -> Option<String> {
     let label = annotation.ml_label?;
     let confidence = annotation.ml_confidence?;
-    let label_text = serde_json::to_value(label)
-        .ok()
-        .and_then(|value| value.as_str().map(str::to_owned))?;
-    Some(format!("ML {label_text} {confidence:.2}"))
+    Some(format!("ML {label} {confidence:.2}"))
 }
 
 fn json_err(err: &serde_json::Error) -> CleantonError {
@@ -863,7 +1105,10 @@ fn print_suggestions_section(suggestions: &Suggestions) {
                 .paths
                 .first()
                 .and_then(|path| path.file_name())
-                .map_or_else(|| "duplicate".to_owned(), |n| n.to_string_lossy().into_owned());
+                .map_or_else(
+                    || "duplicate".to_owned(),
+                    |n| n.to_string_lossy().into_owned(),
+                );
             println!(
                 "    - {} copies of {} ({} each) — save {}",
                 set.count,
@@ -893,9 +1138,13 @@ fn print_suggestions_section(suggestions: &Suggestions) {
                 item.path.display(),
                 kind
             );
-            // Re-clonable git repos (and approx-size folders) carry a note.
+            // Re-clonable git repos (and approx-size folders) carry a note;
+            // the advisory ML badge (display only) rides alongside it.
             if !item.note.is_empty() {
                 println!("        {}", item.note);
+            }
+            if !item.ml_note.is_empty() {
+                println!("        {}", item.ml_note);
             }
         }
         if suggestions.large_items.len() > SUGGESTION_PRINT_LIMIT {
@@ -972,11 +1221,7 @@ fn print_analyzed_summary(analyzed: &AnalyzedPlan, scan: Option<&ScanResult>) {
             analyzed.held.len()
         );
         let mut by_size = analyzed.held.iter().collect::<Vec<_>>();
-        by_size.sort_by(|a, b| {
-            b.action
-                .reclaimable_bytes
-                .cmp(&a.action.reclaimable_bytes)
-        });
+        by_size.sort_by_key(|annotated| std::cmp::Reverse(annotated.action.reclaimable_bytes));
         for annotated in by_size.iter().take(25) {
             let badge = ml_badge(&annotated.annotation)
                 .map(|badge| format!("  [{badge}]"))
@@ -1090,7 +1335,12 @@ fn init_tracing(verbosity: u8) {
         _ => "trace",
     };
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(level));
-    tracing_subscriber::fmt().with_env_filter(filter).init();
+    // Log lines go to stderr so they can never corrupt `--json` stdout (e.g.
+    // the antivirus loader warns about oversized files mid-scan).
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(std::io::stderr)
+        .init();
 }
 
 #[cfg(test)]

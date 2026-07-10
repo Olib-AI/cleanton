@@ -68,30 +68,55 @@ pub(crate) fn analyze_with<C: FileClassifier>(
     recipes: &RecipeSet,
     classifier: &C,
     threshold: f32,
-    orphans: Vec<AnnotatedAction>,
+    mut orphans: Vec<AnnotatedAction>,
 ) -> AnalyzedPlan {
     let started = Instant::now();
+
+    // 0. Advisory ML badges for orphan candidates (display only; orphans stay
+    //    trash-only and confirmation-required regardless of the verdict).
+    crate::ml::annotate_orphans(classifier, &mut orphans);
 
     // 1. Recipe matching (unchanged): the matcher already enforces ProtectedPaths
     //    + the sensitive-basename floor, so only cleared candidates appear here.
     let recipe_actions = match_recipes(scan, recipes);
 
-    // 2. ML adjustment: demote unsafe-looking candidates, annotate the rest.
-    let adjusted = adjust_actions(classifier, threshold, recipe_actions, scan);
+    // 2. Assemble the executable action set: recipe candidates + orphans. ML is
+    //    advisory and never gates, so the planner sees every candidate.
+    let mut executable: Vec<CleanupAction> = recipe_actions;
+    executable.extend(orphans.iter().map(|annotated| annotated.action.clone()));
 
-    // 3. Assemble the executable action set: ML-kept candidates + orphans. ML can
-    //    only ever shrink this set; it never introduces targets.
-    let mut executable: Vec<CleanupAction> = adjusted
+    // 3. The planner re-applies ProtectedPaths, dedups, and drops candidates
+    //    nested inside another selected target.
+    let mut plan = crate::planner::plan_from_actions(config, executable, scan, started.elapsed());
+
+    // 4. Advisory ML annotation of the SURVIVING plan actions. Annotating after
+    //    the planner matters: on real scans most raw candidates are descendants
+    //    that the planner subsumes into their ancestor action, and spending the
+    //    bounded inference budget on them left the visible plan largely
+    //    unbadged. Orphans were already annotated above and keep their badge.
+    let orphan_targets: HashSet<&Path> = orphans
+        .iter()
+        .map(|annotated| annotated.action.target.as_path())
+        .collect();
+    let (recipe_planned, orphan_planned): (Vec<CleanupAction>, Vec<CleanupAction>) = plan
+        .actions
+        .iter()
+        .cloned()
+        .partition(|action| !orphan_targets.contains(action.target.as_path()));
+    let adjusted = adjust_actions(classifier, threshold, recipe_planned, scan);
+
+    // 5. Rebuild the plan's actions so the `[ML ...]` badge lands on `reason`,
+    //    restoring the planner's largest-first presentation order.
+    let mut planned: Vec<CleanupAction> = adjusted
         .kept
         .iter()
         .map(|annotated| annotated.action.clone())
         .collect();
-    executable.extend(orphans.iter().map(|annotated| annotated.action.clone()));
+    planned.extend(orphan_planned);
+    planned.sort_by_key(|action| Reverse(action.reclaimable_bytes));
+    plan.actions = planned;
 
-    // 4. The planner re-applies ProtectedPaths and breadth checks downstream.
-    let plan = crate::planner::plan_from_actions(config, executable, scan, started.elapsed());
-
-    // 5. Annotations for everything that could reach the plan.
+    // 6. Annotations for everything in the plan.
     let mut annotations = adjusted.kept;
     annotations.extend(orphans.iter().cloned());
 

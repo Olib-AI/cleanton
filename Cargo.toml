@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/cleanton-antivirus",
     "crates/cleanton-app",
     "crates/cleanton-cli",
     "crates/cleanton-common",
@@ -14,7 +15,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.96.0"
 license = "MIT OR Apache-2.0"
@@ -22,6 +23,7 @@ authors = ["Olib AI"]
 repository = "https://github.com/Olib-AI/cleanton"
 
 [workspace.dependencies]
+cleanton-antivirus = { path = "crates/cleanton-antivirus" }
 cleanton-common = { path = "crates/cleanton-common" }
 cleanton-engine = { path = "crates/cleanton-engine" }
 cleanton-ml = { path = "crates/cleanton-ml" }
@@ -55,6 +57,16 @@ tui-big-text = "0.8"
 slint = "1.17"
 slint-build = "1.17"
 tempfile = "3"
+sha2 = "0.10"
+# cleanton-antivirus (vendored from rusted-batata rb-antivirus) additions:
+regex = "1"
+base64 = "0.22"
+sha1 = "0.10"
+md-5 = "0.10"
+hex = "0.4"
+flate2 = "1"
+tar = "0.4"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [workspace.lints.rust]
 # `deny` (not `forbid`): the sole audited FFI module

@@ -294,7 +294,11 @@ mod tests {
         assert!(note(HostContext::Terminal).contains("separate"));
         let cli_steps = steps(HostContext::Terminal);
         assert_eq!(cli_steps.len(), 3);
-        assert!(cli_steps.iter().any(|line| line.contains("Full Disk Access")));
+        assert!(
+            cli_steps
+                .iter()
+                .any(|line| line.contains("Full Disk Access"))
+        );
 
         // App guidance names Cleanton and clarifies the CLI fallback.
         assert!(lead(HostContext::AppBundle).contains("Cleanton"));

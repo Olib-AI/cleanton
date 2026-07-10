@@ -14,7 +14,9 @@ use std::path::{Path, PathBuf};
 pub fn ml_badge(annotation: &ActionAnnotation) -> Option<String> {
     let label = annotation.ml_label?;
     let confidence = annotation.ml_confidence?;
-    Some(format!("ML {label:?} {confidence:.2}"))
+    // Kebab-case `Display` text, matching the CLI badge and the `[ML ...]`
+    // reason suffix so every surface shows the same label wording.
+    Some(format!("ML {label} {confidence:.2}"))
 }
 
 #[derive(Debug, Clone)]
