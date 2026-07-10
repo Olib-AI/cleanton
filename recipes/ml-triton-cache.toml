@@ -1,15 +1,18 @@
 [recipe]
 id = "ml-triton-cache"
-name = "vLLM Triton Kernel Cache"
-description = "GPU kernel compilation cache for Triton"
+name = "Triton Kernel Cache"
+description = "Compiled GPU kernel cache for Triton (rebuilt on next run)"
 category = "ml"
 safety_level = "safe"
 enabled = true
 priority = 50
 
+# Triton shards the cache into many small per-kernel directories, so a
+# per-entry size floor would exclude nearly everything; an age gate keeps the
+# hot kernels of active projects out of the results instead.
 [match]
 path_glob = "~/.triton/cache/**"
-min_size_mb = 100
+min_age_days = 14
 
 [action]
 type = "trash"
@@ -17,5 +20,5 @@ prompt = "Move {size} of Triton cache to Trash?"
 group = true
 
 [test]
-should_match = ["~/.triton/cache/foo/bar.bin"]
-should_not_match = ["~/.triton/config"]
+should_match = ["~/.triton/cache/a1b2c3/kernel.metallib"]
+should_not_match = ["~/.triton/config", "~/.triton/autotune/table.json"]

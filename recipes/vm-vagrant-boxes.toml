@@ -21,4 +21,4 @@ group = true
 
 [test]
 should_match = ["~/.vagrant.d/boxes/ubuntu-VAGRANTSLASH-jammy64/20240101/virtualbox/box.ovf"]
-should_not_match = ["~/.vagrant.d/Vagrantfile"]
+should_not_match = ["~/.vagrant.d/Vagrantfile", "~/.vagrant.d/insecure_private_key"]

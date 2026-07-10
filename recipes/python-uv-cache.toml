@@ -19,4 +19,4 @@ group = true
 
 [test]
 should_match = ["~/.cache/uv/archive/foo"]
-should_not_match = ["~/.cache/other"]
+should_not_match = ["~/.cache/other", "~/.local/share/uv/python/cpython-3.12.6-macos-aarch64-none/bin/python3"]

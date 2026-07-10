@@ -1,7 +1,7 @@
 [recipe]
 id = "go-mod-cache"
 name = "Go Module Cache"
-description = "Go module cache directory"
+description = "Go module download cache (restored by go mod download)"
 category = "go"
 safety_level = "safe"
 enabled = true

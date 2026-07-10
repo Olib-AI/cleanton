@@ -18,9 +18,9 @@ names = ["oauth_creds.json", "settings.json", ".credentials.json", "credentials.
 
 [action]
 type = "trash"
-prompt = "Move {size} of Antigravity cache to Trash?"
+prompt = "Move {size} of Gemini CLI cache to Trash?"
 group = true
 
 [test]
 should_match = ["~/.gemini/cache/log.txt"]
-should_not_match = ["~/.gemini/oauth_creds.json", "~/.gemini/settings.json", "~/.gemini/history/session.json"]
+should_not_match = ["~/.gemini/oauth_creds.json", "~/.gemini/settings.json", "~/.gemini/history/session.json", "~/.gemini/tmp/3a5f/chat-checkpoint.json"]

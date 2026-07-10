@@ -22,5 +22,5 @@ group = true
 
 [test]
 should_match = ["projects/api/__pycache__/module.cpython-314.pyc"]
-should_not_match = ["projects/api/module.py"]
+should_not_match = ["projects/api/module.py", "projects/api/pycache/module.pyc"]
 

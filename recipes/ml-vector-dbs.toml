@@ -1,12 +1,15 @@
 [recipe]
 id = "ml-vector-dbs"
 name = "Local Vector Databases"
-description = "Vector store database storage (Chroma, Qdrant, Milvus)"
+description = "Local Chroma vector store databases (re-embeddable from source data)"
 category = "ml"
 safety_level = "cautious"
 enabled = true
 priority = 50
 
+# `chroma.sqlite3` is Chroma's fixed database filename; its per-collection
+# segment dirs live beside it but have generic UUID names we cannot target
+# safely. Qdrant/Milvus local stores use generic names and are not covered.
 [match]
 file_name = "chroma.sqlite3"
 min_size_mb = 100
@@ -14,9 +17,9 @@ min_age_days = 14
 
 [action]
 type = "trash"
-prompt = "Move {size} of vector databases to Trash?"
+prompt = "Move {size} of Chroma vector databases to Trash?"
 group = true
 
 [test]
 should_match = ["projects/app/chroma/chroma.sqlite3"]
-should_not_match = ["projects/app/main.py"]
+should_not_match = ["projects/app/main.py", "projects/app/chroma/app.sqlite3"]

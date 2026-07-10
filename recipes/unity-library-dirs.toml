@@ -1,0 +1,25 @@
+[recipe]
+id = "unity-library-dirs"
+name = "Unity Library Caches"
+# Assets AND ProjectSettings beside it prove a Unity project root; a directory
+# merely named Library (including ~/Library) is never matched without both.
+description = "Library/ import caches of Unity projects (rebuilt when the project is next opened)"
+category = "gamedev"
+safety_level = "cautious"
+enabled = true
+priority = 50
+
+[match]
+directory_name = "Library"
+parent_must_contain = ["Assets", "ProjectSettings"]
+min_size_mb = 100
+min_age_days = 30
+
+[action]
+type = "trash"
+prompt = "Move {size} of Unity Library caches to Trash?"
+group = true
+
+[test]
+should_match = ["projects/my-game/Library"]
+should_not_match = ["~/Library", "loose/Library"]

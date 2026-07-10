@@ -1,0 +1,24 @@
+[recipe]
+id = "android-sdk-system-images"
+name = "Android SDK System Images"
+# Only the downloadable emulator system images; user AVD instances (their
+# disks and snapshots) live under ~/.android/avd and are never matched.
+description = "Android emulator system images (re-downloaded via the SDK Manager)"
+category = "android"
+safety_level = "cautious"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/Library/Android/sdk/system-images/**"
+min_age_days = 30
+min_size_mb = 200
+
+[action]
+type = "trash"
+prompt = "Move {size} of Android system images to Trash?"
+group = true
+
+[test]
+should_match = ["~/Library/Android/sdk/system-images/android-34/google_apis/arm64-v8a/system.img"]
+should_not_match = ["~/.android/avd/Pixel_8_API_34.avd/userdata-qemu.img", "~/Library/Android/sdk/platform-tools/adb"]

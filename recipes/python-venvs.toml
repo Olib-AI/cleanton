@@ -1,7 +1,7 @@
 [recipe]
 id = "python-venvs"
 name = "Python Virtual Environments"
-description = "Python .venv or venv directories"
+description = "Project .venv virtual environments (recreated by venv/uv/poetry)"
 category = "python"
 safety_level = "cautious"
 enabled = true
@@ -12,6 +12,9 @@ directory_name = ".venv"
 # Any recognized Python project manifest proves the venv belongs to a real
 # project (pip/uv/poetry projects without pyproject.toml were invisible before).
 parent_must_contain_any = ["pyproject.toml", "requirements.txt", "setup.py", "setup.cfg"]
+# Every real venv carries pyvenv.cfg at its root; a user folder that merely
+# happens to be named .venv never matches.
+self_must_contain = ["pyvenv.cfg"]
 min_size_mb = 50
 min_age_days = 30
 

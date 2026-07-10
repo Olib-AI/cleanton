@@ -7,15 +7,19 @@ safety_level = "cautious"
 enabled = true
 priority = 50
 
+# Ollama stores pulled weights as extensionless blobs under
+# `~/.ollama/models/blobs` (manifests are tiny and stay below the size floor).
+# Re-pullable with `ollama pull`; the age gate avoids suggesting fresh pulls.
 [match]
 path_glob = "~/.ollama/models/**"
 min_size_mb = 500
+min_age_days = 30
 
 [action]
 type = "trash"
-prompt = "Move {size} of Ollama models to Trash?"
+prompt = "Move {size} of Ollama models (re-pullable) to Trash?"
 group = true
 
 [test]
 should_match = ["~/.ollama/models/blobs/sha256-foo"]
-should_not_match = ["~/.ollama/config"]
+should_not_match = ["~/.ollama/config", "~/.ollama/history"]

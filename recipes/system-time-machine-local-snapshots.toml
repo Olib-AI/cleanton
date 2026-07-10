@@ -1,19 +1,30 @@
 [recipe]
 id = "system-time-machine-local-snapshots"
 name = "Time Machine Local Snapshots"
-description = "APFS Time Machine local snapshots; requires tmutil thinning, not filesystem deletion"
+description = "APFS local Time Machine snapshots; review-only here — delete via the confirm-gated snapshot panel on Results, never by trashing files"
 category = "system"
 safety_level = "aggressive"
 enabled = true
 priority = 20
 
+# Review-only disclosure, intentionally NON-deleting. Local snapshots are APFS
+# volume snapshots, not regular directories: the space they hold can only be
+# released with `tmutil deletelocalsnapshots`. That cleanup exists as the
+# confirm-gated "Time Machine local snapshots" panel on the Results screen
+# (Slint app and TUI), which runs one precise `tmutil deletelocalsnapshots
+# <date>` per user-confirmed snapshot via the audited engine adapter
+# (`cleanton-engine/src/snapshots.rs`). This matcher only fires on the snapshot
+# browse mount (`/Volumes/com.apple.TimeMachine.localsnapshots`) when a scan
+# actually reaches it; trashing anything there would be wrong, hence the
+# `archive` action, which surfaces the finding for review without planning a
+# destructive step.
 [match]
 path_glob = "**/com.apple.TimeMachine.localsnapshots/**"
 min_age_days = 7
 
 [action]
 type = "archive"
-prompt = "Review Time Machine local snapshots for tmutil thinning?"
+prompt = "Local Time Machine snapshots hold {size}; thin them with tmutil (not by deleting files)?"
 group = true
 
 [test]

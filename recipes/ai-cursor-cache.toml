@@ -14,6 +14,7 @@ priority = 50
 # *Cache* also covers CachedData, Code Cache, and GPUCache; User/ and
 # globalStorage still never match.
 path_glob = "~/Library/Application Support/Cursor/*Cache*/**"
+min_age_days = 7
 
 [action]
 type = "trash"
@@ -21,5 +22,5 @@ prompt = "Move {size} of Cursor cache to Trash?"
 group = true
 
 [test]
-should_match = ["~/Library/Application Support/Cursor/Cache/foo"]
-should_not_match = ["~/Library/Application Support/Cursor/User", "~/Library/Application Support/Cursor/User/globalStorage/storage.json"]
+should_match = ["~/Library/Application Support/Cursor/Cache/foo", "~/Library/Application Support/Cursor/Code Cache/js/index_0", "~/Library/Application Support/Cursor/GPUCache/data_1"]
+should_not_match = ["~/Library/Application Support/Cursor/User", "~/Library/Application Support/Cursor/User/globalStorage/storage.json", "~/Library/Application Support/Cursor/Session Storage/000003.log"]

@@ -1,0 +1,24 @@
+[recipe]
+id = "browser-chromium-code-cache"
+name = "App V8 Code Caches"
+# Code Cache holds compiled V8 JavaScript/WebAssembly bytecode that Chromium
+# regenerates as pages and apps run. Profile databases and Local Storage
+# (logins, app state) are different subtrees and never match.
+description = "V8 code caches of Chromium browsers and Electron apps (regenerated in use)"
+category = "apps"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/Library/Application Support/**/Code Cache/**"
+min_age_days = 14
+
+[action]
+type = "trash"
+prompt = "Move {size} of V8 code caches to Trash?"
+group = true
+
+[test]
+should_match = ["~/Library/Application Support/Slack/Code Cache/js/index-dir/the-real-index", "~/Library/Application Support/Google/Chrome/Default/Code Cache/js/0a1b2c3d4e5f_0"]
+should_not_match = ["~/Library/Application Support/Code/User/keybindings.json", "~/Library/Application Support/Google/Chrome/Default/History"]

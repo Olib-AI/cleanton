@@ -1,0 +1,24 @@
+[recipe]
+id = "terraform-plugin-cache"
+name = "Terraform Plugin Cache"
+# Only the shared provider download cache; ~/.terraform.d/credentials.tfrc.json
+# (Terraform Cloud tokens) sits outside plugin-cache and is never matched.
+description = "Terraform shared provider plugin cache (re-downloaded by terraform init)"
+category = "terraform"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/.terraform.d/plugin-cache/**"
+min_age_days = 30
+min_size_mb = 50
+
+[action]
+type = "trash"
+prompt = "Move {size} of Terraform plugin cache to Trash?"
+group = true
+
+[test]
+should_match = ["~/.terraform.d/plugin-cache/registry.terraform.io/hashicorp/aws/5.31.0/darwin_arm64/terraform-provider-aws_v5.31.0_x5"]
+should_not_match = ["~/.terraform.d/credentials.tfrc.json", "~/.terraform.d/plugins/lock.json"]

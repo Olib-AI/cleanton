@@ -1,0 +1,24 @@
+[recipe]
+id = "apps-cocoapods-spec-repos"
+name = "CocoaPods Spec Repos"
+# Only the checked-out spec repos; a project's own Pods/ directory and the
+# download cache (system-cocoapods-cache) are separate and untouched here.
+description = "CocoaPods spec repo checkouts (re-fetched by pod repo update)"
+category = "system"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/.cocoapods/repos/**"
+min_age_days = 30
+min_size_mb = 50
+
+[action]
+type = "trash"
+prompt = "Move {size} of CocoaPods spec repos to Trash?"
+group = true
+
+[test]
+should_match = ["~/.cocoapods/repos/trunk/Specs/a/2/e/AFNetworking/4.0.1/AFNetworking.podspec.json"]
+should_not_match = ["~/Library/Caches/CocoaPods/Pods/Release/AFNetworking"]

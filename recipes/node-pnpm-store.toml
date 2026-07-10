@@ -1,7 +1,10 @@
 [recipe]
 id = "node-pnpm-store"
 name = "pnpm Global Store"
-description = "Global pnpm store for dependencies"
+# Only store/; globally installed packages live under ~/Library/pnpm/global
+# and are never matched. Existing node_modules keep their hardlinked content;
+# the next pnpm install re-fetches whatever is missing.
+description = "Global pnpm content-addressable store (re-fetched by pnpm install)"
 category = "node"
 safety_level = "cautious"
 enabled = true
@@ -18,4 +21,4 @@ group = true
 
 [test]
 should_match = ["~/Library/pnpm/store/v3/files/foo"]
-should_not_match = ["~/.cargo"]
+should_not_match = ["~/.cargo", "~/Library/pnpm/global/5/node_modules/typescript/package.json"]

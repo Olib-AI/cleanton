@@ -1,0 +1,25 @@
+[recipe]
+id = "browser-chromium-gpu-cache"
+name = "App GPU Shader Caches"
+# GPUCache holds compiled GPU shaders that Chromium rebuilds on next launch.
+# Covers Chromium browsers and Electron apps (Chrome, Brave, Slack, Discord,
+# VS Code). IndexedDB, Local Storage, Cookies, and Login Data (logins, app
+# state) are different subtrees and never match.
+description = "GPU shader caches of Chromium browsers and Electron apps (rebuilt on launch)"
+category = "apps"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/Library/Application Support/**/GPUCache/**"
+min_age_days = 14
+
+[action]
+type = "trash"
+prompt = "Move {size} of GPU shader caches to Trash?"
+group = true
+
+[test]
+should_match = ["~/Library/Application Support/discord/GPUCache/f_000001", "~/Library/Application Support/Google/Chrome/Default/GPUCache/data_1", "~/Library/Application Support/Code/GPUCache/index"]
+should_not_match = ["~/Library/Application Support/Google/Chrome/Default/IndexedDB/https_app.example_0.indexeddb.leveldb/000003.log", "~/Library/Application Support/Slack/Local Storage/leveldb/000003.log", "~/Library/Application Support/Google/Chrome/Default/Cookies", "~/Library/Application Support/Google/Chrome/Default/Login Data"]

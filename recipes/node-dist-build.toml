@@ -1,7 +1,10 @@
 [recipe]
 id = "node-dist-build"
 name = "Node Build Output Directories"
-description = "Vite/dist output folders with package.json context"
+# A dist rebuilt in the last two weeks is likely being served or deployed, so
+# the age gate skips it. dist folders shipped inside installed packages belong
+# to the node-modules recipe, not this one.
+description = "dist/ build output next to package.json (rebuilt by the next build)"
 category = "node"
 safety_level = "cautious"
 enabled = true
@@ -10,6 +13,10 @@ priority = 50
 [match]
 directory_name = "dist"
 parent_must_contain = ["package.json"]
+min_age_days = 14
+
+[match.exclude]
+paths = ["**/node_modules/**"]
 
 [action]
 type = "trash"
@@ -18,4 +25,4 @@ group = true
 
 [test]
 should_match = ["projects/app/dist"]
-should_not_match = ["projects/app/src", "loose/dist"]
+should_not_match = ["projects/app/src", "loose/dist", "projects/app/node_modules/somepkg/dist"]

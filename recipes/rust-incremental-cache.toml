@@ -7,6 +7,9 @@ safety_level = "safe"
 enabled = true
 priority = 50
 
+# Session dirs inside `target/<profile>/incremental`; rustc rebuilds them on
+# the next compile. Useful when keeping the rest of `target/` (otherwise
+# rust-target-dirs, priority 90, claims the whole directory first).
 [match]
 path_glob = "**/target/*/incremental/**"
 
@@ -16,5 +19,8 @@ prompt = "Move {size} of Rust incremental compile cache to Trash?"
 group = true
 
 [test]
-should_match = ["projects/app/target/debug/incremental/foo"]
-should_not_match = ["projects/app/src/main.rs"]
+should_match = ["projects/app/target/debug/incremental/app-1a2b3c/s-xyz.lock"]
+should_not_match = [
+    "projects/app/src/main.rs",
+    "projects/app/target/debug/build/libc-1a2b3c/output",
+]

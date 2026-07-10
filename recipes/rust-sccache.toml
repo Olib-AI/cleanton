@@ -8,9 +8,17 @@ safety_level = "safe"
 enabled = true
 priority = 50
 
+# On macOS sccache defaults to `~/Library/Caches/Mozilla.sccache`; the XDG
+# path `~/.cache/sccache` applies when SCCACHE_DIR / XDG_CACHE_HOME is set
+# (common in dotfiles), so both locations are covered. The cache is sharded
+# into many small object files, so no per-entry size floor — the age gate
+# keeps actively used entries out of the results.
 [match]
+path_glob = "~/Library/Caches/Mozilla.sccache/**"
+min_age_days = 14
+
+[[match.any_of]]
 path_glob = "~/.cache/sccache/**"
-min_size_mb = 100
 min_age_days = 14
 
 [action]
@@ -19,5 +27,8 @@ prompt = "Move {size} of sccache compiler cache to Trash?"
 group = true
 
 [test]
-should_match = ["~/.cache/sccache/foo"]
-should_not_match = ["~/.cache/other/foo"]
+should_match = [
+    "~/Library/Caches/Mozilla.sccache/0/a/blob",
+    "~/.cache/sccache/9/f/object",
+]
+should_not_match = ["~/.cache/other/foo", "~/Library/Caches/Yarn"]

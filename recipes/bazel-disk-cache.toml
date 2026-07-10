@@ -1,6 +1,11 @@
 [recipe]
 id = "bazel-disk-cache"
 name = "Bazel Cache"
+# Covers the conventional --disk_cache/--repository_cache location. Bazel's
+# default output base lives under /private/var/tmp/_bazel_<user>, which recipe
+# globs cannot target (absolute path_glob is disallowed); use bazel clean for
+# that tree. Bazelisk's version store (~/Library/Caches/bazelisk) is out of
+# scope: trashing it silently re-downloads pinned Bazel binaries.
 description = "Bazel repository and disk caches under ~/.cache/bazel (rebuilt/re-fetched)"
 category = "bazel"
 safety_level = "cautious"
@@ -19,4 +24,4 @@ group = true
 
 [test]
 should_match = ["~/.cache/bazel/_bazel_user/abc123/execroot/output.bin"]
-should_not_match = ["~/.cache/other"]
+should_not_match = ["~/.cache/other", "~/Library/Caches/bazelisk/downloads/bazel-8.0.0-darwin-arm64"]

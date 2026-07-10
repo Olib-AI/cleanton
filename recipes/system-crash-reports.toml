@@ -1,21 +1,27 @@
 [recipe]
 id = "system-crash-reports"
 name = "Old Crash Reports"
-description = "Old diagnostic crash reports"
+description = "Old crash and diagnostic reports (.crash/.ips) from user apps"
 category = "system"
 safety_level = "cautious"
 enabled = true
 priority = 50
 
+# Covers legacy `.crash` and modern `.ips` reports, plus the `Retired/`
+# subfolder macOS rotates them into.
 [match]
 path_glob = "~/Library/Logs/DiagnosticReports/**"
 min_age_days = 14
 
 [action]
 type = "trash"
-prompt = "Move {size} of crash reports to Trash?"
+prompt = "Move {size} of old crash reports to Trash?"
 group = true
 
 [test]
-should_match = ["~/Library/Logs/DiagnosticReports/App_2026-01-01.crash"]
+should_match = [
+    "~/Library/Logs/DiagnosticReports/App_2026-01-01.crash",
+    "~/Library/Logs/DiagnosticReports/App-2026-06-01-094100.ips",
+    "~/Library/Logs/DiagnosticReports/Retired/App-2026-01-01.ips",
+]
 should_not_match = ["~/Library/Logs/console.log"]

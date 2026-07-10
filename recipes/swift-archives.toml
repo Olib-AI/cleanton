@@ -1,21 +1,24 @@
 [recipe]
 id = "swift-archives"
 name = "Xcode Archives"
-description = "Xcode archives of iOS/macOS apps"
+description = "Old Xcode app archives; their dSYMs symbolicate crashes from shipped builds"
 category = "swift"
 safety_level = "cautious"
 enabled = true
 priority = 50
 
+# Cautious on purpose: an .xcarchive holds the dSYMs needed to symbolicate
+# crash reports from the build it produced. Only archives untouched for months
+# are offered, and the move is reversible from the Trash.
 [match]
 path_glob = "~/Library/Developer/Xcode/Archives/**"
 min_age_days = 90
 
 [action]
 type = "trash"
-prompt = "Move {size} of Xcode archives to Trash?"
+prompt = "Move {size} of old Xcode archives (incl. dSYMs for shipped builds) to Trash?"
 group = true
 
 [test]
-should_match = ["~/Library/Developer/Xcode/Archives/2026-01-01/App.xcarchive"]
+should_match = ["~/Library/Developer/Xcode/Archives/2026-01-01/App 2026-01-01, 09.41.xcarchive"]
 should_not_match = ["~/Library/Developer/Xcode/DerivedData"]

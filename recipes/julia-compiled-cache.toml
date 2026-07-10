@@ -1,0 +1,23 @@
+[recipe]
+id = "julia-compiled-cache"
+name = "Julia Compiled Cache"
+# Only the precompiled module cache; ~/.julia/packages (installed sources) and
+# ~/.julia/environments (project manifests) are never matched.
+description = "Julia precompiled module cache (rebuilt on the next package load)"
+category = "julia"
+safety_level = "cautious"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/.julia/compiled/**"
+min_age_days = 30
+
+[action]
+type = "trash"
+prompt = "Move {size} of Julia compiled cache to Trash?"
+group = true
+
+[test]
+should_match = ["~/.julia/compiled/v1.10/DataFrames/AR9oZ_abc12.ji"]
+should_not_match = ["~/.julia/packages/DataFrames/abc12/src/DataFrames.jl", "~/.julia/environments/v1.10/Manifest.toml"]

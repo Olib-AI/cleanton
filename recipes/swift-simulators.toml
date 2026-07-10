@@ -1,21 +1,31 @@
 [recipe]
 id = "swift-simulators"
 name = "Simulator Devices"
-description = "iOS/watchOS/tvOS Simulator Devices runtime data"
+description = "iOS/watchOS/tvOS Simulator devices unused for months (recreatable in Xcode)"
 category = "swift"
 safety_level = "cautious"
 enabled = true
 priority = 50
 
+# Match whole per-device directories (UDID dirs directly under Devices/),
+# proven by the `device.plist` CoreSimulator writes into every device. This
+# avoids trashing loose internals of an actively used simulator: an old file
+# deep inside a live device no longer matches on its own, only devices whose
+# entire subtree is stale do.
 [match]
-path_glob = "~/Library/Developer/CoreSimulator/Devices/**"
+path_glob = "~/Library/Developer/CoreSimulator/Devices/*"
+self_must_contain = ["device.plist"]
 min_age_days = 60
 
 [action]
 type = "trash"
-prompt = "Move {size} of Simulator device data to Trash?"
+prompt = "Move {size} of unused Simulator devices to Trash?"
 group = true
 
 [test]
-should_match = ["~/Library/Developer/CoreSimulator/Devices/device-id/data"]
-should_not_match = ["~/Library/Developer/Xcode"]
+should_match = ["~/Library/Developer/CoreSimulator/Devices/1A2B3C4D-5E6F-4A7B-8C9D-0E1F2A3B4C5D"]
+should_not_match = [
+    "~/Library/Developer/Xcode",
+    "~/Library/Developer/CoreSimulator/Devices/1A2B3C4D-5E6F-4A7B-8C9D-0E1F2A3B4C5D/data/Containers",
+    "~/Library/Developer/CoreSimulator/Caches/dyld",
+]

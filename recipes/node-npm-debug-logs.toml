@@ -1,0 +1,23 @@
+[recipe]
+id = "node-npm-debug-logs"
+name = "npm Debug Logs"
+# Complements node-npm-cacache, which targets _cacache and deliberately leaves
+# _logs alone. ~/.npmrc (auth tokens) is protected and never matched.
+description = "npm debug log files (rewritten by every npm invocation)"
+category = "node"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/.npm/_logs/**"
+min_age_days = 14
+
+[action]
+type = "trash"
+prompt = "Move {size} of npm debug logs to Trash?"
+group = true
+
+[test]
+should_match = ["~/.npm/_logs/2026-05-01T00_00_00_000Z-debug-0.log"]
+should_not_match = ["~/.npm/_cacache/content-v2/sha512/aa/bb/ccdd"]

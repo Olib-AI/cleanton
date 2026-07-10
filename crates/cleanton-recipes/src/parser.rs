@@ -45,6 +45,14 @@ pub struct MatchSpec {
     pub min_age_days: Option<u64>,
     #[serde(default)]
     pub exclude: MatchExclude,
+    /// Alternative match specs (`[[match.any_of]]` in TOML): the entry matches
+    /// the recipe when the top-level spec *or* any alternative matches. Lets one
+    /// recipe cover several on-disk shapes of the same artifact (e.g. `.ckpt`
+    /// files and `checkpoint-*` directories). Every alternative is validated
+    /// under the same rules as the top-level spec, alternatives must not nest,
+    /// and the matcher's safety floors apply to the recipe as a whole.
+    #[serde(default)]
+    pub any_of: Vec<MatchSpec>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

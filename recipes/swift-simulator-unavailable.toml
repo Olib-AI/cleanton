@@ -1,10 +1,18 @@
 [recipe]
 id = "swift-simulator-unavailable"
 name = "Unavailable Simulators"
-description = "Unavailable Xcode Simulator runtimes"
+description = "Simulator devices whose runtime is gone; needs simctl, not filesystem deletion"
 category = "swift"
+# Disabled: "unavailable" is not a directory on disk. A simulator becomes
+# unavailable when its runtime is removed, which is only visible through
+# `xcrun simctl list devices` — the on-disk layout is identical to a healthy
+# device (`Devices/<UDID>/device.plist` + `data/`), so a filesystem matcher
+# cannot identify these and the old `Devices/*/unavailable/**` glob never
+# matched anything real. Cleanup belongs to a `simctl delete unavailable`
+# service flow (separate workstream); stale devices are meanwhile covered by
+# the age-gated swift-simulators recipe.
 safety_level = "cautious"
-enabled = true
+enabled = false
 priority = 50
 
 [match]

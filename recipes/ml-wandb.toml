@@ -7,9 +7,17 @@ safety_level = "cautious"
 enabled = true
 priority = 50
 
+# Prefer the tool's own footprint as proof: every W&B run leaves a
+# `latest-run` link inside the `wandb` dir. Fall back to a training-script
+# sibling for freshly-initialized dirs that have not run yet.
 [match]
 directory_name = "wandb"
-parent_must_contain = ["train.py"]
+self_must_contain = ["latest-run"]
+min_age_days = 7
+
+[[match.any_of]]
+directory_name = "wandb"
+parent_must_contain_any = ["train.py", "train.ipynb"]
 min_age_days = 7
 
 [action]

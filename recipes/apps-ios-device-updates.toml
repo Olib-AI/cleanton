@@ -17,5 +17,5 @@ prompt = "Move {size} of iOS update installers to Trash?"
 group = true
 
 [test]
-should_match = ["~/Library/iTunes/iPhone Software Updates/iPhone16,1_18.5_Restore.ipsw"]
-should_not_match = ["~/Library/iTunes/iTunes Media/track.m4a"]
+should_match = ["~/Library/iTunes/iPhone Software Updates/iPhone16,1_18.5_Restore.ipsw", "~/Library/iTunes/iPad Software Updates/iPad14,3_18.5_Restore.ipsw"]
+should_not_match = ["~/Library/iTunes/iTunes Media/track.m4a", "~/Library/iTunes/iPhone Carrier Support/carrier.ipcc"]

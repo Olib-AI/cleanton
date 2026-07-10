@@ -1,0 +1,26 @@
+[recipe]
+id = "browser-chrome-http-cache"
+name = "Chrome HTTP Cache"
+# Matches only the per-profile Cache/Cache_Data subtree (Default, Profile 1,
+# ...) that Chrome rebuilds while browsing. Profile databases (History,
+# Bookmarks, Login Data, Cookies) are sibling files and never match. Priority
+# sits above the generic Electron cache recipe so Chrome's caches are
+# attributed here. Sibling Chromium browsers need their own recipes.
+description = "Google Chrome per-profile HTTP disk cache (rebuilt while browsing)"
+category = "apps"
+safety_level = "cautious"
+enabled = true
+priority = 55
+
+[match]
+path_glob = "~/Library/Application Support/Google/Chrome/*/Cache/Cache_Data/**"
+min_age_days = 7
+
+[action]
+type = "trash"
+prompt = "Move {size} of Chrome HTTP cache to Trash?"
+group = true
+
+[test]
+should_match = ["~/Library/Application Support/Google/Chrome/Default/Cache/Cache_Data/f_000001", "~/Library/Application Support/Google/Chrome/Profile 1/Cache/Cache_Data/f_00002a"]
+should_not_match = ["~/Library/Application Support/Google/Chrome/Default/History", "~/Library/Application Support/Google/Chrome/Default/Login Data", "~/Library/Application Support/Google/Chrome/Default/Bookmarks"]

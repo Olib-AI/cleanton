@@ -18,4 +18,4 @@ group = true
 
 [test]
 should_match = ["~/.bun/install/cache/foo/package.json"]
-should_not_match = ["~/.bun/bin"]
+should_not_match = ["~/.bun/bin", "~/.bun/install/global/node_modules/typescript/package.json"]

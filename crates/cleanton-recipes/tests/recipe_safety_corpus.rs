@@ -205,6 +205,25 @@ fn canonical_regenerable_caches_are_matched_with_context_proof() {
     let gradle_build = project_with_marker(root, "androidproj", "build.gradle.kts", "build");
     let gradle_entry = entry(&gradle_build, FileKind::Directory, LARGE_BYTES);
 
+    // Hugging Face Trainer checkpoint dir proven by the trainer_state.json
+    // *inside* the matched directory (ml-checkpoints' `[[match.any_of]]` shape).
+    let hf_checkpoint = root.join("mlproj/output/checkpoint-500");
+    std::fs::create_dir_all(&hf_checkpoint).expect("create checkpoint dir");
+    let trainer_state = hf_checkpoint.join("trainer_state.json");
+    std::fs::write(&trainer_state, b"{}").expect("write trainer_state.json");
+    // Backdate: the recipe's min_age_days probes real subtree mtimes.
+    let a_month_ago_ckpt = SystemTime::now() - Duration::from_hours(31 * 24);
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&trainer_state)
+        .and_then(|file| file.set_modified(a_month_ago_ckpt))
+        .expect("backdate trainer_state.json");
+    let checkpoint_entry = entry(&hf_checkpoint, FileKind::Directory, 256 * 1_048_576);
+
+    // Loose Lightning-style .ckpt checkpoint file (ml-checkpoints' primary spec).
+    let ckpt_file = root.join("mlproj/lightning_logs/version_0/checkpoints/epoch=9.ckpt");
+    let ckpt_entry = entry(&ckpt_file, FileKind::File, 256 * 1_048_576);
+
     // CMake build/ proven by the CMakeCache.txt *inside* the matched directory.
     let cmake_build = root.join("nativeproj/build");
     std::fs::create_dir_all(&cmake_build).expect("create cmake build dir");
@@ -220,12 +239,14 @@ fn canonical_regenerable_caches_are_matched_with_context_proof() {
         .expect("backdate CMakeCache.txt");
     let cmake_entry = entry(&cmake_build, FileKind::Directory, LARGE_BYTES);
 
-    let expectations: [(&FileEntry, &str); 5] = [
+    let expectations: [(&FileEntry, &str); 7] = [
         (&rust_entry, "rust-target-dirs"),
         (&node_entry, "node-modules"),
         (&py_entry, "python-bytecode"),
         (&gradle_entry, "jvm-gradle-build-dirs"),
         (&cmake_entry, "cmake-build-dirs"),
+        (&checkpoint_entry, "ml-checkpoints"),
+        (&ckpt_entry, "ml-checkpoints"),
     ];
 
     for (candidate, expected_id) in expectations {

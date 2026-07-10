@@ -1,21 +1,25 @@
 [recipe]
 id = "rust-rustup-toolchains"
 name = "Rustup Toolchains"
-description = "Unused rustup toolchains"
+description = "Rustup toolchains not touched in months (re-installable with rustup)"
 category = "rust"
 safety_level = "cautious"
 enabled = true
 priority = 50
 
+# Caution: file mtimes reflect INSTALL time, not usage, so the active default
+# toolchain can appear here if installed long ago — hence cautious level and
+# a long age gate. Review before confirming; `rustup toolchain install`
+# restores anything removed.
 [match]
 path_glob = "~/.rustup/toolchains/**"
 min_age_days = 90
 
 [action]
 type = "trash"
-prompt = "Move {size} of old rustup toolchains to Trash?"
+prompt = "Move {size} of rustup toolchains (re-installable via rustup) to Trash?"
 group = true
 
 [test]
-should_match = ["~/.rustup/toolchains/stable-x86_64-apple-darwin"]
-should_not_match = ["~/.rustup/settings.toml"]
+should_match = ["~/.rustup/toolchains/1.75-aarch64-apple-darwin/lib/libstd.dylib"]
+should_not_match = ["~/.rustup/settings.toml", "~/.rustup/downloads/abc123.tar.xz"]

@@ -1,6 +1,9 @@
 [recipe]
 id = "zig-cache-dirs"
 name = "Zig Build Caches"
+# Zig 0.13+ name only; the pre-0.13 zig-cache (no dot) spelling is not covered
+# (directory_name takes a single literal). zig-out holds installed artifacts
+# and is deliberately out of scope.
 description = ".zig-cache directories of Zig projects (rebuilt by the next zig build)"
 category = "zig"
 safety_level = "safe"
@@ -18,4 +21,4 @@ group = true
 
 [test]
 should_match = ["projects/zig-app/.zig-cache"]
-should_not_match = ["loose/.zig-cache", "projects/zig-app/src"]
+should_not_match = ["loose/.zig-cache", "projects/zig-app/src", "projects/zig-app/zig-out"]
