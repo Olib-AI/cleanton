@@ -1,14 +1,17 @@
 //! Pure-Rust ONNX inference with `tract`.
 //!
-//! The trained classifier (`models/file_classifier_v1.onnx`) and its sidecar
-//! (`models/file_classifier_v1.json`) are embedded into the binary at compile
+//! The trained classifier (`models/file_classifier_v2.onnx`) and its sidecar
+//! (`models/file_classifier_v2.json`) are embedded into the binary at compile
 //! time, so the shipped app needs no external model file and no native
 //! `onnxruntime` library. The model and the parsed sidecar are built once,
 //! lazily, and cached for the process lifetime.
 //!
 //! The network operates on *standardized* features; we apply the exact same
 //! mean/std constants the Python trainer recorded in the sidecar, so Rust and
-//! Python produce identical outputs for identical raw feature vectors.
+//! Python produce identical outputs for identical raw feature vectors. The 3
+//! categorical slots (extension/parent/grandparent ids) carry identity
+//! constants (mean 0, std 1) — the graph consumes the raw ids via in-graph
+//! embeddings, and the exported model emits raw logits (softmax runs here).
 
 use std::sync::OnceLock;
 
@@ -16,12 +19,9 @@ use serde::Deserialize;
 use tract_onnx::prelude::*;
 
 use crate::{
-    CleanupLabel, EMBEDDED_MODEL_BYTES, FEATURE_COUNT, MlClassification, MlError, MlResult,
-    MlUnavailableReason,
+    CleanupLabel, EMBEDDED_MODEL_BYTES, EMBEDDED_SIDECAR, FEATURE_COUNT, MlClassification, MlError,
+    MlResult, MlUnavailableReason,
 };
-
-/// Embedded sidecar with normalization constants and label order.
-const EMBEDDED_SIDECAR: &str = include_str!("../models/file_classifier_v1.json");
 
 type RunnableOnnx = RunnableModel<TypedFact, Box<dyn TypedOp>, TypedModel>;
 
@@ -113,9 +113,10 @@ fn unavailable() -> MlError {
     }
 }
 
-/// Run the embedded classifier on a raw 12-feature vector and return the
-/// calibrated prediction (argmax label + softmax probability of that label).
-pub fn classify_features(values: &[f32; FEATURE_COUNT]) -> MlResult<MlClassification> {
+/// Run the embedded classifier on a raw 53-feature vector and return the raw
+/// logits (one per label, in the sidecar's label order). Exposed so golden
+/// parity tests can assert logit-level agreement with the Python exporter.
+pub fn logits_for_features(values: &[f32; FEATURE_COUNT]) -> MlResult<[f32; 4]> {
     let prepared = prepared().map_err(|_| unavailable())?;
 
     let mut normalized = [0.0_f32; FEATURE_COUNT];
@@ -137,15 +138,28 @@ pub fn classify_features(values: &[f32; FEATURE_COUNT]) -> MlResult<MlClassifica
         .run(tvec!(input.into()))
         .map_err(|_| unavailable())?;
 
-    let logits = outputs
+    let view = outputs
         .first()
         .ok_or_else(unavailable)?
         .to_array_view::<f32>()
         .map_err(|_| unavailable())?;
-    let logits: Vec<f32> = logits.iter().copied().collect();
-    if logits.len() != 4 {
+    let mut logits = [0.0_f32; 4];
+    let mut produced = 0_usize;
+    for (slot, &value) in logits.iter_mut().zip(view.iter()) {
+        *slot = value;
+        produced = produced.saturating_add(1);
+    }
+    if produced != 4 || view.len() != 4 {
         return Err(unavailable());
     }
+    Ok(logits)
+}
+
+/// Run the embedded classifier on a raw 53-feature vector and return the
+/// calibrated prediction (argmax label + softmax probability of that label).
+pub fn classify_features(values: &[f32; FEATURE_COUNT]) -> MlResult<MlClassification> {
+    let prepared = prepared().map_err(|_| unavailable())?;
+    let logits = logits_for_features(values)?;
 
     let probs = softmax(&logits);
     let (index, confidence) = argmax(&probs);

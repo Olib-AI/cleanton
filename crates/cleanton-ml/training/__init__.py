@@ -1,8 +1,13 @@
-"""cleanton-ml training framework.
+"""cleanton-ml training framework v2.
 
-Deterministic, reproducible pipeline that generates a synthetic but realistic
-macOS path dataset, derives labels grounded in the cleanton recipe corpus and
-protected-path rules, trains a small safety-biased MLP, enforces a 0%
-false-positive gate on a golden keep-set, and exports an ONNX model that the
-pure-Rust ``cleanton-ml`` crate runs with ``tract``.
+Deterministic pipeline that generates coherent synthetic macOS home
+directory TREES, derives every label from the safety floors + the full
+130-recipe DSL corpus (never hand-set), trains a small embedding-MLP with
+an asymmetric safety-cost loss, enforces hard eval gates (0% cleanable on
+the golden keep corpus, adversarial near-miss suite, per-class recall
+floors, calibration), and exports ``file_classifier_v2.onnx`` + sidecar +
+parity fixtures for the pure-Rust ``tract`` inference path.
+
+The model is ADVISORY ONLY: the engine never deletes because of it, and
+training is biased so mistakes always fall in the "keep" direction.
 """
