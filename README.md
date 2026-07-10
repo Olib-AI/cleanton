@@ -3,9 +3,9 @@
 
   # Cleanton
 
-  **A native macOS disk cleaner for developers.**
+  **Reclaim disk space, and check your packages for supply-chain attacks.**
 
-  Reclaim space from build caches, dependency folders, and other developer junk. Review everything before it is removed. Files go to the Trash by default, so a mistake is recoverable.
+  A native macOS app that finds the space your tools leave behind, uninstalls apps along with everything they scatter on disk, and scans your installed packages for the kind of malicious code that has been showing up in npm and pip. You review everything first. What gets removed goes to the Trash, so a mistake is recoverable.
 
   [![Latest release](https://img.shields.io/github/v/release/Olib-AI/cleanton?label=download&style=flat-square&color=2F6FEB)](https://github.com/Olib-AI/cleanton/releases/latest)
   [![Platform](https://img.shields.io/badge/platform-macOS%20arm64-2F6FEB?style=flat-square)](https://github.com/Olib-AI/cleanton/releases)
@@ -25,17 +25,27 @@ Cleanton removes files from your disk. You decide what goes, but you are respons
 - Some actions can free a large amount of data at once. A full developer machine can have tens of gigabytes in build caches.
 - Always read the plan before you run it. Cleanton shows every item and its size, and lets you select or skip individual entries.
 - Back up anything you cannot lose. Cleanton targets caches and rebuildable artifacts, but you are the one who confirms the final list.
-- The suggestions for large folders and re-downloadable repositories are for review only. Cleanton never removes those for you.
+- The suggestions for large folders and re-clonable repositories are for review only. Cleanton never removes those for you.
+- The security scan only reports. It never removes, quarantines, or changes a package.
 
 If you are not sure what an item is, skip it. Nothing is removed until you confirm.
 
 ---
 
-## What is Cleanton?
+## What Cleanton does
 
-Cleanton finds the disk space that developer tools leave behind and helps you reclaim it safely. It ships as a native macOS app and a command-line tool that share the same engine.
+Cleanton does two jobs, and shows you everything before it acts.
 
-It knows where the space hides:
+1. **Frees disk space** that developer tools, apps, and macOS leave behind.
+2. **Checks your installed packages** for supply-chain attacks and tells you when something looks wrong.
+
+It ships as a native macOS app and a command-line tool that share the same engine.
+
+---
+
+## Free up space
+
+Cleanton knows where the space hides and groups what it finds so you can act fast.
 
 - **Rust**: `target` directories, the Cargo registry cache, incremental and sccache data
 - **Node**: `node_modules`, npm and Yarn and pnpm and Bun and Deno caches, framework and deploy caches, and downloaded test browsers (Playwright, Puppeteer, Cypress)
@@ -44,9 +54,12 @@ It knows where the space hides:
 - **Python**: virtual environments and pip, uv, Poetry, and Conda caches
 - **Go, Ruby, PHP, .NET, Dart and Flutter, Elixir, Haskell, Zig, and more**: the build and dependency caches for each
 - **IDEs and editors**: JetBrains, VS Code, and Zed caches
+- **Everyday apps**: caches from Chrome and other browsers, Adobe media caches, Steam shader caches, Zoom, and old iPhone and iPad backups
 - **Docker**: dangling images, build cache, unused volumes
 - **Machine learning and AI tools**: model and checkpoint caches, Ollama and LM Studio models, and the caches left by Claude Code, Cursor, Copilot, and other assistants
-- **System**: Homebrew and Xcode caches, old logs, crash reports, and Time Machine local snapshots
+- **System**: Homebrew and Xcode caches, old logs, crash reports, and local Time Machine snapshots
+
+Local Time Machine snapshots deserve a note. macOS keeps them on your startup disk and they can quietly hold many gigabytes. Because macOS manages them, Cleanton removes them with Apple's own tool after you confirm, and unlike everything else they do not go to the Trash. Cleanton says so plainly before you act.
 
 Then it helps you deal with the rest, and never removes any of it on its own:
 
@@ -54,6 +67,18 @@ Then it helps you deal with the rest, and never removes any of it on its own:
 - **Suggestions**: duplicate files, large folders, re-clonable git repositories (a remote and no local changes), macOS screenshots and screen recordings, and old installers left in Downloads. Surfaced for review, never removed for you.
 - **Packages**: review and clean npm, pip, Homebrew, and MacPorts packages, with dependency-aware removal and a warning when a package is referenced by one of your codebases.
 - **Services**: see launchd and Homebrew services and startup items, and disable or remove the ones you do not want, with system services locked as protected.
+
+---
+
+## Check your packages for supply-chain attacks
+
+Attackers have been slipping malicious code into popular npm and pip packages, and into editor extensions. Some steal your tokens during install. Some reach out to servers they should not. Some copy a trusted name one letter off. The newest ones spread on their own, republishing themselves through any account they can reach.
+
+Cleanton scans the packages installed on your Mac and looks for those signs. It reads the code without running it, so scanning is safe.
+
+The first scan records what you already have as trusted. After that, Cleanton only speaks up about what is new or has changed, so a normal toolchain stays quiet instead of drowning you in noise. A package that changes on disk without a new version number is treated as a strong warning, because that is how a compromised update hides.
+
+When Cleanton flags something, it shows you where it is and gives you the exact command to remove or reinstall it yourself. It never touches your packages. You stay in control.
 
 ---
 
@@ -92,7 +117,7 @@ The script downloads the latest CLI tarball, installs it to `~/.cleanton/`, and 
 
 ## Using it
 
-Open the app and pick a scan root (your home folder by default). Run a scan, review the grouped results, select what you want to remove, and confirm. Removed items go to the Trash.
+Open the app and pick a scan root (your home folder by default). Run a scan, review the grouped results, select what you want to remove, and confirm. Removed items go to the Trash. The Security tab scans your installed packages, and the first scan learns what is normal for your machine.
 
 The command-line tool mirrors the app:
 
@@ -101,7 +126,10 @@ The command-line tool mirrors the app:
 cleanton plan
 
 # run the plan after you have reviewed it (items go to the Trash)
-cleanton plan --apply
+cleanton clean --yes
+
+# scan installed packages for supply-chain threats (reports only)
+cleanton security
 ```
 
 Run `cleanton --help` for the full list of commands.
@@ -117,6 +145,7 @@ Cleanton is built to be careful:
 - **Trash by default.** Removed items are recoverable from the Trash. Permanent deletion is never the default.
 - **Review before action.** Every scan shows the full list with sizes. You confirm the final selection.
 - **Conservative targets.** Cleanton aims at caches and rebuildable artifacts. Large folders and re-clonable repositories are surfaced as suggestions only, never removed automatically.
+- **The security scan only reports.** It reads package code without running it, and never removes or changes anything.
 - **Signed and notarized.** The app is signed with the Olib AI Developer ID and notarized by Apple.
 
 That said, only you know your machine. Read [the safety guide](docs/safety.md) and the plan before you run anything.

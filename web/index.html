@@ -3,24 +3,24 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Cleanton, a native macOS disk cleaner for developers</title>
+    <title>Cleanton, a native macOS disk cleaner with supply-chain security scanning</title>
 
     <link rel="icon" type="image/png" sizes="64x64" href="assets/favicon-64.png" />
     <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png" />
     <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
 
-    <meta name="description" content="Cleanton is a native macOS disk cleaner for developers. Reclaim space from build caches, dependency folders, Docker, and model caches. Review every item before removal. Files go to the Trash by default." />
+    <meta name="description" content="Cleanton is a native macOS app that reclaims disk space from build caches, apps, and system junk, and scans your installed npm and pip packages for supply-chain attacks. Review every item before removal. Files go to the Trash by default." />
     <meta name="author" content="Olib AI" />
 
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="Cleanton, a native macOS disk cleaner for developers" />
-    <meta property="og:description" content="Reclaim disk space from build caches and developer junk. Review everything first. Files go to the Trash by default, so a mistake is recoverable." />
+    <meta property="og:title" content="Cleanton, a native macOS disk cleaner with supply-chain security scanning" />
+    <meta property="og:description" content="Reclaim disk space and check your installed packages for supply-chain attacks. Review everything first. Files go to the Trash by default, so a mistake is recoverable." />
     <meta property="og:image" content="https://raw.githubusercontent.com/Olib-AI/cleanton/main/web/assets/icon-512.png" />
     <meta property="og:url" content="https://olib-ai.github.io/cleanton/" />
 
     <meta name="twitter:card" content="summary" />
-    <meta name="twitter:title" content="Cleanton, a native macOS disk cleaner for developers" />
-    <meta name="twitter:description" content="Reclaim disk space from build caches and developer junk. Review everything first." />
+    <meta name="twitter:title" content="Cleanton, a native macOS disk cleaner with supply-chain security scanning" />
+    <meta name="twitter:description" content="Reclaim disk space and check your installed packages for supply-chain attacks. Review everything first." />
     <meta name="twitter:image" content="https://raw.githubusercontent.com/Olib-AI/cleanton/main/web/assets/icon-512.png" />
 
     <script type="application/ld+json">
@@ -130,6 +130,7 @@
         <div class="nav-links">
           <a href="#screenshots">Screenshots</a>
           <a href="#clean">What it cleans</a>
+          <a href="#security">Security</a>
           <a href="#safety">Safety</a>
           <a href="#install">Install</a>
           <a class="btn btn-primary" href="https://github.com/Olib-AI/cleanton/releases/latest">Download</a>
@@ -141,8 +142,8 @@
       <section class="hero" id="top">
         <div class="container">
           <img class="mark" src="assets/logo.png" alt="Cleanton icon" />
-          <h1>Reclaim your disk,<br/>without the guesswork</h1>
-          <p class="lede">Cleanton is a native macOS disk cleaner for developers. It finds the space your tools leave behind, uninstalls apps along with everything they leave on disk, and moves what you pick to the Trash.</p>
+          <h1>Reclaim your disk,<br/>and vet your packages</h1>
+          <p class="lede">Cleanton is a native macOS app. It finds the space your tools leave behind, uninstalls apps along with everything they leave on disk, and scans your installed packages for the malicious code that has been turning up in npm and pip. You review everything, and what you pick goes to the Trash.</p>
           <div class="cta-row">
             <a class="btn btn-primary" href="https://github.com/Olib-AI/cleanton/releases/latest">Download for macOS</a>
             <a class="btn btn-ghost" href="https://github.com/Olib-AI/cleanton#install">Read the install guide</a>
@@ -214,12 +215,20 @@
               <p>JetBrains, VS Code, and Zed caches that rebuild themselves on the next launch.</p>
             </div>
             <div class="card">
+              <h3>Everyday apps</h3>
+              <p>caches from Chrome and other browsers, Adobe media caches, Steam shader caches, Zoom, and old iPhone and iPad backups.</p>
+            </div>
+            <div class="card">
               <h3>Docker</h3>
               <p>dangling images, build cache, and unused volumes.</p>
             </div>
             <div class="card">
               <h3>ML and AI tools</h3>
               <p>model and checkpoint caches, Ollama and LM Studio models, and the caches from Claude Code, Cursor, Copilot, and other assistants.</p>
+            </div>
+            <div class="card">
+              <h3>System</h3>
+              <p>Homebrew and Xcode caches, old logs, crash reports, and local Time Machine snapshots that quietly hold gigabytes on your startup disk.</p>
             </div>
           </div>
           <h3 style="margin-top: 2.2em;">Tools that put you in control, and never delete on their own</h3>
@@ -244,7 +253,32 @@
         </div>
       </section>
 
-      <section class="section alt" id="safety">
+      <section class="section alt" id="security">
+        <div class="container">
+          <h2>Check your packages for supply-chain attacks</h2>
+          <p>Attackers have been slipping malicious code into popular npm and pip packages, and into editor extensions. Cleanton scans the packages installed on your Mac and looks for the signs, reading the code without ever running it.</p>
+          <div class="grid" style="margin-top: 24px;">
+            <div class="card">
+              <h3>It knows the tricks</h3>
+              <p>Install scripts that steal your tokens, code that phones home to unknown servers, names that copy a trusted package one letter off, and the self-spreading npm worms that republish themselves.</p>
+            </div>
+            <div class="card">
+              <h3>It learns your machine</h3>
+              <p>The first scan records what you already have as trusted. After that, Cleanton only speaks up about what is new or has changed, so a normal setup stays quiet.</p>
+            </div>
+            <div class="card">
+              <h3>It catches quiet tampering</h3>
+              <p>A package that changes on disk without a new version number is treated as a strong warning, because that is how a compromised update hides.</p>
+            </div>
+            <div class="card">
+              <h3>It only reports</h3>
+              <p>When Cleanton flags something, it shows you where it is and the exact command to remove or reinstall it yourself. It never touches your packages.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="safety">
         <div class="container">
           <div class="warn">
             <h2>Cleanton removes files. Read this.</h2>
@@ -274,16 +308,19 @@
         </div>
       </section>
 
-      <section class="section" id="install">
+      <section class="section alt" id="install">
         <div class="container">
           <h2>Install</h2>
           <p>Cleanton is a macOS app for Apple Silicon. Download the app, or install the command-line tool with one command.</p>
 <pre class="code"><span class="c"># Command-line tool (macOS arm64):</span>
 <span class="k">curl</span> -fsSL https://raw.githubusercontent.com/Olib-AI/cleanton/main/scripts/install.sh | <span class="k">sh</span>
 
-<span class="c"># Then, after reviewing the plan, send removed items to the Trash:</span>
+<span class="c"># Show what is reclaimable, then send what you pick to the Trash:</span>
 <span class="k">cleanton</span> plan
-<span class="k">cleanton</span> plan --apply</pre>
+<span class="k">cleanton</span> clean --yes
+
+<span class="c"># Scan installed packages for supply-chain threats (reports only):</span>
+<span class="k">cleanton</span> security</pre>
           <p>For the app, download <code>cleanton-app-macos-arm64.tar.gz</code> from the <a href="https://github.com/Olib-AI/cleanton/releases/latest">latest release</a> and move <code>Cleanton.app</code> to your Applications folder. The app is notarized and opens cleanly. The standalone command-line tool is quarantined by macOS on direct download; the installer script clears that for you, and the <a href="https://github.com/Olib-AI/cleanton/blob/main/docs/installation.md">install guide</a> covers the manual step.</p>
         </div>
       </section>
