@@ -14,7 +14,6 @@ path_glob = "~/Library/Caches/deno/**"
 [action]
 type = "trash"
 prompt = "Move {size} of Deno cache to Trash?"
-group = true
 
 [test]
 should_match = ["~/Library/Caches/deno/deps/http/foo"]

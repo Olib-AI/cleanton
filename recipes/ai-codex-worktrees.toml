@@ -19,7 +19,6 @@ names = ["auth.json", "config.toml", "config.json", ".credentials.json", "creden
 [action]
 type = "trash"
 prompt = "Move {size} of old Codex worktrees to Trash?"
-group = true
 
 [test]
 should_match = ["~/.codex/worktrees/task-123/repo"]

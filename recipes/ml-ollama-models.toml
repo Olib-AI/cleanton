@@ -18,7 +18,6 @@ min_age_days = 30
 [action]
 type = "trash"
 prompt = "Move {size} of Ollama models (re-pullable) to Trash?"
-group = true
 
 [test]
 should_match = ["~/.ollama/models/blobs/sha256-foo"]

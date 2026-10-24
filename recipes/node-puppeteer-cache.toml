@@ -14,7 +14,6 @@ min_age_days = 30
 [action]
 type = "trash"
 prompt = "Move {size} of Puppeteer browsers to Trash?"
-group = true
 
 [test]
 should_match = ["~/.cache/puppeteer/chrome/mac_arm-127.0.6533.88/chrome-mac-arm64/payload.bin"]

@@ -843,7 +843,6 @@ mod tests {
             action: ActionSpec {
                 action_type: ActionType::Trash,
                 prompt: "Trash?".to_owned(),
-                group: false,
             },
             test: RecipeTest {
                 should_match: vec!["project/cache/item".to_owned()],

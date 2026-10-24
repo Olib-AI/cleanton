@@ -65,7 +65,11 @@ impl ServiceManager {
     }
 
     /// List all background services (launchd and brew services)
-    #[allow(clippy::too_many_lines, clippy::unused_async)]
+    #[allow(
+        clippy::too_many_lines,
+        clippy::unused_async,
+        clippy::unused_async_trait_impl
+    )]
     pub async fn list_services(&self) -> Result<Vec<Service>, CleantonError> {
         let mut services = Vec::new();
         let proc_stats = launchd::get_all_processes_stats();

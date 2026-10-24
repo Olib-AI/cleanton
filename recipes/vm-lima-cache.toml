@@ -17,7 +17,6 @@ min_size_mb = 100
 [action]
 type = "trash"
 prompt = "Move {size} of Lima image cache to Trash?"
-group = true
 
 [test]
 should_match = ["~/Library/Caches/lima/download/by-url-sha256/abc123/data"]

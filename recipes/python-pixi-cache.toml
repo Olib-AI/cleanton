@@ -14,7 +14,6 @@ min_size_mb = 100
 [action]
 type = "trash"
 prompt = "Move {size} of Pixi/rattler package cache to Trash?"
-group = true
 
 [test]
 should_match = ["~/.cache/rattler/pkgs/foo"]

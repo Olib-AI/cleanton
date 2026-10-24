@@ -16,7 +16,6 @@ path_glob = "**/target/*/incremental/**"
 [action]
 type = "trash"
 prompt = "Move {size} of Rust incremental compile cache to Trash?"
-group = true
 
 [test]
 should_match = ["projects/app/target/debug/incremental/app-1a2b3c/s-xyz.lock"]

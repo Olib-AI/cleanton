@@ -21,7 +21,6 @@ path_glob = "~/Library/Developer/CoreSimulator/Devices/*/unavailable/**"
 [action]
 type = "trash"
 prompt = "Move {size} of unavailable simulators to Trash?"
-group = true
 
 [test]
 should_match = ["~/Library/Developer/CoreSimulator/Devices/dev-id/unavailable/runtime"]

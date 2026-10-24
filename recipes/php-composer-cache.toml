@@ -19,7 +19,6 @@ min_age_days = 30
 [action]
 type = "trash"
 prompt = "Move {size} of Composer cache to Trash?"
-group = true
 
 [test]
 should_match = ["~/Library/Caches/composer/files/vendor/package/1.0.0.zip"]

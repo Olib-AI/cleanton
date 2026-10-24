@@ -19,7 +19,6 @@ min_age_days = 7
 [action]
 type = "trash"
 prompt = "Move {size} of Cursor cache to Trash?"
-group = true
 
 [test]
 should_match = ["~/Library/Application Support/Cursor/Cache/foo", "~/Library/Application Support/Cursor/Code Cache/js/index_0", "~/Library/Application Support/Cursor/GPUCache/data_1"]

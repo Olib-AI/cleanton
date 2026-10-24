@@ -13,7 +13,7 @@
 //! constants (mean 0, std 1) — the graph consumes the raw ids via in-graph
 //! embeddings, and the exported model emits raw logits (softmax runs here).
 
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use serde::Deserialize;
 use tract_onnx::prelude::*;
@@ -23,7 +23,7 @@ use crate::{
     MlResult, MlUnavailableReason,
 };
 
-type RunnableOnnx = RunnableModel<TypedFact, Box<dyn TypedOp>, TypedModel>;
+type RunnableOnnx = Arc<RunnableModel<TypedFact, Box<dyn TypedOp>>>;
 
 #[derive(Debug, Deserialize)]
 struct Normalization {
@@ -141,7 +141,7 @@ pub fn logits_for_features(values: &[f32; FEATURE_COUNT]) -> MlResult<[f32; 4]> 
     let view = outputs
         .first()
         .ok_or_else(unavailable)?
-        .to_array_view::<f32>()
+        .to_plain_array_view::<f32>()
         .map_err(|_| unavailable())?;
     let mut logits = [0.0_f32; 4];
     let mut produced = 0_usize;

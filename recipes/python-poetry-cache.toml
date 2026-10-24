@@ -21,7 +21,6 @@ paths = ["~/Library/Caches/pypoetry/virtualenvs", "~/Library/Caches/pypoetry/vir
 [action]
 type = "trash"
 prompt = "Move {size} of Poetry cache to Trash?"
-group = true
 
 [test]
 should_match = ["~/Library/Caches/pypoetry/artifacts/foo"]

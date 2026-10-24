@@ -17,7 +17,6 @@ min_size_mb = 50
 [action]
 type = "trash"
 prompt = "Move {size} of Terraform plugin cache to Trash?"
-group = true
 
 [test]
 should_match = ["~/.terraform.d/plugin-cache/registry.terraform.io/hashicorp/aws/5.31.0/darwin_arm64/terraform-provider-aws_v5.31.0_x5"]

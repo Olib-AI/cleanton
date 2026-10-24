@@ -16,7 +16,6 @@ min_age_days = 14
 [action]
 type = "trash"
 prompt = "Move {size} of npm debug logs to Trash?"
-group = true
 
 [test]
 should_match = ["~/.npm/_logs/2026-05-01T00_00_00_000Z-debug-0.log"]

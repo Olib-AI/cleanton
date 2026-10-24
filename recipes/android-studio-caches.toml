@@ -16,7 +16,6 @@ min_age_days = 14
 [action]
 type = "trash"
 prompt = "Move {size} of Android Studio caches to Trash?"
-group = true
 
 [test]
 should_match = ["~/Library/Caches/Google/AndroidStudio2025.1/caches/content.dat.storageData"]

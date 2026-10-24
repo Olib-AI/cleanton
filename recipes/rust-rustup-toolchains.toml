@@ -18,7 +18,6 @@ min_age_days = 90
 [action]
 type = "trash"
 prompt = "Move {size} of rustup toolchains (re-installable via rustup) to Trash?"
-group = true
 
 [test]
 should_match = ["~/.rustup/toolchains/1.75-aarch64-apple-darwin/lib/libstd.dylib"]

@@ -27,7 +27,6 @@ names = [".credentials.json", "settings.json", "settings.local.json", ".claude.j
 [action]
 type = "trash"
 prompt = "Move {size} of Claude Code cache to Trash?"
-group = true
 
 [test]
 should_match = ["~/.claude/statsig/statsig.cached.evaluations.2"]

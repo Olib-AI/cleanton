@@ -14,7 +14,6 @@ min_age_days = 60
 [action]
 type = "trash"
 prompt = "Move {size} of Ivy cache to Trash?"
-group = true
 
 [test]
 should_match = ["~/.ivy2/cache/org.example/lib/jars/lib-1.0.jar"]

@@ -86,9 +86,7 @@ impl HostContext {
 /// Detect whether the current executable lives inside a `.app` bundle.
 #[must_use]
 pub fn host_context() -> HostContext {
-    let in_bundle = std::env::current_exe()
-        .ok()
-        .is_some_and(|exe| exe_is_in_app_bundle(&exe));
+    let in_bundle = std::env::current_exe().is_ok_and(|exe| exe_is_in_app_bundle(&exe));
     if in_bundle {
         HostContext::AppBundle
     } else {

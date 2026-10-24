@@ -14,7 +14,6 @@ min_age_days = 30
 [action]
 type = "trash"
 prompt = "Move {size} of Yarn classic cache to Trash?"
-group = true
 
 [test]
 should_match = ["~/Library/Caches/Yarn/v6/npm-foo"]

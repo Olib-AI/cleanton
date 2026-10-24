@@ -68,8 +68,6 @@ pub struct ActionSpec {
     #[serde(rename = "type")]
     pub action_type: ActionType,
     pub prompt: String,
-    #[serde(default)]
-    pub group: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

@@ -14,7 +14,6 @@ min_age_days = 30
 [action]
 type = "trash"
 prompt = "Move {size} of Zig global cache to Trash?"
-group = true
 
 [test]
 should_match = ["~/.cache/zig/p/1220abcdef/src/main.zig-payload"]

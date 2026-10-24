@@ -17,7 +17,6 @@ min_age_days = 14
 [action]
 type = "trash"
 prompt = "Move {size} of V8 code caches to Trash?"
-group = true
 
 [test]
 should_match = ["~/Library/Application Support/Slack/Code Cache/js/index-dir/the-real-index", "~/Library/Application Support/Google/Chrome/Default/Code Cache/js/0a1b2c3d4e5f_0"]

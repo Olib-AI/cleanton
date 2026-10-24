@@ -18,7 +18,6 @@ names = [".gitkeep"]
 [action]
 type = "trash"
 prompt = "Move {size} of Python bytecode to Trash?"
-group = true
 
 [test]
 should_match = ["projects/api/__pycache__/module.cpython-314.pyc"]

@@ -13,7 +13,6 @@ path_glob = "**/docker-dummy-unused-volumes/**"
 [action]
 type = "trash"
 prompt = "Delete unused Docker volumes?"
-group = true
 
 [test]
 should_match = ["projects/docker-dummy-unused-volumes/volume"]

@@ -624,10 +624,7 @@ fn maybe_transcode_utf16(data: &[u8]) -> Option<Vec<u8>> {
         (0xFF, 0xFE) => (true, &data[2..]),
         (0xFE, 0xFF) => (false, &data[2..]),
         // No BOM: infer endianness from the alternating-NUL pattern.
-        _ => match detect_utf16_no_bom(data) {
-            Some(le) => (le, data),
-            None => return None,
-        },
+        _ => (detect_utf16_no_bom(data)?, data),
     };
     if body.len() < 2 {
         return None;

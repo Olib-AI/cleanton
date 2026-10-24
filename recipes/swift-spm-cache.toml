@@ -13,7 +13,6 @@ path_glob = "~/Library/Caches/org.swift.swiftpm/**"
 [action]
 type = "trash"
 prompt = "Move {size} of SwiftPM cache to Trash?"
-group = true
 
 [test]
 should_match = ["~/Library/Caches/org.swift.swiftpm/repositories"]

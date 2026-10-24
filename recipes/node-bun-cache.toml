@@ -14,7 +14,6 @@ path_glob = "~/.bun/install/cache/**"
 [action]
 type = "trash"
 prompt = "Move {size} of Bun install cache to Trash?"
-group = true
 
 [test]
 should_match = ["~/.bun/install/cache/foo/package.json"]

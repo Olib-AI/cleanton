@@ -17,7 +17,6 @@ min_age_days = 14
 [action]
 type = "trash"
 prompt = "Move {size} of Zoom cache to Trash?"
-group = true
 
 [test]
 should_match = ["~/Library/Caches/us.zoom.xos/Cache.db"]

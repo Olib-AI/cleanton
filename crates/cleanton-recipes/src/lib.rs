@@ -4,7 +4,10 @@ mod parser;
 mod registry;
 mod validator;
 
-pub use matcher::{action_for_entry, action_for_entry_with_subtree_mtime, recipe_matches_entry};
+pub use matcher::{
+    DirectoryGate, action_for_entry, action_for_entry_with_subtree_mtime, directory_gate,
+    recipe_has_gates, recipe_matches_entry,
+};
 pub use parser::{
     ActionSpec, MatchExclude, MatchSpec, Recipe, RecipeDocument, RecipeTest, parse_recipe_str,
 };

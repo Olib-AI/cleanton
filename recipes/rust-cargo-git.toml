@@ -16,7 +16,6 @@ min_age_days = 30
 [action]
 type = "trash"
 prompt = "Move {size} of Cargo git checkouts to Trash?"
-group = true
 
 [test]
 should_match = ["~/.cargo/git/checkouts/serde-1a2b3c/0f1e2d"]

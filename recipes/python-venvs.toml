@@ -21,7 +21,6 @@ min_age_days = 30
 [action]
 type = "trash"
 prompt = "Move {size} of Python virtual environments to Trash?"
-group = true
 
 [test]
 should_match = ["projects/app/.venv"]

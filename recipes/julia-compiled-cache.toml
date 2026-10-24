@@ -16,7 +16,6 @@ min_age_days = 30
 [action]
 type = "trash"
 prompt = "Move {size} of Julia compiled cache to Trash?"
-group = true
 
 [test]
 should_match = ["~/.julia/compiled/v1.10/DataFrames/AR9oZ_abc12.ji"]

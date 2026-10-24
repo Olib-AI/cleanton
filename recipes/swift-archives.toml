@@ -17,7 +17,6 @@ min_age_days = 90
 [action]
 type = "trash"
 prompt = "Move {size} of old Xcode archives (incl. dSYMs for shipped builds) to Trash?"
-group = true
 
 [test]
 should_match = ["~/Library/Developer/Xcode/Archives/2026-01-01/App 2026-01-01, 09.41.xcarchive"]

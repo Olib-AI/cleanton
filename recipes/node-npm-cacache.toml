@@ -16,7 +16,6 @@ min_age_days = 30
 [action]
 type = "trash"
 prompt = "Move {size} of npm cache to Trash?"
-group = true
 
 [test]
 should_match = ["~/.npm/_cacache/content-v2/sha512/aa/bb/ccdd"]

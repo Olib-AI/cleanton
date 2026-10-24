@@ -25,7 +25,6 @@ min_age_days = 7
 [action]
 type = "archive"
 prompt = "Local Time Machine snapshots hold {size}; thin them with tmutil (not by deleting files)?"
-group = true
 
 [test]
 should_match = ["Volumes/com.apple.TimeMachine.localsnapshots/Backups.backupdb/local-snapshot"]

@@ -15,7 +15,6 @@ min_age_days = 60
 [action]
 type = "trash"
 prompt = "Move {size} of orphaned preferences to Trash?"
-group = true
 
 [test]
 should_match = ["~/Library/Preferences/com.orphaned.app.plist"]

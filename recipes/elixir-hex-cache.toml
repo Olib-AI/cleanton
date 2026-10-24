@@ -16,7 +16,6 @@ min_age_days = 30
 [action]
 type = "trash"
 prompt = "Move {size} of Hex package cache to Trash?"
-group = true
 
 [test]
 should_match = ["~/.hex/packages/hexpm/phoenix-1.7.14.tar"]

@@ -19,7 +19,6 @@ names = ["oauth_creds.json", "settings.json", ".credentials.json", "credentials.
 [action]
 type = "trash"
 prompt = "Move {size} of Gemini CLI cache to Trash?"
-group = true
 
 [test]
 should_match = ["~/.gemini/cache/log.txt"]

@@ -15,7 +15,6 @@ min_age_days = 30
 [action]
 type = "trash"
 prompt = "Move {size} of Cargo registry source checkouts to Trash?"
-group = true
 
 [test]
 should_match = ["~/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde-1.0.200/src/lib.rs"]

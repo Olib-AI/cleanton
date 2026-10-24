@@ -15,7 +15,6 @@ min_age_days = 30
 [action]
 type = "trash"
 prompt = "Move {size} of orphaned caches to Trash?"
-group = true
 
 [test]
 should_match = ["~/Library/Caches/com.orphaned.app/cache"]

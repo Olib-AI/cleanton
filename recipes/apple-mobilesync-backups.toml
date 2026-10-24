@@ -17,7 +17,6 @@ min_age_days = 90
 [action]
 type = "archive"
 prompt = "Review old iOS device backups for manual removal?"
-group = true
 
 [test]
 should_match = ["~/Library/Application Support/MobileSync/Backup/00008101-000E4D3A0EF8001E/Manifest.db"]

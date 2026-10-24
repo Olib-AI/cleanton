@@ -16,7 +16,6 @@ parent_must_contain_any = ["stack.yaml", "package.yaml"]
 [action]
 type = "trash"
 prompt = "Move {size} of Stack work directories to Trash?"
-group = true
 
 [test]
 should_match = ["projects/hs-app/.stack-work", "projects/hs-monorepo/subpkg/.stack-work"]

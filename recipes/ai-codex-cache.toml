@@ -21,7 +21,6 @@ names = ["auth.json", "config.toml", "config.json", ".credentials.json", "creden
 [action]
 type = "trash"
 prompt = "Move {size} of Codex CLI logs to Trash?"
-group = true
 
 [test]
 should_match = ["~/.codex/log/codex-tui.log"]

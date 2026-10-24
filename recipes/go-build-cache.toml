@@ -13,7 +13,6 @@ path_glob = "~/Library/Caches/go-build/**"
 [action]
 type = "trash"
 prompt = "Move {size} of Go build cache to Trash?"
-group = true
 
 [test]
 should_match = ["~/Library/Caches/go-build/00/0000000000000000000000000000000000000000-d"]

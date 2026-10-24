@@ -23,7 +23,6 @@ min_age_days = 7
 [action]
 type = "trash"
 prompt = "Move {size} of W&B logs to Trash?"
-group = true
 
 [test]
 should_match = ["projects/ml/wandb"]

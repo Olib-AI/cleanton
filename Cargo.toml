@@ -17,7 +17,7 @@ members = [
 [workspace.package]
 version = "0.3.0"
 edition = "2024"
-rust-version = "1.96.0"
+rust-version = "1.99.1"
 license = "MIT OR Apache-2.0"
 authors = ["Olib AI"]
 repository = "https://github.com/Olib-AI/cleanton"
@@ -85,6 +85,7 @@ module_name_repetitions = "allow"
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
 struct_excessive_bools = "allow"
+assert_is_empty = "allow"
 # Destructive-tool hardening — denied, not warned (tests exempt via clippy.toml /
 # scoped cfg(test) allows). No silent panics or bounds-panics in a deleter.
 unwrap_used = "deny"

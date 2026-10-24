@@ -15,7 +15,6 @@ min_size_mb = 50
 [action]
 type = "trash"
 prompt = "Move {size} of NuGet packages to Trash?"
-group = true
 
 [test]
 should_match = ["~/.nuget/packages/newtonsoft.json/13.0.3/lib/net8.0/Newtonsoft.Json.dll"]

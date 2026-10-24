@@ -22,7 +22,6 @@ paths = ["~/.lmstudio/**", "~/.cache/lm-studio/**"]
 [action]
 type = "trash"
 prompt = "Move {size} of GGUF model weights to Trash?"
-group = true
 
 [test]
 should_match = ["projects/models/llama-3-8b-Q4_K_M.gguf"]

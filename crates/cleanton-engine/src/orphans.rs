@@ -339,7 +339,6 @@ fn floor_recipe(min_age_days: u64) -> RecipeDocument {
         action: ActionSpec {
             action_type: ActionType::Trash,
             prompt: String::new(),
-            group: false,
         },
         test: RecipeTest::default(),
     }

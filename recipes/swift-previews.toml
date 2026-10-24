@@ -13,7 +13,6 @@ path_glob = "~/Library/Developer/Xcode/UserData/Previews/**"
 [action]
 type = "trash"
 prompt = "Move {size} of SwiftUI Previews cache to Trash?"
-group = true
 
 [test]
 should_match = ["~/Library/Developer/Xcode/UserData/Previews/Simulator Devices/1A2B3C4D"]

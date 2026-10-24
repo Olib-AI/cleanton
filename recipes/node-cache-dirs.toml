@@ -15,7 +15,6 @@ parent_must_contain = ["package.json"]
 [action]
 type = "trash"
 prompt = "Move {size} of Node tool caches to Trash?"
-group = true
 
 [test]
 should_match = ["projects/app/.parcel-cache"]

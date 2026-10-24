@@ -16,7 +16,6 @@ min_age_days = 30
 [action]
 type = "trash"
 prompt = "Move {size} of saved application state to Trash?"
-group = true
 
 [test]
 should_match = ["~/Library/Saved Application State/com.apple.Safari.savedState/windows.plist"]

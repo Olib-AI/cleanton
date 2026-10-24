@@ -25,7 +25,6 @@ min_age_days = 180
 [action]
 type = "trash"
 prompt = "Move {size} of Xcode Device Support files to Trash?"
-group = true
 
 [test]
 should_match = [
