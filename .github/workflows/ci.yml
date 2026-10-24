@@ -62,7 +62,8 @@ jobs:
           if cargo test --workspace --all-features 2>&1 | tee test-output.txt; then
             exit 0
           fi
-          grep -E "^test .*FAILED|^failures:|^    [a-z_:]+$|panicked at|^error\[|^error:" test-output.txt | head -60 | while IFS= read -r line; do printf '::error::%s\n' "$line"; done
+          grep -E "^test .*FAILED|^failures:" test-output.txt | head -40 | while IFS= read -r line; do printf '::error::%s\n' "$line"; done
+          grep -E -A6 "panicked at" test-output.txt | head -90 | while IFS= read -r line; do printf '::error::%s\n' "$line"; done
           exit 1
 
   macos-build:
