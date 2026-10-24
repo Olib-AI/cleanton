@@ -20,6 +20,10 @@ pub(crate) const BUILTIN_RECIPES: &[(&str, &str)] = &[
         include_str!("../../../recipes/rust-cargo-registry-src.toml"),
     ),
     (
+        "recipes/rust-cargo-registry-index.toml",
+        include_str!("../../../recipes/rust-cargo-registry-index.toml"),
+    ),
+    (
         "recipes/rust-incremental-cache.toml",
         include_str!("../../../recipes/rust-incremental-cache.toml"),
     ),
@@ -224,6 +228,10 @@ pub(crate) const BUILTIN_RECIPES: &[(&str, &str)] = &[
         include_str!("../../../recipes/ai-claude-code-worktrees.toml"),
     ),
     (
+        "recipes/ai-opencode-cache.toml",
+        include_str!("../../../recipes/ai-opencode-cache.toml"),
+    ),
+    (
         "recipes/ai-cursor-cache.toml",
         include_str!("../../../recipes/ai-cursor-cache.toml"),
     ),
@@ -280,6 +288,10 @@ pub(crate) const BUILTIN_RECIPES: &[(&str, &str)] = &[
         include_str!("../../../recipes/go-mod-cache.toml"),
     ),
     (
+        "recipes/go-module-cache.toml",
+        include_str!("../../../recipes/go-module-cache.toml"),
+    ),
+    (
         "recipes/jvm-gradle-caches.toml",
         include_str!("../../../recipes/jvm-gradle-caches.toml"),
     ),
@@ -294,6 +306,10 @@ pub(crate) const BUILTIN_RECIPES: &[(&str, &str)] = &[
     (
         "recipes/jvm-gradle-build-dirs.toml",
         include_str!("../../../recipes/jvm-gradle-build-dirs.toml"),
+    ),
+    (
+        "recipes/jvm-sbt-cache.toml",
+        include_str!("../../../recipes/jvm-sbt-cache.toml"),
     ),
     (
         "recipes/jvm-maven-repository.toml",
@@ -400,6 +416,14 @@ pub(crate) const BUILTIN_RECIPES: &[(&str, &str)] = &[
         include_str!("../../../recipes/cmake-build-dirs.toml"),
     ),
     (
+        "recipes/c-cpp-ccache.toml",
+        include_str!("../../../recipes/c-cpp-ccache.toml"),
+    ),
+    (
+        "recipes/c-cpp-conan-cache.toml",
+        include_str!("../../../recipes/c-cpp-conan-cache.toml"),
+    ),
+    (
         "recipes/ruby-bundler-cache.toml",
         include_str!("../../../recipes/ruby-bundler-cache.toml"),
     ),
@@ -446,6 +470,10 @@ pub(crate) const BUILTIN_RECIPES: &[(&str, &str)] = &[
     (
         "recipes/apps-spotify-cache.toml",
         include_str!("../../../recipes/apps-spotify-cache.toml"),
+    ),
+    (
+        "recipes/apps-slack-cache.toml",
+        include_str!("../../../recipes/apps-slack-cache.toml"),
     ),
     (
         "recipes/apps-ios-device-updates.toml",
@@ -514,6 +542,10 @@ pub(crate) const BUILTIN_RECIPES: &[(&str, &str)] = &[
     (
         "recipes/browser-firefox-profile-cache.toml",
         include_str!("../../../recipes/browser-firefox-profile-cache.toml"),
+    ),
+    (
+        "recipes/browser-safari-cache.toml",
+        include_str!("../../../recipes/browser-safari-cache.toml"),
     ),
     (
         "recipes/apps-steam-shader-cache.toml",

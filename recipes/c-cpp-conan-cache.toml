@@ -1,0 +1,39 @@
+[recipe]
+id = "c-cpp-conan-cache"
+name = "Conan Package Cache"
+description = "Downloaded Conan package cache (C/C++ dependency manager); packages re-download on the next install"
+category = "c-cpp"
+icon = "fa-cogs"
+safety_level = "cautious"
+enabled = true
+priority = 55
+
+# Conan keeps downloaded packages under `~/.conan/data` (Conan 1) and
+# `~/.conan2/p` (Conan 2). Profile/settings files live directly under the
+# dotfolder, so the match is scoped to the package trees and never reaches
+# `~/.conan/profiles`, `~/.conan/settings.yml`, or `~/.conan2/global.conf`.
+# Packages are regenerable, but a build may pin an exact revision, hence
+# `cautious` plus an age gate.
+[match]
+path_glob = "~/.conan/data/**"
+min_size_mb = 50
+min_age_days = 30
+
+[[match.any_of]]
+path_glob = "~/.conan2/p/**"
+min_size_mb = 50
+min_age_days = 30
+
+[action]
+type = "trash"
+prompt = "Move {size} of Conan package cache to Trash? Packages re-download on demand."
+
+[test]
+should_match = [
+    "~/.conan/data/zlib/1.2.13/_conan_hash/export/conanfile.py",
+    "~/.conan2/p/zlib/1.2.13/_conan_hash/export/conanfile.py",
+]
+should_not_match = [
+    "~/.conanx/data/zlib/1.2.13/export/conanfile.py",
+    "~/Documents/conan/data/zlib/1.2.13/export/conanfile.py",
+]

@@ -1,0 +1,31 @@
+[recipe]
+id = "rust-cargo-registry-index"
+name = "Cargo Registry Index Cache"
+description = "Cargo's downloaded sparse-index cache; re-fetched on the next resolution"
+category = "rust"
+icon = "fa-rust"
+safety_level = "safe"
+enabled = true
+priority = 72
+
+# `~/.cargo/registry/index` holds the sparse-registry cache
+# (`index.crates.io-<hash>/.cache/...`). It is pure metadata that Cargo
+# re-fetches on demand, so this is `safe`; the age gate keeps a warm index
+# alone. The `.crate` archives and extracted sources are separate recipes
+# (`rust-cargo-registry-cache`, `rust-cargo-registry-src`).
+[match]
+path_glob = "~/.cargo/registry/index/**"
+min_age_days = 30
+
+[action]
+type = "trash"
+prompt = "Move {size} of Cargo index cache to Trash? Cargo re-fetches it on demand."
+
+[test]
+should_match = [
+    "~/.cargo/registry/index/index.crates.io-1949cf8c6b5b557f/.cache/ab/cd/abcdef",
+]
+should_not_match = [
+    "~/.cargo/registry/cache/ab/cd/abcdef.crate",
+    "~/.cargo/registry/src/index.crates.io-abcd/foo/bar.rs",
+]

@@ -1,0 +1,30 @@
+[recipe]
+id = "jvm-sbt-cache"
+name = "sbt Boot Cache"
+description = "sbt launcher boot jars and plugin resolver cache; re-resolved on the next sbt run"
+category = "jvm"
+icon = "fa-java"
+safety_level = "cautious"
+enabled = true
+priority = 52
+
+# `~/.sbt/boot` holds the sbt launcher boot jars, re-resolved automatically.
+# It is scoped away from `~/.sbt/global.sbt`, `~/.sbt/plugins/`, and
+# `~/.sbt/reloader` — the user's own build configuration, which must never be
+# touched by a cache recipe.
+[match]
+path_glob = "~/.sbt/boot/**"
+min_age_days = 30
+
+[action]
+type = "trash"
+prompt = "Move {size} of sbt boot cache to Trash? sbt re-resolves it on demand."
+
+[test]
+should_match = [
+    "~/.sbt/boot/sbt-1.10.7/org.scala-lang.modules/scala-library/2.13.14/scala-library-2.13.14.jar",
+]
+should_not_match = [
+    "~/.sbt/global.sbt",
+    "~/.sbt/plugins/foo.sbt",
+]
