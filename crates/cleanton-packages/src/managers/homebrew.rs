@@ -170,7 +170,10 @@ pub(crate) async fn uninstall(cask: bool, names: &[String]) -> ActionOutcome {
     if names.is_empty() {
         return ActionOutcome::failed("no packages specified");
     }
-    outcome(run("brew", uninstall_args(cask, names), ACTION_TIMEOUT).await, 0)
+    outcome(
+        run("brew", uninstall_args(cask, names), ACTION_TIMEOUT).await,
+        0,
+    )
 }
 
 /// Pure argument builder for [`uninstall`], split out so the `--cask` flag is

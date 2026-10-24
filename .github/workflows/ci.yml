@@ -50,13 +50,7 @@ jobs:
           [ "$pinned" = "$actual" ]
 
       - name: Check formatting
-        shell: bash
-        run: |
-          if cargo fmt --all -- --check > /tmp/fmt.diff 2>&1; then
-            exit 0
-          fi
-          while IFS= read -r line; do printf '::error::%s\n' "$line"; done < /tmp/fmt.diff
-          exit 1
+        run: cargo fmt --all --check
 
       - name: Clippy (deny warnings)
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
