@@ -53,7 +53,13 @@ jobs:
         run: cargo fmt --all --check
 
       - name: Clippy (deny warnings)
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        shell: bash
+        run: |
+          if cargo clippy --workspace --all-targets --all-features --message-format=short -- -D warnings > /tmp/clippy.txt 2>&1; then
+            exit 0
+          fi
+          grep -E 'warning:|^error' /tmp/clippy.txt | while IFS= read -r line; do printf '::error::%s\n' "$line"; done
+          exit 1
 
       - name: Test
         run: cargo test --workspace --all-features

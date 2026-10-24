@@ -178,7 +178,7 @@ pub(crate) async fn uninstall(cask: bool, names: &[String]) -> ActionOutcome {
 
 /// Pure argument builder for [`uninstall`], split out so the `--cask` flag is
 /// unit-tested without ever shelling out to `brew`.
-fn uninstall_args<'a>(cask: bool, names: &'a [String]) -> Vec<&'a str> {
+fn uninstall_args(cask: bool, names: &[String]) -> Vec<&str> {
     let mut args: Vec<&str> = vec!["uninstall"];
     if cask {
         args.push("--cask");
