@@ -121,7 +121,6 @@ jobs:
 
   audit:
     name: cargo audit
-    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -148,7 +147,7 @@ jobs:
 
   summary:
     name: Summary
-    if: github.event_name == 'workflow_dispatch'
+    if: always()
     needs: [recipes, rust, audit]
     runs-on: ubuntu-latest
     steps:

@@ -53,16 +53,17 @@ jobs:
         run: cargo fmt --all --check
 
       - name: Clippy (deny warnings)
-        shell: bash
-        run: |
-          if cargo clippy --workspace --all-targets --all-features --message-format=short -- -D warnings > /tmp/clippy.txt 2>&1; then
-            exit 0
-          fi
-          grep -E 'warning:|^error' /tmp/clippy.txt | while IFS= read -r line; do printf '::error::%s\n' "$line"; done
-          exit 1
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
       - name: Test
-        run: cargo test --workspace --all-features
+        shell: bash
+        run: |
+          set -o pipefail
+          if cargo test --workspace --all-features 2>&1 | tee test-output.txt; then
+            exit 0
+          fi
+          grep -E "^test .*FAILED|^failures:|^    [a-z_:]+$|panicked at|^error\[|^error:" test-output.txt | head -60 | while IFS= read -r line; do printf '::error::%s\n' "$line"; done
+          exit 1
 
   macos-build:
     name: macOS unsigned release build
