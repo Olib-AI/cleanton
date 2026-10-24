@@ -1,0 +1,28 @@
+[recipe]
+id = "apps-slack-cache"
+name = "Slack Cache"
+description = "Slack desktop app HTTP/media cache; re-fetched from Slack on demand"
+category = "apps"
+icon = "fa-comments"
+safety_level = "cautious"
+enabled = true
+priority = 50
+
+# Slack for Mac keys its caches off the bundle id
+# (`com.tinyspeck.slackmacgap`). Media/HTTP caches are regenerable, but Slack
+# can be mid-conversation, so this is `cautious` with an age gate. The
+# matcher's safety floors still refuse credentials and protected paths.
+[match]
+path_glob = "~/Library/Caches/com.tinyspeck.slackmacgap/**"
+min_age_days = 14
+
+[action]
+type = "trash"
+prompt = "Move {size} of Slack cache to Trash? Slack re-fetches it on demand."
+
+[test]
+should_match = ["~/Library/Caches/com.tinyspeck.slackmacgap/Cache/CacheData/abc"]
+should_not_match = [
+    "~/Library/Caches/com.tinyspeck.slackmacgapx/Cache/CacheData/abc",
+    "~/Documents/Slack/Cache/CacheData/abc",
+]

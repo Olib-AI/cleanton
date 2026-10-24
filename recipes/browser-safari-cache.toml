@@ -1,0 +1,28 @@
+[recipe]
+id = "browser-safari-cache"
+name = "Safari Web Cache"
+description = "Safari web content cache; re-fetched from the origin on demand"
+category = "browsers"
+icon = "fa-safari"
+safety_level = "cautious"
+enabled = true
+priority = 50
+
+# Safari's WebKit cache lives under `~/Library/Caches/com.apple.Safari`. It is
+# regenerable, but Safari can be open and re-populating it, so this is
+# `cautious` with a short age gate. The matcher's safety floors still refuse
+# credentials and protected paths.
+[match]
+path_glob = "~/Library/Caches/com.apple.Safari/**"
+min_age_days = 7
+
+[action]
+type = "trash"
+prompt = "Move {size} of Safari cache to Trash? Safari re-fetches it on demand."
+
+[test]
+should_match = ["~/Library/Caches/com.apple.Safari/WebKit/Cache/abc"]
+should_not_match = [
+    "~/Library/Caches/com.apple.SafariX/WebKit/Cache/abc",
+    "~/Library/Caches/Safari/WebKit/Cache/abc",
+]

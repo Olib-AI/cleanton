@@ -160,14 +160,28 @@ pub(crate) async fn inventory_casks() -> Inventory {
     Inventory::ready(ManagerKind::HomebrewCask, packages, None)
 }
 
-/// `brew uninstall <names...>` (dependency-aware; never `--ignore-dependencies`).
-pub(crate) async fn uninstall(names: &[String]) -> ActionOutcome {
+/// `brew uninstall [--cask] <names...>` (dependency-aware; never `--ignore-dependencies`).
+///
+/// Casks MUST be uninstalled with `--cask`. Without it Homebrew treats the
+/// token as a formula name and refuses to remove the `.app` bundle, which is
+/// the "remove an app and it is still there" bug. The `.app` bundle is what
+/// the user actually sees, so the flag is the whole point of this path.
+pub(crate) async fn uninstall(cask: bool, names: &[String]) -> ActionOutcome {
     if names.is_empty() {
         return ActionOutcome::failed("no packages specified");
     }
+    outcome(run("brew", uninstall_args(cask, names), ACTION_TIMEOUT).await, 0)
+}
+
+/// Pure argument builder for [`uninstall`], split out so the `--cask` flag is
+/// unit-tested without ever shelling out to `brew`.
+fn uninstall_args<'a>(cask: bool, names: &'a [String]) -> Vec<&'a str> {
     let mut args: Vec<&str> = vec!["uninstall"];
+    if cask {
+        args.push("--cask");
+    }
     args.extend(names.iter().map(String::as_str));
-    outcome(run("brew", args, ACTION_TIMEOUT).await, 0)
+    args
 }
 
 /// `brew upgrade [names...]` (empty `names` upgrades everything).
@@ -274,4 +288,26 @@ async fn du_sizes(root: &Path) -> HashMap<String, u64> {
         }
     }
     map
+}
+
+#[cfg(test)]
+mod tests {
+    use super::uninstall_args;
+
+    #[test]
+    fn cask_uninstall_includes_the_cask_flag() {
+        // Regression: removing a cask (an .app) must pass --cask, otherwise
+        // Homebrew treats the token as a formula and leaves the bundle in place.
+        let names = vec!["firefox".to_owned(), "slack".to_owned()];
+        assert_eq!(
+            uninstall_args(true, &names),
+            vec!["uninstall", "--cask", "firefox", "slack"]
+        );
+    }
+
+    #[test]
+    fn formula_uninstall_omits_the_cask_flag() {
+        let names = vec!["git".to_owned()];
+        assert_eq!(uninstall_args(false, &names), vec!["uninstall", "git"]);
+    }
 }

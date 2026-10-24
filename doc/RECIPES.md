@@ -668,6 +668,26 @@ not shrink until the runtime compacts it. Full details and per-runtime paths: [P
 
 ---
 
+### Recently added (maintenance pass)
+
+A set of caches added after the original registry, each scoped to a tool-owned
+subtree so a generic dotfolder (`~/.sbt/global.sbt`, `~/.conan/profiles`, …)
+is never matched.
+
+| Recipe | Safety | Match | Age/Size | Notes |
+|---|---|---|---|---|
+| `c-cpp-ccache` | `safe` | `~/Library/Caches/ccache/**` or `~/.cache/ccache/**` | min size 50 MB, min age 30d | ccache object-file cache; rebuilt on the next compile. |
+| `c-cpp-conan-cache` | `cautious` | `~/.conan/data/**` (Conan 1) or `~/.conan2/p/**` (Conan 2) | min size 50 MB, min age 30d | Downloaded packages; re-download on demand. Scopes away profiles/settings. |
+| `go-module-cache` | `cautious` | `~/go/pkg/mod/**` excluding `~/go/pkg/mod/cache/**` | min age 30d | Extracted modules; the download cache is `go-mod-cache`. |
+| `rust-cargo-registry-index` | `safe` | `~/.cargo/registry/index/**` | min age 30d | Sparse-index metadata; Cargo re-fetches on demand. |
+| `jvm-sbt-cache` | `cautious` | `~/.sbt/boot/**` | min age 30d | sbt launcher boot jars; re-resolved on demand. Never `~/.sbt/global.sbt`/`plugins`. |
+| `ai-opencode-cache` | `cautious` | `~/.cache/opencode/**` | min age 14d | OpenCode model/log cache; regenerable. |
+| `apps-slack-cache` | `cautious` | `~/Library/Caches/com.tinyspeck.slackmacgap/**` | min age 14d | Slack desktop HTTP/media cache; re-fetched on demand. |
+| `browser-safari-cache` | `cautious` | `~/Library/Caches/com.apple.Safari/**` | min age 7d | Safari WebKit content cache; re-fetched from the origin. |
+
+> Docker recipes remain API-driven (`bollard`) and are intentionally not
+> filesystem globs; the `docker-*` TOML entries are disabled placeholders.
+
 ## Recipe Priority Order
 
 When multiple recipes match the same path, priority determines which recipe "owns" it:
