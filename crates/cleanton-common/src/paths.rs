@@ -241,7 +241,23 @@ fn case_variant_resolves(path: &Path) -> bool {
         return false;
     };
 
-    variant != path && fs::metadata(&variant).is_ok()
+    if variant != path && fs::metadata(&variant).is_ok() {
+        return true;
+    }
+
+    for &(alias, canonical) in FIRMLINK_ALIASES {
+        if let Ok(unrewritten) = path.strip_prefix(canonical) {
+            let unrewritten_path = Path::new(alias).join(unrewritten);
+            if let Some(variant) = case_variant_path(&unrewritten_path)
+                && variant != unrewritten_path
+                && fs::metadata(&variant).is_ok()
+            {
+                return true;
+            }
+        }
+    }
+
+    false
 }
 
 fn nearest_existing_case_variant_resolves(path: &Path) -> bool {
@@ -254,6 +270,25 @@ fn case_behavior_unknown(path: &Path) -> bool {
 
 fn nearest_existing_path(path: &Path) -> Option<PathBuf> {
     let expanded = expand_tilde(path);
+    if let Some(existing) = expanded
+        .ancestors()
+        .find(|candidate| candidate.components().count() > 1 && fs::metadata(candidate).is_ok())
+    {
+        return Some(existing.to_path_buf());
+    }
+
+    for &(alias, canonical) in FIRMLINK_ALIASES {
+        if let Ok(unrewritten) = expanded.strip_prefix(canonical) {
+            let candidate = Path::new(alias).join(unrewritten);
+            if let Some(existing) = candidate
+                .ancestors()
+                .find(|c| c.components().count() > 1 && fs::metadata(c).is_ok())
+            {
+                return Some(existing.to_path_buf());
+            }
+        }
+    }
+
     expanded
         .ancestors()
         .find(|candidate| fs::metadata(candidate).is_ok())

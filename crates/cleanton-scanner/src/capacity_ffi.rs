@@ -113,8 +113,13 @@ pub fn volume_capacity(path: &Path) -> Result<VolumeCapacity> {
         return Err(CleantonError::io(path, std::io::Error::last_os_error()));
     }
 
+    #[cfg(target_os = "macos")]
+    let bsize = u64::from(stat_buf.f_bsize);
+    #[cfg(not(target_os = "macos"))]
+    let bsize = u64::try_from(stat_buf.f_bsize).unwrap_or(0);
+
     Ok(VolumeCapacity::from_statfs_fields(
-        u64::from(stat_buf.f_bsize),
+        bsize,
         stat_buf.f_blocks,
         stat_buf.f_bfree,
         stat_buf.f_bavail,
@@ -131,10 +136,10 @@ pub fn volume_capacity(path: &Path) -> Result<VolumeCapacity> {
 
 /// Returns `true` if the filesystem containing `path` is case-sensitive.
 ///
-/// Uses `pathconf(_PC_CASE_SENSITIVE)`. Default APFS volumes are case-insensitive and
-/// return `false`. On any error (or non-Unix target) this conservatively returns `false`
+/// Uses `pathconf(_PC_CASE_SENSITIVE)` on macOS. Default APFS volumes are case-insensitive and
+/// return `false`. On any error (or non-Apple target) this conservatively returns `false`
 /// (case-insensitive), which drives the safer case-insensitive protected-path comparison.
-#[cfg(unix)]
+#[cfg(target_os = "macos")]
 #[must_use]
 pub fn is_case_sensitive(path: &Path) -> bool {
     use std::os::unix::ffi::OsStrExt;
@@ -151,7 +156,7 @@ pub fn is_case_sensitive(path: &Path) -> bool {
     value > 0
 }
 
-#[cfg(not(unix))]
+#[cfg(not(target_os = "macos"))]
 #[must_use]
 pub fn is_case_sensitive(_path: &Path) -> bool {
     false
