@@ -14,7 +14,6 @@ min_age_days = 30
 [action]
 type = "trash"
 prompt = "Move {size} of Cypress binaries to Trash?"
-group = true
 
 [test]
 should_match = ["~/Library/Caches/Cypress/13.10.0/Cypress.app-payload"]

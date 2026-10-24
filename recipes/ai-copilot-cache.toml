@@ -17,7 +17,6 @@ min_age_days = 7
 [action]
 type = "trash"
 prompt = "Move {size} of GitHub Copilot cache to Trash?"
-group = true
 
 [test]
 should_match = ["~/Library/Caches/github-copilot/completions/foo"]

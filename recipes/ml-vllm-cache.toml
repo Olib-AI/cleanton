@@ -17,7 +17,6 @@ min_age_days = 14
 [action]
 type = "trash"
 prompt = "Move {size} of vLLM cache to Trash?"
-group = true
 
 [test]
 should_match = ["~/.cache/vllm/torch_compile_cache/hash/artifact.bin"]

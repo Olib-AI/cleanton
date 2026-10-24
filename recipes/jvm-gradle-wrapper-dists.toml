@@ -16,7 +16,6 @@ min_age_days = 60
 [action]
 type = "trash"
 prompt = "Move {size} of Gradle wrapper distributions to Trash?"
-group = true
 
 [test]
 should_match = ["~/.gradle/wrapper/dists/gradle-8.10-bin/abc123/gradle-8.10-bin.zip"]

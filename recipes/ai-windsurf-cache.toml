@@ -16,7 +16,6 @@ min_age_days = 7
 [action]
 type = "trash"
 prompt = "Move {size} of Windsurf cache to Trash?"
-group = true
 
 [test]
 should_match = ["~/Library/Application Support/Windsurf/CachedData/abc/module.js"]

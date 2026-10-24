@@ -15,7 +15,6 @@ min_size_mb = 10
 [action]
 type = "trash"
 prompt = "Move {size} of Swift build directories to Trash?"
-group = true
 
 [test]
 should_match = ["projects/app/.build"]

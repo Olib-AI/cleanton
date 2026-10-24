@@ -14,7 +14,6 @@ min_age_days = 30
 [action]
 type = "trash"
 prompt = "Move {size} of Go module cache to Trash?"
-group = true
 
 [test]
 should_match = ["~/go/pkg/mod/cache/download/github.com/foo/@v/v1.0.0.zip"]

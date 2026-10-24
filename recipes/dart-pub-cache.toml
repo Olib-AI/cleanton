@@ -18,7 +18,6 @@ min_size_mb = 50
 [action]
 type = "trash"
 prompt = "Move {size} of pub cache to Trash?"
-group = true
 
 [test]
 should_match = ["~/.pub-cache/hosted/pub.dev/http-1.2.0/lib/http.dart-payload"]

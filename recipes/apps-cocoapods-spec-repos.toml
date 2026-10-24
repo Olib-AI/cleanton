@@ -17,7 +17,6 @@ min_size_mb = 50
 [action]
 type = "trash"
 prompt = "Move {size} of CocoaPods spec repos to Trash?"
-group = true
 
 [test]
 should_match = ["~/.cocoapods/repos/trunk/Specs/a/2/e/AFNetworking/4.0.1/AFNetworking.podspec.json"]

@@ -16,7 +16,6 @@ min_age_days = 14
 [action]
 type = "trash"
 prompt = "Move {size} of Spotify cache to Trash?"
-group = true
 
 [test]
 should_match = ["~/Library/Caches/com.spotify.client/Data/ab/abcdef.file"]

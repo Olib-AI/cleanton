@@ -19,7 +19,6 @@ min_age_days = 14
 [action]
 type = "trash"
 prompt = "Move {size} of Adobe media caches to Trash?"
-group = true
 
 [test]
 should_match = ["~/Library/Application Support/Adobe/Common/Media Cache Files/clip-audio.cfa", "~/Library/Application Support/Adobe/Common/Media Cache/database.mcdb"]

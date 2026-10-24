@@ -16,7 +16,6 @@ min_age_days = 7
 [action]
 type = "trash"
 prompt = "Move {size} of VS Code caches to Trash?"
-group = true
 
 [test]
 should_match = ["~/Library/Application Support/Code/CachedData/abc/extension.js", "~/Library/Application Support/Code/Code Cache/js/index_0"]

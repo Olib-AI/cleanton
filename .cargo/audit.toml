@@ -1,0 +1,44 @@
+# cargo-audit configuration — https://github.com/rustsec/rustsec/tree/main/cargo-audit
+#
+# Picked up automatically by `cargo audit` when run from the repository root
+# (cargo-audit reads `./.cargo/audit.toml`, falling back to `~/.cargo/audit.toml`).
+#
+# Policy
+# ------
+# * Vulnerabilities fail the build.
+# * Unmaintained/unsound advisories are printed but do not fail (they are transitive,
+#   upstream-owned, and tracked by Dependabot).
+# * An entry may only be ignored when the affected code path is not reachable from
+#   this workspace. Every ignore below records why, who owns it, and when to revisit.
+#   Review this list at the start of every release (see SECURITY.md).
+
+[advisories]
+ignore = [
+    # --- zip: extraction-only advisories -------------------------------------
+    # All three affect `ZipArchive::extract()` / `ZipStreamReader::extract()`:
+    # SUID/SGID bit preservation and symlink-target escapes during *extraction*.
+    # cleanton never extracts archives to the filesystem; it only scans files
+    # in memory with bounded stream reading.
+    # Owner: vendored cleanton-antivirus.
+    "RUSTSEC-2026-0367",
+    "RUSTSEC-2026-0368",
+    "RUSTSEC-2026-0369",
+]
+
+# Show every informational advisory category so `cargo audit` output is complete.
+informational_warnings = ["unmaintained", "unsound", "notice"]
+
+[output]
+format = "terminal"
+quiet = false
+# Fail the run on informational advisories that indicate unsoundness. Unmaintained
+# crates are printed as warnings only: they are transitive and Dependabot-owned.
+deny = ["unsound"]
+
+[database]
+# Advisory database used by CI and by `scripts/audit.sh`. `stale = false` turns an
+# advisory DB that has not been refreshed in 90 days into a build failure, so a green
+# audit never means "we checked an old database".
+url = "https://github.com/RustSec/advisory-db"
+fetch = true
+stale = false

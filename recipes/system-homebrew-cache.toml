@@ -14,7 +14,6 @@ min_age_days = 30
 [action]
 type = "trash"
 prompt = "Move {size} of Homebrew cache to Trash?"
-group = true
 
 [test]
 should_match = ["~/Library/Caches/Homebrew/downloads/git-2.40.tar.gz"]

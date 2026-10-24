@@ -18,7 +18,6 @@ path_glob = "**/node_modules/.vite"
 [action]
 type = "trash"
 prompt = "Move {size} of framework caches to Trash?"
-group = true
 
 [test]
 should_match = ["projects/app/node_modules/.vite"]

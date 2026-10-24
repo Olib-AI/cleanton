@@ -17,7 +17,6 @@ min_age_days = 7
 [action]
 type = "trash"
 prompt = "Move {size} of app web caches to Trash?"
-group = true
 
 [test]
 should_match = ["~/Library/Application Support/Slack/Cache/Cache_Data/f_000001"]

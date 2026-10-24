@@ -1,0 +1,65 @@
+# =============================================================================
+# Cleanton — Dependency & supply-chain security audit
+# =============================================================================
+# Runs `cargo audit` against the live RustSec advisory database:
+#   * on every pull request and push that touches dependencies,
+#   * on a daily schedule,
+#   * on demand.
+#
+# Policy and triage live in `.cargo/audit.toml`.
+
+name: Security audit
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "crates/**/Cargo.toml"
+      - ".cargo/audit.toml"
+      - ".github/workflows/security.yml"
+      - "rust-toolchain.toml"
+  pull_request:
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "crates/**/Cargo.toml"
+      - ".cargo/audit.toml"
+      - ".github/workflows/security.yml"
+      - "rust-toolchain.toml"
+  schedule:
+    # Daily at 06:17 UTC
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+
+jobs:
+  cargo-audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (1.99.1)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.99.1"
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@cargo-audit
+
+      - name: cargo audit (policy from .cargo/audit.toml)
+        run: cargo audit --deny unsound
+
+      - name: Assert toolchain pin
+        run: |
+          pinned="$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)"
+          actual="$(rustc --version | cut -d' ' -f2)"
+          echo "pinned=$pinned actual=$actual"
+          [ "$pinned" = "$actual" ]

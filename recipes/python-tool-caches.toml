@@ -15,7 +15,6 @@ parent_must_contain_any = ["pyproject.toml", "setup.py", "setup.cfg", "mypy.ini"
 [action]
 type = "trash"
 prompt = "Move {size} of Python tool caches to Trash?"
-group = true
 
 [test]
 should_match = ["projects/app/.mypy_cache"]

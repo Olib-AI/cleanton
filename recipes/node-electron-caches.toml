@@ -14,7 +14,6 @@ min_age_days = 30
 [action]
 type = "trash"
 prompt = "Move {size} of Electron build caches to Trash?"
-group = true
 
 [test]
 should_match = ["~/Library/Caches/electron/electron-v31.0.0-darwin-arm64.zip", "~/Library/Caches/electron-builder/nsis/nsis-3.0.4.1.7z"]

@@ -26,11 +26,76 @@ pub(crate) fn execute_plan(
     execute_plan_with_cancel(config, plan, event_tx, None)
 }
 
+/// How many Trash targets go into one [`trash::delete_all`] call.
+///
+/// On macOS the `trash` crate's default `DeleteMethod::Finder` moves items by
+/// spawning `osascript` and asking Finder.app to do it: measured at ~100 ms per
+/// call on an M-series machine, essentially all of it process spawn plus Finder
+/// IPC, and almost independent of how many paths the script names. Trashing one
+/// path per call therefore made that constant the entire cost of a cleanup -- a
+/// 20k-action plan spent over half an hour inside `osascript` alone, which is
+/// what "it goes through each file" actually was. `delete_all` names every path
+/// in ONE `AppleScript`, so a whole batch costs about what a single item used to.
+///
+/// This deliberately stays on the Finder method rather than the faster
+/// `NsFileManager` one: Finder records each item's original location, so "Put
+/// Back" keeps working, and restore-from-Trash is the safety net that justifies
+/// Trash-by-default.
+///
+/// The batch is bounded rather than "the whole plan" for two reasons: the script
+/// is passed as a single `osascript -e` argument, so an unbounded batch would
+/// grow the command line toward `ARG_MAX`; and a failed batch costs a per-item
+/// retry pass, which should stay small. It also bounds cancellation latency (see
+/// [`execute_plan_with_cancel`]).
+const TRASH_BATCH: usize = 200;
+
+/// One action's position in a batch: either already resolved, or validated and
+/// waiting for the batched Trash move. Both carry the originating action, which
+/// the progress events need and [`ExecutionActionResult`] does not retain.
+enum Slot<'a> {
+    /// Already resolved (skipped, failed, or permanently deleted).
+    Done(&'a CleanupAction, ExecutionActionResult),
+    /// Validated and awaiting [`trash_batch`].
+    PendingTrash(&'a CleanupAction),
+}
+
+/// Move `targets` to the Trash in one Finder call, returning a per-target
+/// outcome in the same order.
+///
+/// The batch is all-or-nothing: one bad path fails the whole `AppleScript`, and
+/// the error does not say which path was at fault. On failure we retry the batch
+/// item by item to attribute the error and let the good paths through. A path
+/// that has already vanished by then was moved by the partially-applied batch, so
+/// it counts as trashed rather than as a failure.
+fn trash_batch(targets: &[&Path]) -> Vec<std::result::Result<(), String>> {
+    if targets.is_empty() {
+        return Vec::new();
+    }
+    if trash::delete_all(targets).is_ok() {
+        return targets.iter().map(|_| Ok(())).collect();
+    }
+    targets
+        .iter()
+        .map(|target| match trash::delete(target) {
+            Ok(()) => Ok(()),
+            Err(err) => {
+                if fs::symlink_metadata(target).is_err() {
+                    // Gone: the failed batch had already moved this one.
+                    Ok(())
+                } else {
+                    Err(format!("trash move failed: {err}"))
+                }
+            }
+        })
+        .collect()
+}
+
 /// Like [`execute_plan`], but stops promptly once `cancel` is set: the current
-/// action finishes (an in-flight trash move is never left half-done), every
+/// batch finishes (an in-flight trash move is never left half-done), every
 /// remaining action is recorded as `Skipped`, and the partial result — with its
 /// execution log — is returned. Cancellation must actually stop destructive
-/// work, not merely hide its outcome.
+/// work, not merely hide its outcome. Granularity is one [`TRASH_BATCH`], which
+/// is a single Finder call.
 pub(crate) fn execute_plan_with_cancel(
     config: &CleantonConfig,
     plan: &CleanupPlan,
@@ -50,56 +115,223 @@ pub(crate) fn execute_plan_with_cancel(
         actions: Vec::new(),
     };
 
-    for action in &plan.actions {
-        if cancel.is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Relaxed)) {
-            result.skipped_actions += 1;
-            result.actions.push(action_result(
-                action,
-                ExecutionStatus::Skipped,
-                0,
-                0,
-                "skipped: execution cancelled by user",
-            ));
-            continue;
-        }
-        result.attempted_actions += 1;
-        let _ = event_tx.try_send(EngineEvent::ActionStarted {
-            action: action.clone(),
-        });
+    // Chunked rather than one pass over the whole plan: the guards below are
+    // cheap, so a whole-plan pass would mark every action attempted before the
+    // first Trash move happened, and a late Cancel would arrive too late to stop
+    // anything. Re-checking per batch keeps Cancel meaningful.
+    for chunk in plan.actions.chunks(TRASH_BATCH) {
+        let cancelled = cancel.is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Relaxed));
 
-        let action_result = execute_action(action, &protected);
-        match action_result.status {
-            ExecutionStatus::MovedToTrash => {
-                result.moved_to_trash_bytes = result
-                    .moved_to_trash_bytes
-                    .saturating_add(action_result.moved_to_trash_bytes);
-                let _ = event_tx.try_send(EngineEvent::ActionCompleted {
-                    action: action.clone(),
-                    freed: 0,
-                });
-            }
-            ExecutionStatus::Deleted => {
-                result.freed_bytes = result.freed_bytes.saturating_add(action_result.freed_bytes);
-                let _ = event_tx.try_send(EngineEvent::ActionCompleted {
-                    action: action.clone(),
-                    freed: action_result.freed_bytes,
-                });
-            }
-            ExecutionStatus::Skipped => {
+        let mut slots: Vec<Slot> = Vec::with_capacity(chunk.len());
+        for action in chunk {
+            if let Some(refusal) = refuse_action(action, &protected, cancelled) {
                 result.skipped_actions += 1;
+                slots.push(Slot::Done(action, refusal));
+                continue;
             }
-            ExecutionStatus::Failed => {
-                let _ = event_tx.try_send(EngineEvent::ActionFailed {
-                    action: action.clone(),
-                    error: action_result.message.clone(),
-                });
+            result.attempted_actions += 1;
+            let _ = event_tx.try_send(EngineEvent::ActionStarted {
+                action: action.clone(),
+            });
+            if action.action_type == ActionType::Delete {
+                // Permanent deletion is a direct syscall with no process spawn,
+                // so it gains nothing from batching.
+                slots.push(Slot::Done(action, execute_delete(action)));
+            } else {
+                slots.push(Slot::PendingTrash(action));
             }
         }
-        result.actions.push(action_result);
+
+        let targets: Vec<&Path> = slots
+            .iter()
+            .filter_map(|slot| match slot {
+                Slot::PendingTrash(action) => Some(action.target.as_path()),
+                Slot::Done(_, _) => None,
+            })
+            .collect();
+        let mut outcomes = trash_batch(&targets).into_iter();
+
+        for slot in slots {
+            let (action, resolved) = match slot {
+                Slot::Done(action, resolved) => (action, resolved),
+                Slot::PendingTrash(action) => {
+                    let resolved = match outcomes.next() {
+                        Some(Ok(())) => action_result(
+                            action,
+                            ExecutionStatus::MovedToTrash,
+                            action.reclaimable_bytes,
+                            0,
+                            "moved to Trash; bytes are not freed until Trash is emptied",
+                        ),
+                        Some(Err(message)) => {
+                            action_result(action, ExecutionStatus::Failed, 0, 0, message)
+                        }
+                        None => action_result(
+                            action,
+                            ExecutionStatus::Failed,
+                            0,
+                            0,
+                            "trash move failed: no outcome recorded",
+                        ),
+                    };
+                    (action, resolved)
+                }
+            };
+            record(&mut result, event_tx, action, resolved);
+        }
     }
 
     result.log_path = write_execution_log(config, started, &result)?;
     Ok(result)
+}
+
+/// Every reason an action is refused before it can join a batch, in the order the
+/// per-action executor applied them: cancellation, unsupported type,
+/// protected-path refusal, then metadata revalidation against the scan
+/// fingerprint. `Some(result)` means refused with that `Skipped` outcome; `None`
+/// means cleared to execute.
+///
+/// Kept as one function so the guards stay in one place and cannot drift apart
+/// from each other as the batching around them changes.
+fn refuse_action(
+    action: &CleanupAction,
+    protected: &ProtectedPaths,
+    cancelled: bool,
+) -> Option<ExecutionActionResult> {
+    if cancelled {
+        return Some(action_result(
+            action,
+            ExecutionStatus::Skipped,
+            0,
+            0,
+            "skipped: execution cancelled by user",
+        ));
+    }
+    if action.action_type != ActionType::Trash && action.action_type != ActionType::Delete {
+        return Some(action_result(
+            action,
+            ExecutionStatus::Skipped,
+            0,
+            0,
+            "unsupported action type",
+        ));
+    }
+    if protected.is_protected(&action.target) {
+        return Some(action_result(
+            action,
+            ExecutionStatus::Skipped,
+            0,
+            0,
+            "target is protected",
+        ));
+    }
+    match validate_metadata(action) {
+        Ok(()) => None,
+        Err(message) => Some(action_result(
+            action,
+            ExecutionStatus::Skipped,
+            0,
+            0,
+            message,
+        )),
+    }
+}
+
+/// Fold one resolved action into the running totals and emit its event.
+fn record(
+    result: &mut ExecutionResult,
+    event_tx: &mpsc::Sender<EngineEvent>,
+    action: &CleanupAction,
+    resolved: ExecutionActionResult,
+) {
+    match resolved.status {
+        ExecutionStatus::MovedToTrash => {
+            result.moved_to_trash_bytes = result
+                .moved_to_trash_bytes
+                .saturating_add(resolved.moved_to_trash_bytes);
+            let _ = event_tx.try_send(EngineEvent::ActionCompleted {
+                action: action.clone(),
+                freed: 0,
+            });
+        }
+        ExecutionStatus::Deleted => {
+            result.freed_bytes = result.freed_bytes.saturating_add(resolved.freed_bytes);
+            let _ = event_tx.try_send(EngineEvent::ActionCompleted {
+                action: action.clone(),
+                freed: resolved.freed_bytes,
+            });
+        }
+        // Skipped is tallied where the guard fires, since only that site knows
+        // whether the action was ever attempted.
+        ExecutionStatus::Skipped => {}
+        ExecutionStatus::Failed => {
+            let _ = event_tx.try_send(EngineEvent::ActionFailed {
+                action: action.clone(),
+                error: resolved.message.clone(),
+            });
+        }
+    }
+    result.actions.push(resolved);
+}
+
+/// Single-action composition of the executor's guards and execution, mirroring
+/// exactly what [`execute_plan_with_cancel`] does for one action (a batch of
+/// one). Test-only: production always goes through the batched path.
+///
+/// This is built from the same [`refuse_action`], [`execute_delete`] and
+/// [`trash_batch`] the real loop uses, so the single-action tests still exercise
+/// production logic rather than a parallel copy of it.
+#[cfg(test)]
+fn execute_action(action: &CleanupAction, protected: &ProtectedPaths) -> ExecutionActionResult {
+    if let Some(refusal) = refuse_action(action, protected, false) {
+        return refusal;
+    }
+    if action.action_type == ActionType::Delete {
+        return execute_delete(action);
+    }
+    match trash_batch(&[action.target.as_path()]).into_iter().next() {
+        Some(Ok(())) => action_result(
+            action,
+            ExecutionStatus::MovedToTrash,
+            action.reclaimable_bytes,
+            0,
+            "moved to Trash; bytes are not freed until Trash is emptied",
+        ),
+        Some(Err(message)) => action_result(action, ExecutionStatus::Failed, 0, 0, message),
+        None => action_result(
+            action,
+            ExecutionStatus::Failed,
+            0,
+            0,
+            "trash move failed: no outcome recorded",
+        ),
+    }
+}
+
+/// Permanently remove one already-validated `Delete` target.
+fn execute_delete(action: &CleanupAction) -> ExecutionActionResult {
+    let target_metadata = fs::symlink_metadata(&action.target);
+    let is_dir = target_metadata.as_ref().is_ok_and(fs::Metadata::is_dir);
+    let is_symlink = target_metadata
+        .as_ref()
+        .is_ok_and(|metadata| metadata.file_type().is_symlink());
+
+    match remove_execution_target(&action.target, is_dir, is_symlink) {
+        Ok(()) => action_result(
+            action,
+            ExecutionStatus::Deleted,
+            0,
+            action.reclaimable_bytes,
+            "permanently deleted",
+        ),
+        Err(err) => action_result(
+            action,
+            ExecutionStatus::Failed,
+            0,
+            0,
+            format!("permanent deletion failed: {err}"),
+        ),
+    }
 }
 
 /// Move a single user-reviewed path (a duplicate copy, large item, or
@@ -498,80 +730,6 @@ fn validate_plan(config: &CleantonConfig, plan: &CleanupPlan) -> Result<()> {
     }
 
     Ok(())
-}
-
-fn execute_action(action: &CleanupAction, protected: &ProtectedPaths) -> ExecutionActionResult {
-    if action.action_type != ActionType::Trash && action.action_type != ActionType::Delete {
-        return action_result(
-            action,
-            ExecutionStatus::Skipped,
-            0,
-            0,
-            "unsupported action type",
-        );
-    }
-
-    if protected.is_protected(&action.target) {
-        return action_result(
-            action,
-            ExecutionStatus::Skipped,
-            0,
-            0,
-            "target is protected",
-        );
-    }
-
-    match validate_metadata(action) {
-        Ok(()) => {}
-        Err(message) => {
-            return action_result(action, ExecutionStatus::Skipped, 0, 0, message);
-        }
-    }
-
-    if action.action_type == ActionType::Trash {
-        match trash::delete(&action.target) {
-            Ok(()) => action_result(
-                action,
-                ExecutionStatus::MovedToTrash,
-                action.reclaimable_bytes,
-                0,
-                "moved to Trash; bytes are not freed until Trash is emptied",
-            ),
-            Err(err) => action_result(
-                action,
-                ExecutionStatus::Failed,
-                0,
-                0,
-                format!("trash move failed: {err}"),
-            ),
-        }
-    } else {
-        // ActionType::Delete
-        let target_metadata = fs::symlink_metadata(&action.target);
-        let is_dir = target_metadata.as_ref().is_ok_and(fs::Metadata::is_dir);
-        let is_symlink = target_metadata
-            .as_ref()
-            .is_ok_and(|m| m.file_type().is_symlink());
-
-        let res = remove_execution_target(&action.target, is_dir, is_symlink);
-
-        match res {
-            Ok(()) => action_result(
-                action,
-                ExecutionStatus::Deleted,
-                0,
-                action.reclaimable_bytes,
-                "permanently deleted",
-            ),
-            Err(err) => action_result(
-                action,
-                ExecutionStatus::Failed,
-                0,
-                0,
-                format!("permanent deletion failed: {err}"),
-            ),
-        }
-    }
 }
 
 #[allow(clippy::disallowed_methods)]

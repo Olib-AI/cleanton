@@ -15,7 +15,6 @@ min_size_mb = 50
 [action]
 type = "trash"
 prompt = "Move {size} of Playwright browsers to Trash?"
-group = true
 
 [test]
 should_match = ["~/Library/Caches/ms-playwright/chromium-1155/chrome-mac/Chromium.app-payload"]

@@ -20,7 +20,6 @@ names = [".cache"]
 [action]
 type = "trash"
 prompt = "Move {size} of Node dependencies to Trash?"
-group = true
 
 [test]
 should_match = ["projects/web/node_modules"]

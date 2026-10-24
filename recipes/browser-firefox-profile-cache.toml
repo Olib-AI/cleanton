@@ -17,7 +17,6 @@ min_age_days = 14
 [action]
 type = "trash"
 prompt = "Move {size} of Firefox profile cache to Trash?"
-group = true
 
 [test]
 should_match = ["~/Library/Application Support/Firefox/Profiles/abcd1234.default-release/cache2/entries/0123456789ABCDEF", "~/Library/Application Support/Firefox/Profiles/abcd1234.default-release/cache2/doomed/12345"]

@@ -14,7 +14,6 @@ min_age_days = 30
 [action]
 type = "trash"
 prompt = "Move {size} of Coursier cache to Trash?"
-group = true
 
 [test]
 should_match = ["~/Library/Caches/Coursier/v1/https/repo1.maven.org/maven2/org/scala-lang/scala-library.jar"]

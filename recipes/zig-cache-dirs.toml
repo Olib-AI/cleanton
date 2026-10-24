@@ -17,7 +17,6 @@ parent_must_contain_any = ["build.zig", "build.zig.zon"]
 [action]
 type = "trash"
 prompt = "Move {size} of Zig build caches to Trash?"
-group = true
 
 [test]
 should_match = ["projects/zig-app/.zig-cache"]

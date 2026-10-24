@@ -52,6 +52,45 @@ fn glob_matches(pattern: &str, text: &str) -> bool {
     with_compiled_glob(pattern, |compiled| compiled.matches(text)).unwrap_or(false)
 }
 
+/// True when `spec`'s `pattern` selects `entry`.
+///
+/// A trailing `/**` selects everything *beneath* a directory but not the
+/// directory itself: `**/__pycache__/**` matches `.../__pycache__/m.pyc` but NOT
+/// `.../__pycache__`. Recipes written that way mean the directory as a unit --
+/// their prompts say "Move {size} of X to Trash" -- so for a DIRECTORY entry we
+/// also test the pattern with the trailing `/**` stripped.
+///
+/// That distinction decides the whole shape of the plan. Without it the
+/// directory is never a candidate, so the deepest thing the recipe can select is
+/// its children; when those children are files, the plan gets one action per
+/// file and the executor trashes them one `trash::delete` at a time. With it the
+/// directory itself becomes the candidate, the planner subsumes its contents,
+/// and the folder moves in a single Trash operation.
+///
+/// Two deliberate limits:
+///
+/// - Only DIRECTORY entries get the stripped form; applying it to files could
+///   newly select a plain file that happens to share the directory's name.
+/// - Only specs WITHOUT `min_age_days`. An age gate means "reclaim the stale
+///   parts of this cache", and a directory is aged by the newest mtime in its
+///   whole subtree. Hoisting such a recipe to the cache root would gate the
+///   entire cache on its single freshest file, so it would essentially never
+///   fire -- `~/Library/Caches/ms-playwright/**` (30 days) stops reclaiming the
+///   moment one browser is used. Age-gated recipes therefore keep their existing
+///   per-child granularity, where the gate can still pick off the stale
+///   subdirectories one whole folder at a time.
+fn glob_selects_entry(spec: &crate::MatchSpec, pattern: &str, entry: &FileEntry) -> bool {
+    if glob_matches_path(pattern, &entry.path) {
+        return true;
+    }
+    if entry.kind != FileKind::Directory || spec.min_age_days.is_some() {
+        return false;
+    }
+    pattern
+        .strip_suffix("/**")
+        .is_some_and(|base| glob_matches_path(base, &entry.path))
+}
+
 use crate::RecipeDocument;
 
 #[must_use]
@@ -113,6 +152,20 @@ fn spec_matches_entry(
     entry: &FileEntry,
     parent_contains: &impl Fn(&Path, &str) -> bool,
     newest_in_subtree: &impl Fn(&Path) -> Option<SystemTime>,
+) -> bool {
+    spec_selects_entry(matcher, entry, parent_contains)
+        && spec_gates_pass(matcher, entry, newest_in_subtree)
+}
+
+/// The spec's *selectors*: excludes, name/glob/extension patterns, and context
+/// markers. These decide WHAT a spec is about, independent of whether the
+/// candidate is currently eligible. Split out from [`spec_gates_pass`] so
+/// [`directory_gate`] can tell "this recipe does not concern this directory"
+/// apart from "this recipe concerns it, but it is not eligible right now".
+fn spec_selects_entry(
+    matcher: &crate::MatchSpec,
+    entry: &FileEntry,
+    parent_contains: &impl Fn(&Path, &str) -> bool,
 ) -> bool {
     if matcher.exclude.names.iter().any(|name| {
         entry
@@ -179,7 +232,7 @@ fn spec_matches_entry(
         } else {
             path_glob.clone()
         };
-        if !glob_matches_path(&expanded, &entry.path) {
+        if !glob_selects_entry(matcher, &expanded, entry) {
             return false;
         }
     }
@@ -188,6 +241,20 @@ fn spec_matches_entry(
         return false;
     }
 
+    true
+}
+
+/// The spec's *eligibility gates*: `min_size_mb` and `min_age_days`. A directory
+/// is aged by the newest mtime anywhere in its subtree, so a single recently
+/// touched file keeps the whole directory ineligible — deliberately strict,
+/// because the recipes that carry an age gate mean "this cache is no longer in
+/// use". See [`directory_gate`] for what that strictness implies for the
+/// directory's contents.
+fn spec_gates_pass(
+    matcher: &crate::MatchSpec,
+    entry: &FileEntry,
+    newest_in_subtree: &impl Fn(&Path) -> Option<SystemTime>,
+) -> bool {
     if let Some(min_size_mb) = matcher.min_size_mb
         && entry.allocated_bytes < min_size_mb.saturating_mul(1_048_576)
     {
@@ -206,6 +273,79 @@ fn spec_matches_entry(
     }
 
     true
+}
+
+/// True when any of the recipe's specs carries an eligibility gate. Recipes
+/// without one can never produce [`DirectoryGate::GateFailed`], so bulk callers
+/// skip them entirely when building the suppression set.
+#[must_use]
+pub fn recipe_has_gates(recipe: &RecipeDocument) -> bool {
+    std::iter::once(&recipe.matcher)
+        .chain(recipe.matcher.any_of.iter())
+        .any(|spec| spec.min_size_mb.is_some() || spec.min_age_days.is_some())
+}
+
+/// How a recipe relates to a *directory* it was evaluated against.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DirectoryGate {
+    /// A spec selected the directory and its gates passed: the directory itself
+    /// is a candidate, and the planner will subsume its contents into it.
+    Matched,
+    /// A spec selected the directory but an eligibility gate failed. The recipe
+    /// is *about* this directory as a unit, and the unit is not eligible — so
+    /// the recipe must not fall back to picking off the directory's contents
+    /// one file at a time. Callers suppress this recipe beneath such a root.
+    GateFailed,
+    /// No spec selected the directory; the recipe has nothing to say about it.
+    NoMatch,
+}
+
+/// Classify a directory entry against a recipe, distinguishing "not eligible"
+/// from "not relevant".
+///
+/// This exists because a `path_glob` like `~/Library/Caches/Foo/**` selects the
+/// cache directory *and* every file beneath it. When an age gate rejects the
+/// directory (one fresh file inside), the individually-old files beneath it
+/// still satisfy the same recipe on their own. With no surviving ancestor
+/// action there is nothing for the planner to prune them into, so the recipe
+/// silently degrades from "trash this unused cache" into "shred N files out of
+/// an actively used cache" — slow, and destructive to caches that need their
+/// contents to stay consistent with an index.
+#[must_use]
+pub fn directory_gate(
+    recipe: &RecipeDocument,
+    entry: &FileEntry,
+    newest_in_subtree: impl Fn(&Path) -> Option<SystemTime>,
+) -> DirectoryGate {
+    if entry.kind != FileKind::Directory {
+        return DirectoryGate::NoMatch;
+    }
+    // Mirror the safety floors: a directory a recipe could never act on must not
+    // suppress anything either.
+    if DEFAULT_PROTECTED.is_protected_fast(&entry.path) || is_sensitive_basename(&entry.path) {
+        return DirectoryGate::NoMatch;
+    }
+
+    let parent_contains = |parent: &Path, marker: &str| parent.join(marker).exists();
+    let mut gate_failed = false;
+    for spec in std::iter::once(&recipe.matcher).chain(recipe.matcher.any_of.iter()) {
+        if !spec_selects_entry(spec, entry, &parent_contains) {
+            continue;
+        }
+        if spec_gates_pass(spec, entry, &newest_in_subtree) {
+            // Any fully-satisfied alternative makes the directory itself a
+            // candidate, which is the outcome we want; it wins over a sibling
+            // alternative that merely gate-failed.
+            return DirectoryGate::Matched;
+        }
+        gate_failed = true;
+    }
+
+    if gate_failed {
+        DirectoryGate::GateFailed
+    } else {
+        DirectoryGate::NoMatch
+    }
 }
 
 /// The on-disk context proofs: `parent_must_contain` (all-of),
@@ -624,7 +764,6 @@ mod tests {
             action: ActionSpec {
                 action_type: ActionType::Trash,
                 prompt: "Trash?".to_owned(),
-                group: false,
             },
             test: RecipeTest::default(),
         }

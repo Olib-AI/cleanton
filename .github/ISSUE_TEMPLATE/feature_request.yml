@@ -1,0 +1,24 @@
+name: Feature request
+description: Suggest something for Cleanton to clean, surface, or do better
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is the problem?
+      description: What disk space or workflow is Cleanton missing today?
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like Cleanton to do?
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else
+      description: Tools, paths, or sizes involved. The more concrete, the better.
+    validations:
+      required: false

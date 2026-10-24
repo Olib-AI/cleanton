@@ -21,7 +21,6 @@ paths = ["**/node_modules/**"]
 [action]
 type = "trash"
 prompt = "Move {size} of Node build output to Trash?"
-group = true
 
 [test]
 should_match = ["projects/app/dist"]

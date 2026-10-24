@@ -1,0 +1,32 @@
+# Dependency updates. Security advisories are also caught by the daily cargo-audit
+# workflow; Dependabot is what actually lands the fixes.
+version: 2
+
+updates:
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "rust"]
+    commit-message:
+      prefix: "deps"
+    groups:
+      parsers:
+        patterns: ["quick-xml", "zip", "pulldown-cmark", "serde*", "aho-corasick"]
+        update-types: ["minor", "patch"]
+      rust-dependencies:
+        patterns: ["*"]
+        exclude-patterns: ["quick-xml", "zip", "pulldown-cmark", "serde*", "aho-corasick"]
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    labels: ["dependencies", "ci"]
+    commit-message:
+      prefix: "ci"

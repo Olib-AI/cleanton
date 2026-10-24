@@ -16,7 +16,6 @@ min_size_mb = 100
 [action]
 type = "trash"
 prompt = "Move {size} of Kotlin/Native toolchains to Trash?"
-group = true
 
 [test]
 should_match = ["~/.konan/dependencies/apple-llvm-20200714-macos-aarch64-essentials/bin/clang"]

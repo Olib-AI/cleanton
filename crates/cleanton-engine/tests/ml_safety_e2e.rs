@@ -61,6 +61,14 @@ fn targets(actions: &[CleanupAction]) -> Vec<PathBuf> {
     actions.iter().map(|action| action.target.clone()).collect()
 }
 
+/// True when `path` is reclaimed by `targets` — either as its own target or via
+/// an ancestor directory that is itself a target (and therefore takes `path`
+/// with it).
+fn covers(targets: &[PathBuf], path: &Path) -> bool {
+    path.ancestors()
+        .any(|ancestor| targets.iter().any(|target| target == ancestor))
+}
+
 #[tokio::test]
 async fn ml_pipeline_never_plans_a_protected_or_sensitive_target() {
     let temp = tempfile::Builder::new()
@@ -131,6 +139,12 @@ async fn ml_pipeline_never_plans_a_protected_or_sensitive_target() {
     // INVARIANT 3: the regenerable cache IS a recognised candidate — routed to the
     // plan if ML confirmed it, or held for explicit confirmation if ML demoted it,
     // but never silently dropped.
+    //
+    // Coverage is by self OR ancestor: the `python-bytecode` recipe targets the
+    // `__pycache__` directory as a unit, so the cache file is reclaimed by its
+    // parent's single action rather than by an action of its own. Reclaiming the
+    // whole directory covers strictly more than the file did, so the invariant
+    // ("never silently dropped") is what is asserted here — not the granularity.
     let plan_targets = targets(&analyzed.plan.actions);
     let held_targets: Vec<PathBuf> = analyzed
         .held
@@ -138,7 +152,7 @@ async fn ml_pipeline_never_plans_a_protected_or_sensitive_target() {
         .map(|held| held.action.target.clone())
         .collect();
     assert!(
-        plan_targets.contains(&cache_file) || held_targets.contains(&cache_file),
+        covers(&plan_targets, &cache_file) || covers(&held_targets, &cache_file),
         "the regenerable cache must be planned or held, never dropped: {}",
         cache_file.display()
     );

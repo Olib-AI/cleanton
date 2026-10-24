@@ -14,7 +14,6 @@ min_age_days = 30
 [action]
 type = "trash"
 prompt = "Move {size} of node-gyp cache to Trash?"
-group = true
 
 [test]
 should_match = ["~/Library/Caches/node-gyp/22.5.0/include/node/node_api.h"]

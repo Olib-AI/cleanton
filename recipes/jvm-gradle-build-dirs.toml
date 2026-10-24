@@ -17,7 +17,6 @@ min_age_days = 14
 [action]
 type = "trash"
 prompt = "Move {size} of Gradle build outputs to Trash?"
-group = true
 
 [test]
 should_match = ["projects/android-app/app/build"]

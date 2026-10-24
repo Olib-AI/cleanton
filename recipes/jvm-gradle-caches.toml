@@ -18,7 +18,6 @@ min_size_mb = 50
 [action]
 type = "trash"
 prompt = "Move {size} of Gradle caches to Trash?"
-group = true
 
 [test]
 should_match = ["~/.gradle/caches/modules-2/files-2.1/org.example/lib/1.0/lib-1.0.jar"]

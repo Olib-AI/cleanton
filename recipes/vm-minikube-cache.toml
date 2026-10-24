@@ -16,7 +16,6 @@ min_age_days = 30
 [action]
 type = "trash"
 prompt = "Move {size} of minikube cache to Trash?"
-group = true
 
 [test]
 should_match = ["~/.minikube/cache/iso/arm64/minikube-v1.33.0-arm64.iso"]

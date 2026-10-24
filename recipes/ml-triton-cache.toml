@@ -17,7 +17,6 @@ min_age_days = 14
 [action]
 type = "trash"
 prompt = "Move {size} of Triton cache to Trash?"
-group = true
 
 [test]
 should_match = ["~/.triton/cache/a1b2c3/kernel.metallib"]

@@ -15,7 +15,6 @@ min_age_days = 14
 [action]
 type = "trash"
 prompt = "Move {size} of aider tag caches to Trash?"
-group = true
 
 [test]
 should_match = ["projects/app/.aider.tags.cache.v4/cache.db"]

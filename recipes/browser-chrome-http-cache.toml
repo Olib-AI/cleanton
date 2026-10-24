@@ -19,7 +19,6 @@ min_age_days = 7
 [action]
 type = "trash"
 prompt = "Move {size} of Chrome HTTP cache to Trash?"
-group = true
 
 [test]
 should_match = ["~/Library/Application Support/Google/Chrome/Default/Cache/Cache_Data/f_000001", "~/Library/Application Support/Google/Chrome/Profile 1/Cache/Cache_Data/f_00002a"]

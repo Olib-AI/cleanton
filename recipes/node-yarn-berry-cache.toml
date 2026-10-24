@@ -17,7 +17,6 @@ path_glob = "**/.yarn/cache"
 [action]
 type = "trash"
 prompt = "Move {size} of Yarn Berry cache to Trash?"
-group = true
 
 [test]
 should_match = ["projects/app/.yarn/cache"]

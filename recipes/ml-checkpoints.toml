@@ -50,7 +50,6 @@ paths = ["~/.cache/**"]
 [action]
 type = "trash"
 prompt = "Move {size} of training checkpoints to Trash?"
-group = true
 
 [test]
 should_match = [

@@ -14,7 +14,6 @@ parent_must_contain = ["mix.exs"]
 [action]
 type = "trash"
 prompt = "Move {size} of Elixir build outputs to Trash?"
-group = true
 
 [test]
 should_match = ["projects/phoenix-app/_build"]

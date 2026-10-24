@@ -14,7 +14,6 @@ min_age_days = 14
 [action]
 type = "trash"
 prompt = "Move {size} of Zed caches to Trash?"
-group = true
 
 [test]
 should_match = ["~/Library/Caches/dev.zed.Zed/embeddings/model.bin"]

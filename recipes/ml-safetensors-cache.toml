@@ -23,7 +23,6 @@ min_size_mb = 50
 [action]
 type = "trash"
 prompt = "Move {size} of cached Hugging Face models to Trash?"
-group = true
 
 [test]
 should_match = ["~/.cache/huggingface/hub/models--BAAI--bge-small-en-v1.5"]

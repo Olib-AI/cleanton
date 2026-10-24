@@ -16,7 +16,6 @@ min_age_days = 14
 [action]
 type = "trash"
 prompt = "Move {size} of JetBrains IDE caches to Trash?"
-group = true
 
 [test]
 should_match = ["~/Library/Caches/JetBrains/IntelliJIdea2025.2/caches/records.dat"]
