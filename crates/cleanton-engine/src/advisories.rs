@@ -131,9 +131,7 @@ impl PackageSubject {
 /// Normalize a package name for comparison (case-insensitive, separators folded).
 #[must_use]
 pub fn normalize_package_name(name: &str) -> String {
-    name.trim()
-        .to_ascii_lowercase()
-        .replace(['_', '.'], "-")
+    name.trim().to_ascii_lowercase().replace(['_', '.'], "-")
 }
 
 /// Half-open affected range `[introduced, fixed)`.
@@ -199,7 +197,9 @@ impl Advisory {
         {
             return false;
         }
-        self.ranges.iter().any(|range| range.matches(&subject.version))
+        self.ranges
+            .iter()
+            .any(|range| range.matches(&subject.version))
     }
 
     /// One-line "what to do" copy: the first fixed version, when there is one.
@@ -286,7 +286,10 @@ impl AdvisoryDatabase {
         let mut paths = entries
             .flatten()
             .map(|entry| entry.path())
-            .filter(|path| path.extension().is_some_and(|extension| extension == "json"))
+            .filter(|path| {
+                path.extension()
+                    .is_some_and(|extension| extension == "json")
+            })
             .collect::<Vec<_>>();
         paths.sort();
         for path in paths {
@@ -494,11 +497,7 @@ fn parse_advisory(value: &serde_json::Value) -> Vec<Advisory> {
         let Some(package) = affected.package.as_ref() else {
             continue;
         };
-        let Some(ecosystem) = package
-            .ecosystem
-            .as_deref()
-            .and_then(Ecosystem::from_osv)
-        else {
+        let Some(ecosystem) = package.ecosystem.as_deref().and_then(Ecosystem::from_osv) else {
             continue;
         };
         if package.name.is_empty() {

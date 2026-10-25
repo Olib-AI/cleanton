@@ -85,10 +85,7 @@ pub enum WatchEvent {
     /// Nothing changed under any watched root.
     Quiet,
     /// A watched root changed; `new_packages` entries were examined.
-    RootChanged {
-        root: PathBuf,
-        new_packages: usize,
-    },
+    RootChanged { root: PathBuf, new_packages: usize },
     /// An examined package version falls inside a published advisory.
     Advisory {
         package: String,

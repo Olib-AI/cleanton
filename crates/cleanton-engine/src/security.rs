@@ -1726,14 +1726,19 @@ pub(crate) fn gem_identity(dir: &Path, fallback: &str) -> (String, Option<String
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().is_none_or(|extension| extension != "gemspec") {
+        if path
+            .extension()
+            .is_none_or(|extension| extension != "gemspec")
+        {
             continue;
         }
         let Ok(text) = std::fs::read_to_string(&path) else {
             continue;
         };
-        if let (Some(name), version) = (gemspec_field(&text, "name"), gemspec_field(&text, "version"))
-        {
+        if let (Some(name), version) = (
+            gemspec_field(&text, "name"),
+            gemspec_field(&text, "version"),
+        ) {
             return (name, version);
         }
     }
@@ -1852,7 +1857,10 @@ fn enumerate_go_packages(target: &SecurityTarget, out: &mut Vec<PackageCandidate
 }
 
 fn push_go_package(dir: &Path, out: &mut Vec<PackageCandidate>) {
-    let Some(name) = dir.file_name().map(|name| name.to_string_lossy().into_owned()) else {
+    let Some(name) = dir
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+    else {
         return;
     };
     let Some((package, version)) = split_versioned_dir_name(&name) else {
@@ -2077,8 +2085,8 @@ fn build_package_report(
     // assessment is re-derived once the baseline diff assigns a change kind.
     // The install/lifecycle anchor comes from the package's own manifest.
     let lifecycle_scripts = lifecycle_script_paths(&candidate.scan_path);
-    let corroborated =
-        verdict_corroborated(&report.findings, &lifecycle_scripts) || advisory_escalates(advisories);
+    let corroborated = verdict_corroborated(&report.findings, &lifecycle_scripts)
+        || advisory_escalates(advisories);
     let mut findings: Vec<&Finding> = report.findings.iter().collect();
     // Benign-context evidence (CI workflows, tests, fixtures, docs) is
     // deprioritized for display — still shown when nothing else exists.
@@ -2095,23 +2103,23 @@ fn build_package_report(
     let remaining = TOP_FINDINGS_PER_PACKAGE.saturating_sub(top_findings.len());
     top_findings.extend(
         findings
-        .iter()
-        .take(remaining)
-        .map(|finding| SecurityFinding {
-            severity: finding.severity,
-            confidence: finding.confidence,
-            category: finding.category,
-            title: sanitize_display(&finding.title),
-            description: sanitize_display(&finding.description),
-            file: finding.location.as_ref().map(|loc| loc.path.clone()),
-            evidence: finding.evidence.as_ref().map(|snippet| {
-                let mut end = snippet.len().min(EVIDENCE_SNIPPET_MAX);
-                while end > 0 && !snippet.is_char_boundary(end) {
-                    end = end.saturating_sub(1);
-                }
-                sanitize_display(snippet.get(..end).unwrap_or_default())
+            .iter()
+            .take(remaining)
+            .map(|finding| SecurityFinding {
+                severity: finding.severity,
+                confidence: finding.confidence,
+                category: finding.category,
+                title: sanitize_display(&finding.title),
+                description: sanitize_display(&finding.description),
+                file: finding.location.as_ref().map(|loc| loc.path.clone()),
+                evidence: finding.evidence.as_ref().map(|snippet| {
+                    let mut end = snippet.len().min(EVIDENCE_SNIPPET_MAX);
+                    while end > 0 && !snippet.is_char_boundary(end) {
+                        end = end.saturating_sub(1);
+                    }
+                    sanitize_display(snippet.get(..end).unwrap_or_default())
+                }),
             }),
-        }),
     );
     PackageReport {
         name: candidate.name.clone(),
@@ -2134,7 +2142,10 @@ fn build_package_report(
 /// the advisory itself is the finding, and the empty fingerprint makes the
 /// baseline diff surface it every run (a known-vulnerable version must not be
 /// suppressed by having been seen before).
-fn build_advisory_only_report(candidate: &PackageCandidate, advisories: &[Advisory]) -> PackageReport {
+fn build_advisory_only_report(
+    candidate: &PackageCandidate,
+    advisories: &[Advisory],
+) -> PackageReport {
     let verdict = advisory_verdict(advisories);
     let top_findings = advisory_findings(advisories);
     PackageReport {
@@ -2231,12 +2242,8 @@ pub fn scan_targets_with_options(
                     let advisories = advisory_matches(&database, candidate);
                     match scanner.scan_path(&candidate.scan_path) {
                         Ok(report) => {
-                            let package_report = build_package_report(
-                                candidate,
-                                &report,
-                                fingerprint,
-                                &advisories,
-                            );
+                            let package_report =
+                                build_package_report(candidate, &report, fingerprint, &advisories);
                             let mut guard = match results.lock() {
                                 Ok(guard) => guard,
                                 Err(poisoned) => poisoned.into_inner(),
