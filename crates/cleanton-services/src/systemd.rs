@@ -164,9 +164,9 @@ fn parse_systemctl_show_output(stdout: &str, out: &mut HashMap<String, UnitLiveS
             continue;
         }
         if let Some(val) = trimmed.strip_prefix("Id=") {
-            current_id = val.to_owned();
+            val.clone_into(&mut current_id);
         } else if let Some(val) = trimmed.strip_prefix("ActiveState=") {
-            current.active_state = val.to_owned();
+            val.clone_into(&mut current.active_state);
         } else if let Some(val) = trimmed.strip_prefix("MainPID=")
             && let Ok(pid) = val.parse::<u32>()
             && pid > 0

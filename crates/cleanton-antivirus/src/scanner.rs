@@ -133,75 +133,74 @@ impl Scanner {
         // ordering. Small per-package scans stay inline to avoid thread-spawn
         // overhead when callers already parallelize across packages.
         type EngineRunOutput = (EngineStat, Vec<crate::types::Finding>);
-        let results: Vec<EngineRunOutput> =
-            if loaded.files.len() >= 64 && self.engines.len() >= 2 {
-                let next = std::sync::atomic::AtomicUsize::new(0);
-                let workers = std::thread::available_parallelism()
-                    .map_or(2, std::num::NonZeroUsize::get)
-                    .clamp(1, 4)
-                    .min(self.engines.len());
-                let slots: std::sync::Mutex<Vec<Option<EngineRunOutput>>> =
-                    std::sync::Mutex::new((0..self.engines.len()).map(|_| None).collect());
+        let results: Vec<EngineRunOutput> = if loaded.files.len() >= 64 && self.engines.len() >= 2 {
+            let next = std::sync::atomic::AtomicUsize::new(0);
+            let workers = std::thread::available_parallelism()
+                .map_or(2, std::num::NonZeroUsize::get)
+                .clamp(1, 4)
+                .min(self.engines.len());
+            let slots: std::sync::Mutex<Vec<Option<EngineRunOutput>>> =
+                std::sync::Mutex::new((0..self.engines.len()).map(|_| None).collect());
 
-                std::thread::scope(|scope| {
-                    for _ in 0..workers {
-                        scope.spawn(|| {
-                            loop {
-                                let idx = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                                let Some(engine) = self.engines.get(idx) else {
-                                    break;
-                                };
-                                let ctx = ScanContext {
-                                    target_name: target_ref.to_owned(),
-                                    files: &loaded.files,
-                                    package_json: pkg_ref,
-                                    config: &self.config,
-                                };
-                                let t0 = Instant::now();
-                                let findings = engine.scan(&ctx);
-                                let stat = EngineStat {
-                                    engine: engine.name().to_owned(),
-                                    findings: findings.len(),
-                                    duration_ms: t0.elapsed().as_millis() as u64,
-                                };
-                                let mut guard = match slots.lock() {
-                                    Ok(g) => g,
-                                    Err(p) => p.into_inner(),
-                                };
-                                if let Some(slot) = guard.get_mut(idx) {
-                                    *slot = Some((stat, findings));
-                                }
+            std::thread::scope(|scope| {
+                for _ in 0..workers {
+                    scope.spawn(|| {
+                        loop {
+                            let idx = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            let Some(engine) = self.engines.get(idx) else {
+                                break;
+                            };
+                            let ctx = ScanContext {
+                                target_name: target_ref.to_owned(),
+                                files: &loaded.files,
+                                package_json: pkg_ref,
+                                config: &self.config,
+                            };
+                            let t0 = Instant::now();
+                            let findings = engine.scan(&ctx);
+                            let stat = EngineStat {
+                                engine: engine.name().to_owned(),
+                                findings: findings.len(),
+                                duration_ms: t0.elapsed().as_millis() as u64,
+                            };
+                            let mut guard = match slots.lock() {
+                                Ok(g) => g,
+                                Err(p) => p.into_inner(),
+                            };
+                            if let Some(slot) = guard.get_mut(idx) {
+                                *slot = Some((stat, findings));
                             }
-                        });
-                    }
-                });
+                        }
+                    });
+                }
+            });
 
-                let completed = match slots.into_inner() {
-                    Ok(v) => v,
-                    Err(p) => p.into_inner(),
-                };
-                completed.into_iter().flatten().collect()
-            } else {
-                self.engines
-                    .iter()
-                    .map(|engine| {
-                        let ctx = ScanContext {
-                            target_name: target_ref.to_owned(),
-                            files: &loaded.files,
-                            package_json: pkg_ref,
-                            config: &self.config,
-                        };
-                        let t0 = Instant::now();
-                        let findings = engine.scan(&ctx);
-                        let stat = EngineStat {
-                            engine: engine.name().to_owned(),
-                            findings: findings.len(),
-                            duration_ms: t0.elapsed().as_millis() as u64,
-                        };
-                        (stat, findings)
-                    })
-                    .collect()
+            let completed = match slots.into_inner() {
+                Ok(v) => v,
+                Err(p) => p.into_inner(),
             };
+            completed.into_iter().flatten().collect()
+        } else {
+            self.engines
+                .iter()
+                .map(|engine| {
+                    let ctx = ScanContext {
+                        target_name: target_ref.to_owned(),
+                        files: &loaded.files,
+                        package_json: pkg_ref,
+                        config: &self.config,
+                    };
+                    let t0 = Instant::now();
+                    let findings = engine.scan(&ctx);
+                    let stat = EngineStat {
+                        engine: engine.name().to_owned(),
+                        findings: findings.len(),
+                        duration_ms: t0.elapsed().as_millis() as u64,
+                    };
+                    (stat, findings)
+                })
+                .collect()
+        };
 
         let mut all_findings = Vec::new();
         let mut engine_stats = Vec::with_capacity(results.len());

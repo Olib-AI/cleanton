@@ -534,14 +534,15 @@ fn is_sensitive_basename(path: &Path) -> bool {
 enum CompiledNameMatcher {
     Exact(String),
     Glob(Pattern),
+    Invalid,
 }
 
 impl CompiledNameMatcher {
-    fn compile(raw: &str) -> Option<Self> {
-        if !contains_glob_meta(raw) {
-            Some(Self::Exact(raw.to_owned()))
+    fn compile(raw: &str) -> Self {
+        if contains_glob_meta(raw) {
+            Pattern::new(raw).map_or(Self::Invalid, Self::Glob)
         } else {
-            Pattern::new(raw).ok().map(Self::Glob)
+            Self::Exact(raw.to_owned())
         }
     }
 
@@ -549,6 +550,7 @@ impl CompiledNameMatcher {
         match self {
             Self::Exact(expected) => name == expected,
             Self::Glob(pattern) => pattern.matches(name),
+            Self::Invalid => false,
         }
     }
 }
@@ -665,7 +667,7 @@ struct CompiledSpec {
     exclude_names: Vec<String>,
     exclude_paths: Vec<Option<Pattern>>,
     directory_name: Option<String>,
-    file_name: Option<Option<CompiledNameMatcher>>,
+    file_name: Option<CompiledNameMatcher>,
     file_extensions: Option<Vec<String>>,
     path_glob: Option<CompiledPathGlob>,
     parent_must_contain: Option<Vec<String>>,
@@ -725,18 +727,15 @@ impl CompiledSpec {
         entry_ext: Option<&str>,
         dir_contains: &impl Fn(&Path, &str) -> bool,
     ) -> bool {
-        if let Some(expected) = &self.directory_name {
-            if entry.kind != FileKind::Directory || entry_name != Some(expected.as_str()) {
-                return false;
-            }
+        if let Some(expected) = &self.directory_name
+            && (entry.kind != FileKind::Directory || entry_name != Some(expected.as_str()))
+        {
+            return false;
         }
-        if let Some(compiled_name) = &self.file_name {
+        if let Some(matcher) = &self.file_name {
             if entry.kind != FileKind::File {
                 return false;
             }
-            let Some(matcher) = compiled_name.as_ref() else {
-                return false;
-            };
             let Some(actual) = entry_name else {
                 return false;
             };
