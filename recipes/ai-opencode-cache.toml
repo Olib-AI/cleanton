@@ -24,5 +24,5 @@ prompt = "Move {size} of OpenCode cache to Trash? Models re-download on demand."
 should_match = ["~/.cache/opencode/models/model.gguf"]
 should_not_match = [
     "~/.cache/opencodex/models/model.gguf",
-    "~/Documents/opencode/models/model.gguf",
+    "~/projects/opencode/models/model.gguf",
 ]
