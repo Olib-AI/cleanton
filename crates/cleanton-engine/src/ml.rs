@@ -155,34 +155,47 @@ pub(crate) fn adjust_actions<C: FileClassifier>(
     mut actions: Vec<CleanupAction>,
     scan: &ScanResult,
 ) -> Adjusted {
-    let entries: HashMap<&Path, &FileEntry> = scan
-        .entries
-        .iter()
-        .map(|entry| (entry.path.as_path(), entry))
-        .collect();
-    let contexts = build_contexts(scan);
+    if actions.is_empty() {
+        return Adjusted::default();
+    }
 
-    // When the candidate set exceeds the evaluation cap, evaluate the largest
-    // candidates (the ones that drive the reclaimable total and the executable
-    // plan) and hold the remainder unevaluated. Sorting only matters past the
-    // cap, so small candidate sets keep their original order and cost nothing.
     let evaluate_count = actions.len().min(MAX_ML_EVALUATED_ACTIONS);
     if actions.len() > MAX_ML_EVALUATED_ACTIONS {
         actions.sort_by_key(|action| std::cmp::Reverse(action.reclaimable_bytes));
     }
 
+    // Scope context accumulation and entry lookup strictly to the evaluated
+    // candidate targets and their ancestors instead of materializing maps over
+    // the entire million-entry scan.
+    let mut wanted_dirs: HashSet<PathBuf> = HashSet::new();
+    let mut targets: HashSet<&Path> = HashSet::with_capacity(evaluate_count);
+    for action in actions.iter().take(evaluate_count) {
+        targets.insert(action.target.as_path());
+        if let Some(parent) = action.target.parent() {
+            for ancestor in parent.ancestors() {
+                if !wanted_dirs.insert(ancestor.to_path_buf()) {
+                    break;
+                }
+            }
+        }
+    }
+
+    let groups = accumulate_dirs(scan, |parent| wanted_dirs.contains(parent));
+    let entries: HashMap<&Path, &FileEntry> = scan
+        .entries
+        .iter()
+        .filter(|entry| targets.contains(entry.path.as_path()))
+        .map(|entry| (entry.path.as_path(), entry))
+        .collect();
+
     let mut result = Adjusted::default();
     for (index, mut action) in actions.into_iter().enumerate() {
         let annotation = if index < evaluate_count {
-            annotate(classifier, threshold, &action, &entries, &contexts)
+            annotate(classifier, threshold, &action, &entries, &groups)
         } else {
-            // Past the inference cap: stays executable (recipes are trusted),
-            // just without an ML badge. ML is advisory and never gates the plan.
             ActionAnnotation::not_evaluated("not ML-scored (batch cap); recipe trusted")
         };
 
-        // Surface the label+confidence on the action itself (existing UIs render
-        // `reason`), so no UI change is needed to display the ML verdict.
         if let (Some(label), Some(confidence)) = (annotation.ml_label, annotation.ml_confidence) {
             action.reason = format!("{} [ML {label}: {confidence:.2}]", action.reason);
         }
@@ -202,7 +215,7 @@ fn annotate<C: FileClassifier>(
     threshold: f32,
     action: &CleanupAction,
     entries: &HashMap<&Path, &FileEntry>,
-    contexts: &HashMap<PathBuf, FileContext>,
+    groups: &HashMap<PathBuf, DirAcc>,
 ) -> ActionAnnotation {
     let Some(entry) = entries.get(action.target.as_path()) else {
         return ActionAnnotation::not_evaluated("no scan entry for target; left unchanged");
@@ -211,9 +224,7 @@ fn annotate<C: FileClassifier>(
     let context = action
         .target
         .parent()
-        .and_then(|parent| contexts.get(parent))
-        .cloned()
-        .unwrap_or_else(empty_context);
+        .map_or_else(empty_context, |parent| context_for(parent, groups));
 
     match classifier.classify(entry, &context) {
         Ok(classification) => decide(classification.label, classification.confidence, threshold),
@@ -431,6 +442,7 @@ fn context_for(parent: &Path, groups: &HashMap<PathBuf, DirAcc>) -> FileContext 
 /// the scan data alone (no extra filesystem access). One O(n) accumulation
 /// pass plus an O(depth) ancestor walk per distinct parent — no quadratic
 /// sibling scans, so million-entry scans stay linear.
+#[cfg(test)]
 fn build_contexts(scan: &ScanResult) -> HashMap<PathBuf, FileContext> {
     let groups = accumulate_dirs(scan, |_| true);
     groups

@@ -1615,6 +1615,16 @@ fn push_host_persistence_targets(targets: &mut Vec<SecurityTarget>, home: &Path)
     push_if_dir(
         targets,
         SecurityTargetKind::HostPersistence,
+        home.join(".config/autostart"),
+    );
+    push_if_dir(
+        targets,
+        SecurityTargetKind::HostPersistence,
+        home.join(".config/fish"),
+    );
+    push_if_dir(
+        targets,
+        SecurityTargetKind::HostPersistence,
         home.to_path_buf(),
     );
 }
@@ -1800,6 +1810,27 @@ fn enumerate_python_packages(target: &SecurityTarget, out: &mut Vec<PackageCandi
         .map(|entry| entry.path())
         .collect();
     paths.sort();
+
+    // Index `<name>-<version>.dist-info` directories once per `site-packages`
+    // root instead of re-reading the directory for every package.
+    let mut dist_versions: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    for path in &paths {
+        if !path.is_dir() {
+            continue;
+        }
+        let Some(file_name) = path.file_name().map(|n| n.to_string_lossy().into_owned()) else {
+            continue;
+        };
+        if let Some(stem) = file_name.strip_suffix(".dist-info")
+            && let Some((dist_name, version)) = stem.rsplit_once('-')
+        {
+            dist_versions
+                .entry(dist_name.to_lowercase().replace('-', "_"))
+                .or_insert_with(|| version.to_owned());
+        }
+    }
+
     for path in paths {
         let Some(file_name) = path.file_name().map(|n| n.to_string_lossy().into_owned()) else {
             continue;
@@ -1828,7 +1859,8 @@ fn enumerate_python_packages(target: &SecurityTarget, out: &mut Vec<PackageCandi
         if !is_package {
             continue;
         }
-        let version = python_dist_info_version(&target.root, &name);
+        let normalized = name.to_lowercase().replace('-', "_");
+        let version = dist_versions.get(&normalized).cloned();
         let scan_path = std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
         out.push(PackageCandidate {
             name,
@@ -2052,6 +2084,10 @@ enum PersistenceRoot {
     LaunchAgents,
     /// `~/.config/systemd/user` — every `*.service` is a unit.
     SystemdUser,
+    /// `~/.config/autostart` — every `*.desktop` is a login autostart entry.
+    DesktopAutostart,
+    /// `~/.config/fish` — `config.fish` startup script.
+    FishStartup,
     /// `$HOME` — only the startup files in [`PERSISTENCE_FILE_NAMES`].
     ShellStartup,
 }
@@ -2063,6 +2099,10 @@ impl PersistenceRoot {
             Self::LaunchAgents
         } else if lower.contains("systemd/user") {
             Self::SystemdUser
+        } else if lower.ends_with("/.config/autostart") || lower.ends_with("\\.config\\autostart") {
+            Self::DesktopAutostart
+        } else if lower.ends_with("/.config/fish") || lower.ends_with("\\.config\\fish") {
+            Self::FishStartup
         } else {
             Self::ShellStartup
         }
@@ -2090,6 +2130,8 @@ fn enumerate_host_persistence(target: &SecurityTarget, out: &mut Vec<PackageCand
         let wanted = match kind {
             PersistenceRoot::LaunchAgents => extension.as_deref() == Some("plist"),
             PersistenceRoot::SystemdUser => extension.as_deref() == Some("service"),
+            PersistenceRoot::DesktopAutostart => extension.as_deref() == Some("desktop"),
+            PersistenceRoot::FishStartup => lower == "config.fish",
             PersistenceRoot::ShellStartup => PERSISTENCE_FILE_NAMES.contains(&lower.as_str()),
         };
         if !wanted || !path.is_file() {
@@ -2441,6 +2483,16 @@ pub fn scan_targets_with_options(
     let total = packages.len();
     progress(SecurityProgress { scanned: 0, total });
 
+    let preloaded_baseline = options
+        .baseline_path
+        .as_deref()
+        .map(security_baseline::load);
+    let skip_unchanged_av = !options.establish_baseline
+        && !options.include_unchanged
+        && preloaded_baseline
+            .as_ref()
+            .is_some_and(|baseline| !baseline.is_empty());
+
     let scanner = Scanner::with_default_engines(scan_config());
     let next = AtomicUsize::new(0);
     let done_count = AtomicUsize::new(0);
@@ -2485,6 +2537,52 @@ pub fn scan_targets_with_options(
                             }
                         };
                     let advisories = advisory_matches(&database, candidate);
+
+                    // Fast path in diff mode: when a package is byte-identical to
+                    // its trusted baseline entry and matches no advisories, skip
+                    // running all 11 content engines on its tree.
+                    if skip_unchanged_av
+                        && advisories.is_empty()
+                        && !fingerprint.is_empty()
+                        && let Some(baseline) = preloaded_baseline.as_ref()
+                        && let Some(entry) = baseline.entries.get(&security_baseline::identity_key(
+                            candidate.source,
+                            &candidate.name,
+                        ))
+                        && entry.fingerprint == fingerprint
+                    {
+                        let verdict = match entry.verdict_at_baseline.as_str() {
+                            "malicious" => AvVerdict::Malicious,
+                            "suspicious" => AvVerdict::Suspicious,
+                            _ => AvVerdict::Clean,
+                        };
+                        let package_report = PackageReport {
+                            name: candidate.name.clone(),
+                            version: candidate.version.clone(),
+                            path: candidate.display_path.clone(),
+                            source: candidate.source,
+                            verdict,
+                            change: ChangeKind::Uncompared,
+                            assessment: assess(ChangeKind::Uncompared, verdict, false),
+                            corroborated: false,
+                            fingerprint,
+                            score: 0,
+                            top_findings: Vec::new(),
+                            finding_count: 0,
+                        };
+                        let mut guard = match results.lock() {
+                            Ok(guard) => guard,
+                            Err(poisoned) => poisoned.into_inner(),
+                        };
+                        guard.push(package_report);
+                        let done = done_count.fetch_add(1, Ordering::Relaxed).saturating_add(1);
+                        progress(SecurityProgress {
+                            scanned: done,
+                            total,
+                        });
+                        continue;
+                    }
+
                     match scanner.scan_path(&candidate.scan_path) {
                         Ok(report) => {
                             let package_report =
@@ -2545,7 +2643,7 @@ pub fn scan_targets_with_options(
         incomplete: cancelled.load(Ordering::Relaxed),
         ..SecurityReport::empty()
     };
-    apply_baseline(&mut report, results, options);
+    apply_baseline(&mut report, results, options, preloaded_baseline);
     report.duration = started.elapsed();
     report
 }
@@ -2556,6 +2654,7 @@ fn apply_baseline(
     report: &mut SecurityReport,
     scanned: Vec<PackageReport>,
     options: &SecurityScanOptions,
+    preloaded_baseline: Option<SecurityBaseline>,
 ) {
     let Some(baseline_path) = options.baseline_path.as_deref() else {
         // Raw mode (no baseline available): every non-clean AV verdict is
@@ -2573,7 +2672,7 @@ fn apply_baseline(
     };
 
     report.baseline_used = true;
-    let existing = security_baseline::load(baseline_path);
+    let existing = preloaded_baseline.unwrap_or_else(|| security_baseline::load(baseline_path));
     let establish = options.establish_baseline || existing.is_empty();
 
     if establish && !report.incomplete {

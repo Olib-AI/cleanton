@@ -58,7 +58,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
                     .add_modifier(Modifier::BOLD),
             )),
             Line::from(""),
-            Line::from("   Welcome to your macOS Disk Cleaner."),
+            Line::from("   Welcome to your macOS & Linux Disk Cleaner."),
             Line::from("   No scan results available yet."),
             Line::from(""),
             Line::from(Span::styled(
@@ -83,10 +83,10 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     let right_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(9), // Statistics
-            Constraint::Length(9), // Disk capacity (honest)
-            Constraint::Length(6), // Real usage-history sparkline
-            Constraint::Min(3),    // Control center / help
+            Constraint::Length(9),  // Statistics
+            Constraint::Length(11), // Disk & memory capacity + cleanup offers
+            Constraint::Length(5),  // Real usage-history sparkline
+            Constraint::Min(3),     // Control center / help
         ])
         .split(chunks[1]);
 
@@ -184,13 +184,13 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
     );
     f.render_widget(stats_para, right_chunks[0]);
 
-    // Honest disk capacity (total / used / available approx / purgeable / snapshots)
+    // Honest disk & memory capacity + background helper pressure offers
     let capacity_para = Paragraph::new(get_capacity_lines(app)).block(
         Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(app.theme.border))
             .title(Span::styled(
-                "Disk Capacity",
+                "Disk & Memory Status",
                 Style::default().add_modifier(Modifier::BOLD),
             )),
     );
@@ -241,7 +241,17 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
                     .fg(app.theme.success)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled("Trigger Filesystem Scan", Style::default().fg(app.theme.fg)),
+            Span::styled(
+                "Scan Disk               ",
+                Style::default().fg(app.theme.fg),
+            ),
+            Span::styled(
+                "[m] ",
+                Style::default()
+                    .fg(app.theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("Memory Cleanup", Style::default().fg(app.theme.fg)),
         ]),
         Line::from(vec![
             Span::styled(
@@ -368,6 +378,47 @@ fn get_capacity_lines(app: &App) -> Vec<Line<'static>> {
             ),
         ]),
     ];
+
+    if app.resource_status.memory_total_bytes > 0 {
+        let mem_used = app
+            .resource_status
+            .memory_total_bytes
+            .saturating_sub(app.resource_status.memory_available_bytes);
+        let mem_pct = app.resource_status.memory_used_percent;
+        let mem_color = if app.resource_status.memory_offer.is_some() {
+            app.theme.warning
+        } else {
+            app.theme.fg
+        };
+        lines.push(Line::from(vec![
+            label("Memory:"),
+            Span::styled(
+                format!(
+                    "{} / {} ({mem_pct}%)",
+                    human_bytes(mem_used),
+                    human_bytes(app.resource_status.memory_total_bytes)
+                ),
+                Style::default().fg(mem_color),
+            ),
+        ]));
+    }
+
+    if app.resource_status.disk_offer.is_some() {
+        lines.push(Line::from(Span::styled(
+            "  Disk usage high: press [s] to scan caches & build artifacts",
+            Style::default()
+                .fg(app.theme.warning)
+                .add_modifier(Modifier::BOLD),
+        )));
+    }
+    if app.resource_status.memory_offer.is_some() {
+        lines.push(Line::from(Span::styled(
+            "  Memory usage high: press [m] to reclaim & inspect Services",
+            Style::default()
+                .fg(app.theme.warning)
+                .add_modifier(Modifier::BOLD),
+        )));
+    }
 
     // Trash vs Freed vs Reclaimable.
     if let Some(result) = &app.execution_result {

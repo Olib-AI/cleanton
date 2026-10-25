@@ -132,6 +132,10 @@ impl Orchestrator {
     #[must_use]
     pub fn analyze(&self, scan: &ScanResult) -> AnalyzedPlan {
         let classifier = MlEngine::embedded();
+        self.analyze_with_classifier(scan, &classifier)
+    }
+
+    fn analyze_with_classifier(&self, scan: &ScanResult, classifier: &MlEngine) -> AnalyzedPlan {
         // Only inspect ~/Library for orphaned app data when the scan actually
         // covered it (home / full-disk scan). Skips the expensive Library walk
         // entirely for project-scoped scans.
@@ -144,7 +148,7 @@ impl Orchestrator {
             &self.config,
             scan,
             &self.recipes,
-            &classifier,
+            classifier,
             DEFAULT_ML_CONFIDENCE_THRESHOLD,
             orphans,
         )
@@ -155,14 +159,20 @@ impl Orchestrator {
     /// review-only [`Suggestions`]. Docker failures degrade gracefully to an
     /// empty analysis so a missing/absent daemon never breaks the Results view.
     pub async fn analyze_full(&self, scan: &ScanResult) -> AnalyzedFull {
-        let analyzed = self.analyze(scan);
-        let docker = analyze_docker().await;
-        let mut suggestions = detect_suggestions(scan);
-        // Advisory ML badges on the review-only suggestion items (display
-        // only; suggestions are never auto-removed and this never changes
-        // what is suggested).
         let classifier = MlEngine::embedded();
-        crate::ml::annotate_suggestions(&classifier, &mut suggestions, scan);
+        let cpu_work = async {
+            std::thread::scope(|scope| {
+                let analyzed_handle =
+                    scope.spawn(|| self.analyze_with_classifier(scan, &classifier));
+                let mut suggestions = detect_suggestions(scan);
+                crate::ml::annotate_suggestions(&classifier, &mut suggestions, scan);
+                let analyzed = analyzed_handle
+                    .join()
+                    .unwrap_or_else(|_| self.analyze_with_classifier(scan, &classifier));
+                (analyzed, suggestions)
+            })
+        };
+        let (docker, (analyzed, suggestions)) = tokio::join!(analyze_docker(), cpu_work);
         AnalyzedFull {
             analyzed,
             docker,

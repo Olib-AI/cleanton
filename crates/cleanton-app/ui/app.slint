@@ -323,6 +323,21 @@ export global AppState {
     in-out property <[float]> usage-history;
     in-out property <bool> usage-history-ready: false;
 
+    // System memory readout + background-helper cleanup offers when disk or
+    // memory usage exceeds configured thresholds.
+    in-out property <bool> memory-ready: false;
+    in-out property <string> memory-total: "--";
+    in-out property <string> memory-used: "--";
+    in-out property <string> memory-available: "--";
+    in-out property <float> memory-used-ratio: 0.0;
+    in-out property <string> memory-status: "";
+    in-out property <bool> disk-offer-active: false;
+    in-out property <string> disk-offer-headline: "";
+    in-out property <string> disk-offer-detail: "";
+    in-out property <bool> memory-offer-active: false;
+    in-out property <string> memory-offer-headline: "";
+    in-out property <string> memory-offer-detail: "";
+
     // Empty Trash affordance (Trash is not freed until emptied).
     in-out property <bool> empty-trash-pending: false;
     // True only when the Trash actually holds items. The "Empty Trash now"
@@ -411,6 +426,8 @@ export global AppState {
     in-out property <bool> setting-ml: false;
     in-out property <int> setting-max-run-gb: 250;
     in-out property <int> setting-max-action-gb: 100;
+    in-out property <int> setting-disk-pressure-percent: 85;
+    in-out property <int> setting-memory-pressure-percent: 85;
     in-out property <string> setting-save-status: "No changes saved yet.";
     // Package version of the running build, filled from CARGO_PKG_VERSION.
     in-out property <string> app-version: "";
@@ -506,6 +523,11 @@ export global AppCallbacks {
     callback confirm-uninstall();
     callback request-empty-trash-confirmation();
     callback empty-trash();
+    // Reclaim idle process/allocator memory and refresh live memory status.
+    callback reclaim-memory();
+    callback refresh-memory();
+    callback dismiss-disk-offer();
+    callback dismiss-memory-offer();
     // Opens System Settings → Privacy & Security → Full Disk Access. Gated
     // behind an explicit user click.
     callback open-fda-settings();
@@ -628,9 +650,39 @@ export component AppWindow inherits Window {
 
                 SidebarItem { label: "Dashboard"; icon-glyph: "\u{f200}"; active: AppState.active-screen == 0; clicked => { AppState.active-screen = 0; } }
                 SidebarItem { label: "Results"; icon-glyph: "\u{f0ae}"; active: AppState.active-screen == 1; clicked => { AppState.active-screen = 1; } }
-                SidebarItem { label: "Packages"; icon-glyph: "\u{f1b3}"; active: AppState.active-screen == 2; clicked => { AppState.active-screen = 2; AppCallbacks.refresh-packages(); } }
-                SidebarItem { label: "Services"; icon-glyph: "\u{f233}"; active: AppState.active-screen == 3; clicked => { AppState.active-screen = 3; AppCallbacks.refresh-services(); } }
-                SidebarItem { label: "Applications"; icon-glyph: "\u{e196}"; active: AppState.active-screen == 5; clicked => { AppState.active-screen = 5; AppCallbacks.refresh-apps(); } }
+                SidebarItem {
+                    label: "Packages";
+                    icon-glyph: "\u{f1b3}";
+                    active: AppState.active-screen == 2;
+                    clicked => {
+                        AppState.active-screen = 2;
+                        if AppState.package-count == 0 && !AppState.package-loading && AppState.package-status == "Not loaded" {
+                            AppCallbacks.refresh-packages();
+                        }
+                    }
+                }
+                SidebarItem {
+                    label: "Services";
+                    icon-glyph: "\u{f233}";
+                    active: AppState.active-screen == 3;
+                    clicked => {
+                        AppState.active-screen = 3;
+                        if AppState.service-count == 0 && !AppState.loading-services && AppState.services-status == "Not loaded" {
+                            AppCallbacks.refresh-services();
+                        }
+                    }
+                }
+                SidebarItem {
+                    label: "Applications";
+                    icon-glyph: "\u{e196}";
+                    active: AppState.active-screen == 5;
+                    clicked => {
+                        AppState.active-screen = 5;
+                        if AppState.app-rows.length == 0 && !AppState.apps-loading && AppState.apps-status == "" {
+                            AppCallbacks.refresh-apps();
+                        }
+                    }
+                }
                 SidebarItem { label: "Security"; icon-glyph: "\u{f132}"; active: AppState.active-screen == 6; clicked => { AppState.active-screen = 6; } }
                 SidebarItem { label: "Settings"; icon-glyph: "\u{f013}"; active: AppState.active-screen == 4; clicked => { AppState.active-screen = 4; } }
 
@@ -732,6 +784,93 @@ export component AppWindow inherits Window {
 
                     VerticalLayout {
                         spacing: Theme.spacing-lg;
+
+                        // Background-helper high disk usage offer.
+                        if AppState.disk-offer-active: Panel {
+                            border-color: Theme.palette.warning.with-alpha(0.55);
+
+                            VerticalLayout {
+                                padding: Theme.spacing-lg;
+                                spacing: Theme.spacing-sm;
+
+                                HorizontalLayout {
+                                    spacing: Theme.spacing-sm;
+                                    cross-axis-alignment: center;
+                                    FaIcon { glyph: "\u{f071}"; icon-color: Theme.palette.warning; icon-size: Theme.font-size-md; width: 22px; }
+                                    Text { text: AppState.disk-offer-headline; color: Theme.palette.warning; font-size: Theme.font-size-md; font-weight: 700; horizontal-stretch: 1; wrap: word-wrap; }
+                                    ActionButton {
+                                        label: AppState.scanning ? "Scanning..." : "Scan & Review";
+                                        icon-glyph: "\u{f002}";
+                                        button-color: Theme.palette.warning;
+                                        enabled: !AppState.scanning && !AppState.cleaning;
+                                        clicked => {
+                                            AppCallbacks.start-scan();
+                                            AppState.active-screen = 1;
+                                        }
+                                    }
+                                    ActionButton {
+                                        label: "Dismiss";
+                                        primary: false;
+                                        min-width: 88px;
+                                        clicked => { AppCallbacks.dismiss-disk-offer(); }
+                                    }
+                                }
+
+                                if AppState.disk-offer-detail != "": Text {
+                                    text: AppState.disk-offer-detail;
+                                    color: Theme.palette.text-secondary;
+                                    font-size: Theme.font-size-sm;
+                                    wrap: word-wrap;
+                                }
+                            }
+                        }
+
+                        // Background-helper high memory usage offer.
+                        if AppState.memory-offer-active: Panel {
+                            border-color: Theme.palette.warning.with-alpha(0.55);
+
+                            VerticalLayout {
+                                padding: Theme.spacing-lg;
+                                spacing: Theme.spacing-sm;
+
+                                HorizontalLayout {
+                                    spacing: Theme.spacing-sm;
+                                    cross-axis-alignment: center;
+                                    FaIcon { glyph: "\u{e1ec}"; icon-color: Theme.palette.warning; icon-size: Theme.font-size-md; width: 22px; }
+                                    Text { text: AppState.memory-offer-headline; color: Theme.palette.warning; font-size: Theme.font-size-md; font-weight: 700; horizontal-stretch: 1; wrap: word-wrap; }
+                                    ActionButton {
+                                        label: "Reclaim Memory";
+                                        icon-glyph: "\u{f51a}";
+                                        button-color: Theme.palette.warning;
+                                        clicked => { AppCallbacks.reclaim-memory(); }
+                                    }
+                                    ActionButton {
+                                        label: "Review Services";
+                                        icon-glyph: "\u{f233}";
+                                        primary: false;
+                                        clicked => {
+                                            AppState.active-screen = 3;
+                                            if AppState.service-count == 0 && !AppState.loading-services {
+                                                AppCallbacks.refresh-services();
+                                            }
+                                        }
+                                    }
+                                    ActionButton {
+                                        label: "Dismiss";
+                                        primary: false;
+                                        min-width: 88px;
+                                        clicked => { AppCallbacks.dismiss-memory-offer(); }
+                                    }
+                                }
+
+                                if AppState.memory-offer-detail != "": Text {
+                                    text: AppState.memory-offer-detail;
+                                    color: Theme.palette.text-secondary;
+                                    font-size: Theme.font-size-sm;
+                                    wrap: word-wrap;
+                                }
+                            }
+                        }
 
                         if AppState.fda-needs-attention: Panel {
                             VerticalLayout {
@@ -933,6 +1072,51 @@ export component AppWindow inherits Window {
                                 }
                             }
                         }
+
+                        Panel {
+                            VerticalLayout {
+                                padding: Theme.spacing-lg;
+                                spacing: Theme.spacing-md;
+
+                                HorizontalLayout {
+                                    spacing: Theme.spacing-sm;
+                                    cross-axis-alignment: center;
+                                    FaIcon { glyph: "\u{e1ec}"; icon-color: Theme.palette.accent; icon-size: Theme.font-size-md; width: 22px; vertical-alignment: center; }
+                                    Text { text: "System Memory"; color: Theme.palette.text-primary; font-size: Theme.font-size-lg; font-weight: 700; horizontal-stretch: 1; vertical-alignment: center; }
+                                    Text { text: AppState.memory-ready ? "" : "Unavailable"; color: Theme.palette.warning; font-size: Theme.font-size-sm; vertical-alignment: center; }
+                                    ActionButton {
+                                        label: "Reclaim Memory";
+                                        icon-glyph: "\u{f51a}";
+                                        primary: false;
+                                        clicked => { AppCallbacks.reclaim-memory(); }
+                                    }
+                                    ActionButton {
+                                        label: "Refresh";
+                                        icon-glyph: "\u{f021}";
+                                        primary: false;
+                                        min-width: 96px;
+                                        clicked => { AppCallbacks.refresh-memory(); }
+                                    }
+                                }
+
+                                HorizontalLayout {
+                                    spacing: Theme.spacing-xl;
+                                    VerticalLayout { spacing: Theme.spacing-xs; Text { text: "Total"; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; } Text { text: AppState.memory-total; color: Theme.palette.text-primary; font-size: Theme.font-size-lg; font-weight: 700; } }
+                                    VerticalLayout { spacing: Theme.spacing-xs; Text { text: "Used"; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; } Text { text: AppState.memory-used; color: Theme.palette.text-primary; font-size: Theme.font-size-lg; font-weight: 700; } }
+                                    VerticalLayout { spacing: Theme.spacing-xs; Text { text: "Available"; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; } Text { text: AppState.memory-available; color: Theme.palette.success; font-size: Theme.font-size-lg; font-weight: 700; } }
+                                    Rectangle { horizontal-stretch: 1; }
+                                }
+
+                                ProgressBar { progress: AppState.memory-used-ratio; }
+
+                                if AppState.memory-status != "": Text {
+                                    text: AppState.memory-status;
+                                    color: Theme.palette.text-muted;
+                                    font-size: Theme.font-size-xs;
+                                    wrap: word-wrap;
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1091,8 +1275,16 @@ export component AppWindow inherits Window {
                                     alignment: center;
                                     spacing: Theme.spacing-sm;
 
-                                    FaIcon {
-                                        glyph: AppState.scanning || AppState.cleaning ? "\u{f110}" : "\u{f0ae}";
+                                    if AppState.scanning || AppState.cleaning: HorizontalLayout {
+                                        alignment: center;
+                                        Spinner {
+                                            running: true;
+                                            spinner-size: 26px;
+                                            spinner-color: Theme.palette.text-muted;
+                                        }
+                                    }
+                                    if !AppState.scanning && !AppState.cleaning: FaIcon {
+                                        glyph: "\u{f0ae}";
                                         icon-color: Theme.palette.text-muted;
                                         icon-size: Theme.font-size-xl;
                                     }
@@ -1450,24 +1642,21 @@ export component AppWindow inherits Window {
 
                 HorizontalLayout {
                     spacing: Theme.spacing-sm;
+                    cross-axis-alignment: center;
                     VerticalLayout {
                         spacing: Theme.spacing-xs;
                         horizontal-stretch: 1;
                         Text { text: "Packages"; color: Theme.palette.text-primary; font-size: Theme.font-size-xl; font-weight: 700; }
                         Text { text: AppState.package-status; color: Theme.palette.text-secondary; font-size: Theme.font-size-sm; overflow: elide; }
                     }
-                    ActionButton { label: AppState.package-loading ? "Loading..." : "Refresh"; icon-glyph: "\u{f021}"; enabled: !AppState.package-loading && !AppState.package-acting; clicked => { AppCallbacks.refresh-packages(); } }
-                    // Activity indicator on the right, next to the action that
-                    // started it. Conditional rather than `visible: false`: a
-                    // hidden element still occupies its slot in a layout, so an
-                    // always-present spinner left a permanent gap after Refresh.
-                    if AppState.package-loading || AppState.package-acting || AppState.package-usage-scanning: HorizontalLayout {
-                        alignment: center;
-                        Spinner {
-                            running: true;
-                            spinner-size: 16px;
-                        }
+                    // Fixed-width non-stretching spinner placed to the left of
+                    // Refresh so the Refresh button stays anchored at the right
+                    // edge both during and after loading.
+                    if AppState.package-loading || AppState.package-acting || AppState.package-usage-scanning: Spinner {
+                        running: true;
+                        spinner-size: 16px;
                     }
+                    ActionButton { label: AppState.package-loading ? "Loading..." : "Refresh"; icon-glyph: "\u{f021}"; enabled: !AppState.package-loading && !AppState.package-acting; clicked => { AppCallbacks.refresh-packages(); } }
                 }
 
                 // Indeterminate activity strip: feedback that work is in flight,
@@ -1527,12 +1716,10 @@ export component AppWindow inherits Window {
 
                         if AppState.package-action-status != "": HorizontalLayout {
                             spacing: Theme.spacing-xs;
-                            if AppState.package-usage-scanning || AppState.package-acting || AppState.package-loading: HorizontalLayout {
-                                alignment: center;
-                                Spinner {
-                                    running: true;
-                                    spinner-size: 12px;
-                                }
+                            cross-axis-alignment: center;
+                            if AppState.package-usage-scanning || AppState.package-acting || AppState.package-loading: Spinner {
+                                running: true;
+                                spinner-size: 12px;
                             }
                             Text {
                                 text: AppState.package-action-status;
@@ -1545,10 +1732,6 @@ export component AppWindow inherits Window {
                         }
 
                         if AppState.package-note != "": Text { text: AppState.package-note; color: Theme.palette.warning; font-size: Theme.font-size-xs; wrap: word-wrap; }
-
-                        if AppState.package-acting || AppState.package-loading: ActivityBar {
-                            running: true;
-                        }
 
                         HorizontalLayout {
                             spacing: Theme.spacing-md;
@@ -1671,24 +1854,36 @@ export component AppWindow inherits Window {
                 spacing: Theme.spacing-md;
 
                 HorizontalLayout {
+                    spacing: Theme.spacing-sm;
+                    cross-axis-alignment: center;
+
                     VerticalLayout {
                         spacing: Theme.spacing-xs;
                         horizontal-stretch: 1;
                         Text { text: "Services"; color: Theme.palette.text-primary; font-size: Theme.font-size-xl; font-weight: 700; }
-                        Text { text: AppState.services-status; color: Theme.palette.text-secondary; font-size: Theme.font-size-sm; }
+                        Text { text: AppState.services-status; color: Theme.palette.text-secondary; font-size: Theme.font-size-sm; overflow: elide; }
+                    }
+
+                    if AppState.loading-services: Spinner {
+                        running: true;
+                        spinner-size: 16px;
                     }
 
                     ActionButton {
-                        label: "Refresh";
+                        label: AppState.loading-services ? "Loading..." : "Refresh";
                         icon-glyph: "\u{f021}";
                         enabled: !AppState.loading-services;
                         clicked => { AppCallbacks.refresh-services(); }
                     }
                 }
 
+                if AppState.loading-services: ActivityBar {
+                    running: true;
+                }
+
                 HorizontalLayout {
                     spacing: Theme.spacing-md;
-                    MetricTile { label: "Discovered"; value: AppState.service-count; detail: "launchd and Homebrew"; icon-glyph: "\u{f233}"; accent-color: Theme.palette.info; ratio: AppState.service-count > 0 ? 1.0 : 0.0; }
+                    MetricTile { label: "Discovered"; value: AppState.service-count; detail: "launchd, systemd, and Homebrew"; icon-glyph: "\u{f233}"; accent-color: Theme.palette.info; ratio: AppState.service-count > 0 ? 1.0 : 0.0; }
                     MetricTile { label: "Running"; value: AppState.service-running-count; detail: "active services"; icon-glyph: "\u{f04b}"; accent-color: Theme.palette.success; ratio: AppState.service-count > 0 ? AppState.service-running-count / AppState.service-count : 0.0; }
                     MetricTile { label: "Protected"; value: "System safe"; detail: "protected rows are locked"; icon-glyph: "\u{f023}"; accent-color: Theme.palette.warning; ratio: 1.0; }
                 }
@@ -1697,6 +1892,7 @@ export component AppWindow inherits Window {
                 // the discovered/running totals on the metric tiles above.
                 HorizontalLayout {
                     spacing: Theme.spacing-md;
+                    cross-axis-alignment: center;
 
                     LineEdit {
                         horizontal-stretch: 1;
@@ -1773,7 +1969,7 @@ export component AppWindow inherits Window {
                                 // comfortable top padding so the first row breathes.
                                 // Hidden when empty so the empty/loading state reads
                                 // as one clean centered block, not a stray header.
-                                if AppState.service-count > 0: HorizontalLayout {
+                                if AppState.services.length > 0: HorizontalLayout {
                                     padding-left: Theme.spacing-md;
                                     padding-right: Theme.spacing-md;
                                     padding-top: Theme.spacing-sm;
@@ -1786,28 +1982,40 @@ export component AppWindow inherits Window {
                                     Text { text: "ACTION"; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; font-weight: 700; min-width: 168px; horizontal-alignment: right; }
                                 }
 
-                                if AppState.service-count > 0: Rectangle { height: 1px; background: Theme.palette.border-subtle; }
+                                if AppState.services.length > 0: Rectangle { height: 1px; background: Theme.palette.border-subtle; }
 
-                                if AppState.service-count == 0: VerticalLayout {
+                                if AppState.services.length == 0: VerticalLayout {
                                     min-height: 220px;
                                     vertical-stretch: 1;
                                     alignment: center;
                                     spacing: Theme.spacing-sm;
 
-                                    FaIcon {
-                                        glyph: AppState.loading-services ? "\u{f110}" : "\u{f233}";
+                                    if AppState.loading-services: HorizontalLayout {
+                                        alignment: center;
+                                        Spinner {
+                                            running: true;
+                                            spinner-size: 26px;
+                                            spinner-color: Theme.palette.text-muted;
+                                        }
+                                    }
+                                    if !AppState.loading-services: FaIcon {
+                                        glyph: "\u{f233}";
                                         icon-color: Theme.palette.text-muted;
                                         icon-size: Theme.font-size-xl;
                                     }
                                     Text {
-                                        text: AppState.loading-services ? "Discovering services..." : "No services loaded";
+                                        text: AppState.loading-services
+                                            ? "Discovering services..."
+                                            : (AppState.service-count > 0 ? "No services match the current filter" : "No services loaded");
                                         color: Theme.palette.text-secondary;
                                         font-size: Theme.font-size-md;
                                         font-weight: 600;
                                         horizontal-alignment: center;
                                     }
                                     Text {
-                                        text: AppState.loading-services ? "Querying launchd and Homebrew." : "Refresh to discover launchd and Homebrew services.";
+                                        text: AppState.loading-services
+                                            ? "Querying launchd, systemd, and Homebrew."
+                                            : (AppState.service-count > 0 ? "Clear the search filter or toggle switches above to view all services." : "Refresh to discover background services.");
                                         color: Theme.palette.text-muted;
                                         font-size: Theme.font-size-sm;
                                         horizontal-alignment: center;
@@ -1867,7 +2075,8 @@ export component AppWindow inherits Window {
                 spacing: Theme.spacing-lg;
 
                 HorizontalLayout {
-                    spacing: Theme.spacing-md;
+                    spacing: Theme.spacing-sm;
+                    cross-axis-alignment: center;
 
                     VerticalLayout {
                         horizontal-stretch: 1;
@@ -1876,12 +2085,21 @@ export component AppWindow inherits Window {
                         Text { text: AppState.apps-status; color: Theme.palette.text-secondary; font-size: Theme.font-size-sm; overflow: elide; }
                     }
 
+                    if AppState.apps-loading: Spinner {
+                        running: true;
+                        spinner-size: 16px;
+                    }
+
                     ActionButton {
                         label: AppState.apps-loading ? "Loading..." : "Refresh";
                         icon-glyph: "\u{f021}";
                         enabled: !AppState.apps-loading;
                         clicked => { AppCallbacks.refresh-apps(); }
                     }
+                }
+
+                if AppState.apps-loading: ActivityBar {
+                    running: true;
                 }
 
                 HorizontalLayout {
@@ -1922,7 +2140,37 @@ export component AppWindow inherits Window {
                                 }
                             }
 
-                            ScrollView {
+                            if AppState.app-rows.length == 0: VerticalLayout {
+                                min-height: 180px;
+                                vertical-stretch: 1;
+                                alignment: center;
+                                spacing: Theme.spacing-sm;
+
+                                if AppState.apps-loading: HorizontalLayout {
+                                    alignment: center;
+                                    Spinner {
+                                        running: true;
+                                        spinner-size: 24px;
+                                        spinner-color: Theme.palette.text-muted;
+                                    }
+                                }
+                                if !AppState.apps-loading: FaIcon {
+                                    glyph: "\u{e196}";
+                                    icon-color: Theme.palette.text-muted;
+                                    icon-size: Theme.font-size-xl;
+                                }
+                                Text {
+                                    text: AppState.apps-loading
+                                        ? "Scanning installed applications..."
+                                        : (AppState.app-filter != "" ? "No applications match the filter" : "No applications found");
+                                    color: Theme.palette.text-secondary;
+                                    font-size: Theme.font-size-sm;
+                                    font-weight: 600;
+                                    horizontal-alignment: center;
+                                }
+                            }
+
+                            if AppState.app-rows.length > 0: ScrollView {
                                 vertical-stretch: 1;
 
                                 VerticalLayout {
@@ -1951,20 +2199,17 @@ export component AppWindow inherits Window {
                                                 HorizontalLayout {
                                                     spacing: Theme.spacing-xs;
                                                     alignment: start;
+                                                    cross-axis-alignment: center;
                                                     Text { text: a.name; color: Theme.palette.text-primary; font-size: Theme.font-size-sm; font-weight: 600; overflow: elide; vertical-alignment: center; }
-                                                    // Both pills share the row's
-                                                    // natural height, so they line
-                                                    // up with the app name without
-                                                    // any absolute positioning.
                                                     if a.app-store: Badge {
                                                         label: "App Store";
                                                         badge-color: Theme.palette.info;
-                                                        min-width: 58px;
+                                                        compact: true;
                                                     }
                                                     if a.brew: Badge {
                                                         label: "brew";
                                                         badge-color: Theme.palette.warning;
-                                                        min-width: 42px;
+                                                        compact: true;
                                                     }
                                                 }
                                                 Text { text: a.version == "" ? a.bundle-id : a.version + " · " + a.bundle-id; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; overflow: elide; }
@@ -2022,13 +2267,11 @@ export component AppWindow inherits Window {
 
                                 HorizontalLayout {
                                     spacing: Theme.spacing-sm;
+                                    cross-axis-alignment: center;
                                     Text { text: "Uninstall " + AppState.selected-app-name; color: Theme.palette.text-primary; font-size: Theme.font-size-lg; font-weight: 700; horizontal-stretch: 1; overflow: elide; }
-                                    if AppState.leftover-loading || AppState.uninstalling: HorizontalLayout {
-                                        alignment: center;
-                                        Spinner {
-                                            running: true;
-                                            spinner-size: 14px;
-                                        }
+                                    if AppState.leftover-loading || AppState.uninstalling: Spinner {
+                                        running: true;
+                                        spinner-size: 14px;
                                     }
                                     Text {
                                         text: AppState.uninstalling
@@ -2274,6 +2517,14 @@ export component AppWindow inherits Window {
                         spacing: Theme.spacing-md;
                         alignment: center;
 
+                        HorizontalLayout {
+                            alignment: center;
+                            Spinner {
+                                running: true;
+                                spinner-size: 28px;
+                            }
+                        }
+
                         Text {
                             text: "Scanning... " + AppState.security-progress;
                             color: Theme.palette.text-primary;
@@ -2493,6 +2744,7 @@ export component AppWindow inherits Window {
 
                                                 HorizontalLayout {
                                                     spacing: Theme.spacing-sm;
+                                                    cross-axis-alignment: center;
 
                                                     // Change-kind chip: the same-version tamper is the bold red alarm.
                                                     Badge {
@@ -2844,6 +3096,39 @@ export component AppWindow inherits Window {
                                         minimum: 1;
                                         maximum: 100000;
                                         value <=> AppState.setting-max-action-gb;
+                                    }
+                                }
+                            }
+                        }
+
+                        // ── Background helper ───────────────────────────────
+                        Panel {
+                            VerticalLayout {
+                                padding: Theme.spacing-lg;
+                                spacing: Theme.spacing-md;
+
+                                SectionHeader { text: "BACKGROUND HELPER"; }
+
+                                SettingsField {
+                                    label: "Disk cleanup alert (%)";
+                                    description: "Offer disk cleanup when disk usage reaches this percent. Set 0 to disable.";
+                                    SpinBox {
+                                        width: 130px;
+                                        minimum: 0;
+                                        maximum: 99;
+                                        value <=> AppState.setting-disk-pressure-percent;
+                                    }
+                                }
+                                Divider {}
+
+                                SettingsField {
+                                    label: "Memory cleanup alert (%)";
+                                    description: "Offer memory cleanup when memory usage reaches this percent. Set 0 to disable.";
+                                    SpinBox {
+                                        width: 130px;
+                                        minimum: 0;
+                                        maximum: 99;
+                                        value <=> AppState.setting-memory-pressure-percent;
                                     }
                                 }
                             }

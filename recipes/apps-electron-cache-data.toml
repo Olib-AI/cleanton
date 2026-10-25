@@ -14,10 +14,20 @@ priority = 50
 path_glob = "~/Library/Application Support/*/Cache/Cache_Data/**"
 min_age_days = 7
 
+[[match.any_of]]
+path_glob = "~/.config/*/Cache/Cache_Data/**"
+min_age_days = 7
+
 [action]
 type = "trash"
 prompt = "Move {size} of app web caches to Trash?"
 
 [test]
-should_match = ["~/Library/Application Support/Slack/Cache/Cache_Data/f_000001"]
-should_not_match = ["~/Library/Application Support/Slack/Local Storage/leveldb/000003.log"]
+should_match = [
+    "~/Library/Application Support/Slack/Cache/Cache_Data/f_000001",
+    "~/.config/Slack/Cache/Cache_Data/f_000001",
+]
+should_not_match = [
+    "~/Library/Application Support/Slack/Local Storage/leveldb/000003.log",
+    "~/.config/Slack/Local Storage/leveldb/000003.log",
+]

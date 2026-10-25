@@ -223,6 +223,24 @@ mod tests {
         let _ = is_case_sensitive(Path::new("/"));
         let _ = is_case_sensitive(Path::new("/definitely-missing-cleanton-volume-xyz"));
     }
+
+    #[test]
+    fn parses_linux_mem_available_from_proc_meminfo() {
+        let sample = "MemTotal:       32768000 kB\nMemFree:         1024000 kB\nMemAvailable:   24576000 kB\n";
+        assert_eq!(parse_linux_mem_available(sample), Some(24_576_000 * 1024));
+        assert_eq!(parse_linux_mem_available("MemTotal: 1000 kB\n"), None);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn memory_helpers_report_valid_ranges() {
+        let mem = memory_usage().expect("memory usage available on unix CI");
+        assert!(mem.total_bytes > 0);
+        assert!(mem.available_bytes <= mem.total_bytes);
+        assert!((0.0..=1.0).contains(&mem.used_fraction));
+        let _ = top_memory_processes(5);
+        let _ = reclaim_process_memory();
+    }
 }
 
 /// System memory usage snapshot (total / available bytes + used fraction).
@@ -255,7 +273,7 @@ pub fn memory_usage() -> Option<MemoryUsage> {
     if total_bytes == 0 {
         return None;
     }
-    let available_bytes = available_bytes(page)?;
+    let available_bytes = available_bytes(page)?.min(total_bytes);
     let used = total_bytes.saturating_sub(available_bytes);
     #[allow(clippy::cast_precision_loss)]
     let used_fraction = used as f64 / total_bytes as f64;
@@ -268,6 +286,15 @@ pub fn memory_usage() -> Option<MemoryUsage> {
 
 #[cfg(target_os = "linux")]
 fn available_bytes(page: u64) -> Option<u64> {
+    // Prefer `/proc/meminfo` `MemAvailable:` so reclaimable kernel page cache and
+    // buffers are counted as available memory instead of reporting false pressure
+    // when Linux caches filesystem reads in free RAM.
+    if let Ok(meminfo) = std::fs::read_to_string("/proc/meminfo")
+        && let Some(bytes) = parse_linux_mem_available(&meminfo)
+    {
+        return Some(bytes);
+    }
+
     // SAFETY: sysconf with a valid name returns -1 on error and has no
     // memory-safety requirements; the result is checked before use.
     let avail_pages = unsafe { libc::sysconf(libc::_SC_AVPHYS_PAGES) };
@@ -277,9 +304,23 @@ fn available_bytes(page: u64) -> Option<u64> {
     Some(u64::try_from(avail_pages).ok()?.saturating_mul(page))
 }
 
+#[cfg(any(target_os = "linux", test))]
+fn parse_linux_mem_available(meminfo: &str) -> Option<u64> {
+    for line in meminfo.lines() {
+        if let Some(rest) = line.strip_prefix("MemAvailable:") {
+            let kb_str = rest.split_whitespace().next()?;
+            let kb = kb_str.parse::<u64>().ok()?;
+            return Some(kb.saturating_mul(1024));
+        }
+    }
+    None
+}
+
 #[cfg(target_os = "macos")]
 #[allow(deprecated)] // libc::mach_host_self: the mach2 alternative is not a dependency.
 fn available_bytes(page: u64) -> Option<u64> {
+    // SAFETY: `vm_statistics64` is a plain-old-data Mach struct of integer counters
+    // for which an all-zero bit pattern is valid.
     let mut stats: libc::vm_statistics64 = unsafe { std::mem::zeroed() };
     let mut count = u32::try_from(
         std::mem::size_of::<libc::vm_statistics64>() / std::mem::size_of::<libc::integer_t>(),
@@ -300,12 +341,242 @@ fn available_bytes(page: u64) -> Option<u64> {
     if rc != libc::KERN_SUCCESS {
         return None;
     }
-    let available_pages =
-        u64::from(stats.free_count).saturating_add(u64::from(stats.inactive_count));
+    let available_pages = u64::from(stats.free_count)
+        .saturating_add(u64::from(stats.inactive_count))
+        .saturating_add(u64::from(stats.speculative_count));
     Some(available_pages.saturating_mul(page))
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
 fn available_bytes(_page: u64) -> Option<u64> {
     None
+}
+
+/// Snapshot of one user-owned process's resident memory usage.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProcessMemorySample {
+    pub pid: u32,
+    pub name: String,
+    pub rss_bytes: u64,
+}
+
+/// Return up to `limit` user-owned processes with the largest resident set size (`RSS`),
+/// excluding the current Cleanton process. Pure read-only inspection; never signals or
+/// mutates any process.
+#[must_use]
+pub fn top_memory_processes(limit: usize) -> Vec<ProcessMemorySample> {
+    if limit == 0 {
+        return Vec::new();
+    }
+    let mut samples = collect_user_process_memory();
+    samples.sort_by(|a, b| {
+        b.rss_bytes
+            .cmp(&a.rss_bytes)
+            .then_with(|| a.name.cmp(&b.name))
+            .then_with(|| a.pid.cmp(&b.pid))
+    });
+    samples.truncate(limit);
+    samples
+}
+
+#[cfg(target_os = "linux")]
+fn collect_user_process_memory() -> Vec<ProcessMemorySample> {
+    use std::os::unix::fs::MetadataExt;
+
+    // SAFETY: `geteuid` has no preconditions and cannot cause undefined behavior.
+    let current_uid = unsafe { libc::geteuid() };
+    // SAFETY: `sysconf(_SC_PAGESIZE)` has no preconditions; negative values are rejected.
+    let page_raw = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+    let Ok(page_size) = u64::try_from(page_raw) else {
+        return Vec::new();
+    };
+    if page_size == 0 {
+        return Vec::new();
+    }
+    let self_pid = std::process::id();
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return Vec::new();
+    };
+    let mut samples = Vec::new();
+    for entry in entries.flatten() {
+        let file_name = entry.file_name();
+        let Some(pid_str) = file_name.to_str() else {
+            continue;
+        };
+        let Ok(pid) = pid_str.parse::<u32>() else {
+            continue;
+        };
+        if pid == self_pid {
+            continue;
+        }
+        let proc_dir = entry.path();
+        let Ok(meta) = std::fs::metadata(&proc_dir) else {
+            continue;
+        };
+        if meta.uid() != current_uid {
+            continue;
+        }
+        let Ok(statm) = std::fs::read_to_string(proc_dir.join("statm")) else {
+            continue;
+        };
+        let Some(resident_pages) = statm
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse::<u64>().ok())
+        else {
+            continue;
+        };
+        let rss_bytes = resident_pages.saturating_mul(page_size);
+        if rss_bytes == 0 {
+            continue;
+        }
+        let Ok(comm) = std::fs::read_to_string(proc_dir.join("comm")) else {
+            continue;
+        };
+        let name = comm.trim().to_owned();
+        if name.is_empty() {
+            continue;
+        }
+        samples.push(ProcessMemorySample {
+            pid,
+            name,
+            rss_bytes,
+        });
+    }
+    samples
+}
+
+#[cfg(target_os = "macos")]
+fn collect_user_process_memory() -> Vec<ProcessMemorySample> {
+    const PROC_ALL_PIDS: libc::c_uint = 1;
+    const MAX_PIDS: usize = 4096;
+
+    unsafe extern "C" {
+        fn proc_listpids(
+            kind: libc::c_uint,
+            typeinfo: u32,
+            buffer: *mut libc::c_void,
+            buffersize: libc::c_int,
+        ) -> libc::c_int;
+        fn proc_pid_rusage(
+            pid: libc::c_int,
+            flavor: libc::c_int,
+            buffer: *mut libc::rusage_info_v2,
+        ) -> libc::c_int;
+        fn proc_name(pid: libc::c_int, buffer: *mut libc::c_void, buffersize: u32) -> libc::c_int;
+    }
+
+    let mut pids = vec![0_i32; MAX_PIDS];
+    let byte_len = pids.len().saturating_mul(std::mem::size_of::<i32>());
+    let Ok(buf_size) = libc::c_int::try_from(byte_len) else {
+        return Vec::new();
+    };
+    // SAFETY: `pids` is an allocated buffer of `buf_size` bytes that outlives the call.
+    // `proc_listpids` writes at most `buf_size` bytes and returns bytes written or <= 0 on error.
+    let bytes_written = unsafe {
+        proc_listpids(
+            PROC_ALL_PIDS,
+            0,
+            pids.as_mut_ptr().cast::<libc::c_void>(),
+            buf_size,
+        )
+    };
+    if bytes_written <= 0 {
+        return Vec::new();
+    }
+    let count = usize::try_from(bytes_written)
+        .unwrap_or(0)
+        .checked_div(std::mem::size_of::<i32>())
+        .unwrap_or(0)
+        .min(pids.len());
+
+    let self_pid = std::process::id();
+    let mut samples = Vec::new();
+    for &raw_pid in pids.iter().take(count) {
+        if raw_pid <= 0 {
+            continue;
+        }
+        let Ok(pid) = u32::try_from(raw_pid) else {
+            continue;
+        };
+        if pid == self_pid {
+            continue;
+        }
+        // SAFETY: `rusage_info_v2` is a plain-old-data C struct of integer counters;
+        // zero initialization is valid and `proc_pid_rusage` only populates it for processes
+        // accessible to the current user (returning non-zero for root/other-user processes).
+        let mut usage: libc::rusage_info_v2 = unsafe { std::mem::zeroed() };
+        // SAFETY: `usage` is a valid `rusage_info_v2` matching `RUSAGE_INFO_V2`.
+        let rc = unsafe { proc_pid_rusage(raw_pid, libc::RUSAGE_INFO_V2, &raw mut usage) };
+        if rc != 0 || usage.ri_phys_footprint == 0 {
+            continue;
+        }
+        let mut name_buf = [0_u8; 256];
+        let Ok(name_cap) = u32::try_from(name_buf.len()) else {
+            continue;
+        };
+        // SAFETY: `name_buf` is a valid mutable byte buffer of length `name_cap`.
+        let name_len = unsafe {
+            proc_name(
+                raw_pid,
+                name_buf.as_mut_ptr().cast::<libc::c_void>(),
+                name_cap,
+            )
+        };
+        if name_len <= 0 {
+            continue;
+        }
+        let valid_len = usize::try_from(name_len).unwrap_or(0).min(name_buf.len());
+        let name = String::from_utf8_lossy(name_buf.get(..valid_len).unwrap_or(&[]))
+            .trim_end_matches('\0')
+            .trim()
+            .to_owned();
+        if name.is_empty() {
+            continue;
+        }
+        samples.push(ProcessMemorySample {
+            pid,
+            name,
+            rss_bytes: usage.ri_phys_footprint,
+        });
+    }
+    samples
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn collect_user_process_memory() -> Vec<ProcessMemorySample> {
+    Vec::new()
+}
+
+/// Ask the C/system allocator to return unused free heap pages back to the OS kernel.
+/// Safe to invoke after dropping large scan results or when memory pressure is high.
+#[must_use]
+pub fn reclaim_process_memory() -> bool {
+    reclaim_process_memory_impl()
+}
+
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+fn reclaim_process_memory_impl() -> bool {
+    unsafe extern "C" {
+        fn malloc_trim(pad: libc::size_t) -> libc::c_int;
+    }
+    // SAFETY: `malloc_trim(0)` is thread-safe in glibc and releases unused top-of-heap
+    // and arena pages back to the kernel without invalidating any live allocations.
+    unsafe { malloc_trim(0) != 0 }
+}
+
+#[cfg(target_os = "macos")]
+fn reclaim_process_memory_impl() -> bool {
+    unsafe extern "C" {
+        fn malloc_zone_pressure_relief(zone: *mut libc::c_void, goal: libc::size_t)
+        -> libc::size_t;
+    }
+    // SAFETY: Passing a null zone pointer instructs libsystem_malloc to relieve unused
+    // cached pages across all malloc zones; `goal = 0` requests maximal safe relief.
+    unsafe { malloc_zone_pressure_relief(std::ptr::null_mut(), 0) > 0 }
+}
+
+#[cfg(not(any(all(target_os = "linux", target_env = "gnu"), target_os = "macos")))]
+fn reclaim_process_memory_impl() -> bool {
+    false
 }

@@ -12,12 +12,20 @@ priority = 50
 
 [match]
 path_glob = "~/Library/pnpm/store/**"
-min_size_mb = 200
+min_size_mb = 100
+
+[[match.any_of]]
+path_glob = "~/.local/share/pnpm/store/**"
+min_size_mb = 100
+
+[[match.any_of]]
+path_glob = "~/.pnpm-store/**"
+min_size_mb = 100
 
 [action]
 type = "trash"
 prompt = "Move {size} of pnpm global store to Trash?"
 
 [test]
-should_match = ["~/Library/pnpm/store/v3/files/foo"]
+should_match = ["~/Library/pnpm/store/v3/files/foo", "~/.local/share/pnpm/store/v3/files/foo"]
 should_not_match = ["~/.cargo", "~/Library/pnpm/global/5/node_modules/typescript/package.json"]

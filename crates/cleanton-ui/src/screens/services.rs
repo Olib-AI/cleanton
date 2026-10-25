@@ -147,6 +147,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
             ServiceType::SystemLaunchAgent => "System LaunchAgent (/Library/LaunchAgents)",
             ServiceType::SystemLaunchDaemon => "System LaunchDaemon (/Library/LaunchDaemons)",
             ServiceType::BrewService => "Homebrew Managed Service",
+            ServiceType::SystemdUserService => "systemd User Service (~/.config/systemd/user)",
         };
 
         let detail_text = vec![

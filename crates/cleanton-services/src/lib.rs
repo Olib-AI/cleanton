@@ -4,6 +4,7 @@ pub mod manager;
 mod reviewed_plist_delete;
 mod reviewed_process;
 pub mod safety;
+pub mod systemd;
 pub mod types;
 
 pub use manager::{ServiceElevation, ServiceManager, ServiceMutationOptions};

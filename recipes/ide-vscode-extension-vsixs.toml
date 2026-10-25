@@ -1,0 +1,56 @@
+[recipe]
+id = "ide-vscode-extension-vsixs"
+name = "VS Code & Cursor Cached Extension Installers"
+description = "Cached downloaded .vsix extension archives and crash reports in VS Code, Cursor and VSCodium"
+category = "ide"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/Library/Application Support/Code/CachedExtensionVSIXs/**"
+min_age_days = 14
+
+[[match.any_of]]
+path_glob = "~/.config/Code/CachedExtensionVSIXs/**"
+min_age_days = 14
+
+[[match.any_of]]
+path_glob = "~/Library/Application Support/Cursor/CachedExtensionVSIXs/**"
+min_age_days = 14
+
+[[match.any_of]]
+path_glob = "~/.config/Cursor/CachedExtensionVSIXs/**"
+min_age_days = 14
+
+[[match.any_of]]
+path_glob = "~/Library/Application Support/VSCodium/CachedExtensionVSIXs/**"
+min_age_days = 14
+
+[[match.any_of]]
+path_glob = "~/.config/VSCodium/CachedExtensionVSIXs/**"
+min_age_days = 14
+
+[[match.any_of]]
+path_glob = "~/Library/Application Support/Code/Crashpad/completed/**"
+min_age_days = 7
+
+[[match.any_of]]
+path_glob = "~/.config/Code/Crashpad/completed/**"
+min_age_days = 7
+
+[action]
+type = "trash"
+prompt = "Move {size} of cached editor VSIX installers and crash dumps to Trash?"
+
+[test]
+should_match = [
+    "~/Library/Application Support/Code/CachedExtensionVSIXs/ms-python.python-2025.1.0",
+    "~/.config/Code/CachedExtensionVSIXs/rust-lang.rust-analyzer-0.4.0",
+    "~/.config/Cursor/CachedExtensionVSIXs/anysphere.pyright-1.0.0",
+    "~/.config/Code/Crashpad/completed/dump.dmp",
+]
+should_not_match = [
+    "~/.vscode/extensions/rust-lang.rust-analyzer/package.json",
+    "~/.config/Code/User/settings.json",
+]

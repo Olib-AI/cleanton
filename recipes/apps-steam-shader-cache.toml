@@ -15,10 +15,23 @@ path_glob = "~/Library/Application Support/Steam/steamapps/shadercache/**"
 min_size_mb = 50
 min_age_days = 14
 
+[[match.any_of]]
+path_glob = "~/.local/share/Steam/steamapps/shadercache/**"
+min_size_mb = 50
+min_age_days = 14
+
+[[match.any_of]]
+path_glob = "~/.steam/steam/steamapps/shadercache/**"
+min_size_mb = 50
+min_age_days = 14
+
 [action]
 type = "trash"
 prompt = "Move {size} of Steam shader cache to Trash?"
 
 [test]
-should_match = ["~/Library/Application Support/Steam/steamapps/shadercache/570/mesa_shader_cache/index"]
+should_match = [
+    "~/Library/Application Support/Steam/steamapps/shadercache/570/mesa_shader_cache/index",
+    "~/.local/share/Steam/steamapps/shadercache/570/mesa_shader_cache/index",
+]
 should_not_match = ["~/Library/Application Support/Steam/steamapps/common/Dota 2/game/bin/dota", "~/Library/Application Support/Steam/userdata/12345678/730/remote/save.dat"]

@@ -1,0 +1,24 @@
+[recipe]
+id = "dotnet-obj-dirs"
+name = ".NET obj Build Directories"
+# MSBuild and dotnet restore always write project.assets.json inside obj/,
+# proving the directory is a generated .NET intermediate directory rather than
+# a Wavefront 3D asset folder named obj/.
+description = "Per-project .NET MSBuild intermediate obj directories (rebuilt by dotnet build)"
+category = "dotnet"
+safety_level = "safe"
+enabled = true
+priority = 55
+
+[match]
+directory_name = "obj"
+self_must_contain = ["project.assets.json"]
+min_age_days = 7
+
+[action]
+type = "trash"
+prompt = "Move {size} of .NET obj build directories to Trash?"
+
+[test]
+should_match = ["projects/WebApi/obj"]
+should_not_match = ["projects/WebApi/src", "assets/models/obj"]

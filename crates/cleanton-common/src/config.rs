@@ -15,6 +15,7 @@ pub struct CleantonConfig {
     pub safety: SafetyConfig,
     pub ml: MlConfig,
     pub ui: UiConfig,
+    pub background: BackgroundConfig,
 }
 
 impl CleantonConfig {
@@ -125,13 +126,11 @@ pub struct ScanningConfig {
 impl Default for ScanningConfig {
     fn default() -> Self {
         Self {
-            // Depth 10 from the home root reaches essentially every cleanable
-            // cache / build directory (`node_modules`, `target`, `~/Library/
-            // Caches/*`, `.venv`, ...) while keeping a full-home scan from
-            // exploding into millions of entries held in memory. The whole
-            // cleanable directory is matched and size-aggregated from what we
-            // walk; users who want exhaustive depth can raise this.
-            max_depth: 10,
+            // Depth 20 matches ScanOptions::default() and reaches nested build
+            // outputs (Xcode DerivedData object dirs, Python .venv site-packages,
+            // Maven/Gradle repository hierarchies, monorepo workspaces) without
+            // silently truncating directory sizes at depth 10.
+            max_depth: 20,
             follow_symlinks: false,
             respect_gitignore: true,
             parallel_threads: 0,
@@ -209,6 +208,30 @@ impl Default for UiConfig {
             sort_by: "size".to_owned(),
             group_by: "category".to_owned(),
             icon_mode: "nerd-font".to_owned(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BackgroundConfig {
+    /// Monitor disk and memory pressure in the background while Cleanton is running.
+    pub enabled: bool,
+    /// Home-volume used percentage at or above which Cleanton offers disk cleanup (`0` disables).
+    pub disk_pressure_percent: u8,
+    /// System memory used percentage at or above which Cleanton offers memory cleanup (`0` disables).
+    pub memory_pressure_percent: u8,
+    /// Poll interval in seconds for background resource pressure checks.
+    pub poll_interval_secs: u64,
+}
+
+impl Default for BackgroundConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            disk_pressure_percent: 85,
+            memory_pressure_percent: 85,
+            poll_interval_secs: 30,
         }
     }
 }

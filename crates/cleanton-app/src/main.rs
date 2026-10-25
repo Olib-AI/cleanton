@@ -15,7 +15,7 @@ use std::{
     rc::Rc,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
 };
 
@@ -28,10 +28,11 @@ use cleanton_common::{
     ExecutionStatus, SafetyLevel, display,
 };
 use cleanton_engine::{
-    AnalyzedFull, AnalyzedPlan, AnnotatedAction, DockerAnalysis, DockerCleaner, DockerCleanupPlan,
-    DuplicateSet, EngineEvent, InstalledApp, LargeItem, Orchestrator, SecurityRemoval,
-    SnapshotAnalysis, SnapshotConfirmState, Suggestions, UninstallPlan, cask_token_for,
-    delete_local_snapshots, find_leftovers, format_snapshot_date, list_installed_apps,
+    AnalyzedFull, AnalyzedPlan, AnnotatedAction, CleanupOffer, DockerAnalysis, DockerCleaner,
+    DockerCleanupPlan, DuplicateSet, EngineEvent, InstalledApp, LargeItem, Orchestrator,
+    ResourceStatus, SecurityRemoval, SnapshotAnalysis, SnapshotConfirmState, Suggestions,
+    UninstallPlan, cask_token_for, delete_local_snapshots, find_leftovers, format_snapshot_date,
+    list_installed_apps, snapshot_resource_status,
 };
 use cleanton_packages::{Inventory, ManagerKind, PackageManagers, plan_removal, scan_usage};
 use cleanton_scanner::ScanOptions;
@@ -88,6 +89,15 @@ static SECURITY_REMOVE_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 
 /// One uninstall at a time.
 static UNINSTALL_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
+
+/// Monotonic generation counter for package-tab loads so stale responses from
+/// an earlier manager tab never overwrite the newly selected tab.
+static PACKAGE_LOAD_ID: AtomicU64 = AtomicU64::new(0);
+
+/// User-dismissed resource pressure banners; automatically re-armed once usage
+/// falls 5% below threshold so genuine new pressure spikes surface again.
+static DISK_OFFER_DISMISSED: AtomicBool = AtomicBool::new(false);
+static MEMORY_OFFER_DISMISSED: AtomicBool = AtomicBool::new(false);
 
 /// App-bundle paths Cleanton itself just moved to the Trash. The background
 /// app-removal watcher consults this so it does not re-trigger the "an app was
@@ -193,21 +203,16 @@ fn main() -> Result<(), slint::PlatformError> {
     slint::BackendSelector::new().select()?;
     register_embedded_fonts();
 
-    // Create the Slint window.
+    // Create the Slint window and populate immediate in-memory state so the
+    // first frame renders without waiting on subprocesses (`tmutil`, `brew`,
+    // `npm`, `pip`, `port`) or disk/memory probes.
     let ui = AppWindow::new()?;
     initialise_app_state(&ui, &config);
-    // Read real disk capacity + usage history once at startup (no mock data).
-    apply_capacity_state(
-        &ui.global::<AppState>(),
-        &capacity::read(&capacity_root(&config)),
-    );
-    // Probe Full Disk Access once at startup. A single filesystem open is cheap
-    // and infallible (denial is a normal result), so it stays on the UI thread
-    // without affecting the background-thread scan/clean model.
     apply_fda_state(&ui.global::<AppState>());
     // The config becomes shared + mutable so the Settings screen can edit it and
     // subsequent scans/cleans observe the updated values.
     let shared_config: SharedConfig = Arc::new(Mutex::new(config));
+    spawn_startup_probes(ui.as_weak(), shared_config.clone());
     let latest_plan = Arc::new(Mutex::new(None::<CleanupPlan>));
     let current_operation = Arc::new(Mutex::new(None::<CancellationToken>));
 
@@ -284,8 +289,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 .await;
                 progress_handle.abort();
 
-                // Refresh real disk capacity + record a usage sample (off the UI thread).
+                // Refresh real disk capacity + resource status (off the UI thread).
                 let capacity_view = capacity::read(&capacity_root(&config));
+                let resource_status = read_resource_status(&config);
 
                 let _ = ui_weak.upgrade_in_event_loop(move |ui| {
                     if cancel_token.load(Ordering::Relaxed) {
@@ -296,6 +302,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     let state = ui.global::<AppState>();
                     state.set_scanning(false);
                     apply_capacity_state(&state, &capacity_view);
+                    apply_resource_status(&state, &resource_status);
                     match result {
                         Ok((scan, full)) => {
                             store_latest_plan(&latest_plan, Some(full.analyzed.plan.clone()));
@@ -567,8 +574,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 .await;
 
-                // Refresh capacity so the dashboard reflects any bytes actually freed.
+                // Refresh capacity + resource status so the dashboard reflects freed space.
                 let capacity_view = capacity::read(&capacity_root(&config));
+                let resource_status = read_resource_status(&config);
 
                 let _ = ui_weak.upgrade_in_event_loop(move |ui| {
                     // Superseded by a newer operation: drop this result. A user
@@ -584,6 +592,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     let state = ui.global::<AppState>();
                     state.set_cleaning(false);
                     apply_capacity_state(&state, &capacity_view);
+                    apply_resource_status(&state, &resource_status);
                     match result {
                         Ok(result) => {
                             apply_execution_result(&state, &result);
@@ -663,11 +672,13 @@ fn main() -> Result<(), slint::PlatformError> {
         let config = config_snapshot(&config_clone);
         std::thread::spawn(move || {
             let result = trash_ops::empty_trash();
-            // Re-read capacity so the dashboard reflects reclaimed space.
+            // Re-read capacity + resource status so the dashboard reflects reclaimed space.
             let capacity_view = capacity::read(&capacity_root(&config));
+            let resource_status = read_resource_status(&config);
             let _ = ui_weak.upgrade_in_event_loop(move |ui| {
                 let state = ui.global::<AppState>();
                 apply_capacity_state(&state, &capacity_view);
+                apply_resource_status(&state, &resource_status);
                 refresh_trash_state(&state);
                 match result {
                     Ok(()) => state.set_trash_status(
@@ -680,6 +691,69 @@ fn main() -> Result<(), slint::PlatformError> {
             });
         });
     });
+
+    // ── Wire: Memory reclaim + resource pressure callbacks ─────────────────
+    let ui_weak = ui.as_weak();
+    let config_clone = shared_config.clone();
+    ui.global::<AppCallbacks>().on_reclaim_memory(move || {
+        let Some(ui) = ui_weak.upgrade() else {
+            return;
+        };
+        let state = ui.global::<AppState>();
+        state.set_memory_status(
+            "Reclaiming unused allocator pages and refreshing memory...".into(),
+        );
+
+        let ui_weak = ui.as_weak();
+        let config = config_snapshot(&config_clone);
+        std::thread::spawn(move || {
+            let reclaimed = cleanton_scanner::reclaim_process_memory();
+            let status = read_resource_status(&config);
+            let _ = ui_weak.upgrade_in_event_loop(move |ui| {
+                let state = ui.global::<AppState>();
+                apply_resource_status(&state, &status);
+                let note = if reclaimed {
+                    "Reclaimed idle allocator pages. Review heavy processes or background services if memory stays elevated."
+                } else {
+                    "Memory snapshot refreshed. Review heavy processes or background services to free more RAM."
+                };
+                state.set_memory_status(note.into());
+            });
+        });
+    });
+
+    let ui_weak = ui.as_weak();
+    let config_clone = shared_config.clone();
+    ui.global::<AppCallbacks>().on_refresh_memory(move || {
+        let ui_weak = ui_weak.clone();
+        let config = config_snapshot(&config_clone);
+        std::thread::spawn(move || {
+            let capacity_view = capacity::read(&capacity_root(&config));
+            let status = read_resource_status(&config);
+            let _ = ui_weak.upgrade_in_event_loop(move |ui| {
+                let state = ui.global::<AppState>();
+                apply_capacity_state(&state, &capacity_view);
+                apply_resource_status(&state, &status);
+            });
+        });
+    });
+
+    let ui_weak = ui.as_weak();
+    ui.global::<AppCallbacks>().on_dismiss_disk_offer(move || {
+        DISK_OFFER_DISMISSED.store(true, Ordering::Relaxed);
+        if let Some(ui) = ui_weak.upgrade() {
+            ui.global::<AppState>().set_disk_offer_active(false);
+        }
+    });
+
+    let ui_weak = ui.as_weak();
+    ui.global::<AppCallbacks>()
+        .on_dismiss_memory_offer(move || {
+            MEMORY_OFFER_DISMISSED.store(true, Ordering::Relaxed);
+            if let Some(ui) = ui_weak.upgrade() {
+                ui.global::<AppState>().set_memory_offer_active(false);
+            }
+        });
 
     // ── Wire: Services refresh callback ────────────────────────────────────
     let ui_weak = ui.as_weak();
@@ -1271,6 +1345,17 @@ fn main() -> Result<(), slint::PlatformError> {
                 state.set_setting_save_status(format!("Save failed: {err}").into());
             }
         }
+
+        // Re-evaluate pressure offers immediately against the updated thresholds.
+        DISK_OFFER_DISMISSED.store(false, Ordering::Relaxed);
+        MEMORY_OFFER_DISMISSED.store(false, Ordering::Relaxed);
+        let ui_weak = ui.as_weak();
+        std::thread::spawn(move || {
+            let status = read_resource_status(&updated);
+            let _ = ui_weak.upgrade_in_event_loop(move |ui| {
+                apply_resource_status(&ui.global::<AppState>(), &status);
+            });
+        });
     });
 
     // ── Wire: Reset settings callback ──────────────────────────────────────
@@ -1588,14 +1673,161 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
 
-    // ── Watch for apps removed outside Cleanton ────────────────────────────
-    // A light background poll of the Applications folders. When the user drags
-    // an app to the Trash (or another uninstaller removes it), we deep-link to
-    // the Applications tab and load its leftovers so they can be cleaned up.
+    // ── Watch for apps removed outside Cleanton + resource pressure ───────
+    // Light background polls for externally-removed apps and high disk/memory
+    // usage so cleanup offers surface automatically even while idle.
     spawn_app_removal_watcher(ui.as_weak());
+    spawn_resource_pressure_watcher(ui.as_weak(), shared_config.clone());
 
     // ── Run the event loop ─────────────────────────────────────────────────
     ui.run()
+}
+
+/// Offload startup probes (`PackageManagers::detect`, `capacity::read`,
+/// `snapshot_resource_status`, and Trash check) from `main()` so the window
+/// paints immediately.
+fn spawn_startup_probes(ui_weak: slint::Weak<AppWindow>, shared_config: SharedConfig) {
+    std::thread::spawn(move || {
+        let config = config_snapshot(&shared_config);
+        let has_trash = trash_ops::trash_has_items();
+        let detected = PackageManagers::detect();
+        let capacity_view = capacity::read(&capacity_root(&config));
+        let resource_status = read_resource_status(&config);
+        let _ = ui_weak.upgrade_in_event_loop(move |ui| {
+            let state = ui.global::<AppState>();
+            state.set_trash_has_items(has_trash);
+            if !has_trash && !state.get_empty_trash_pending() {
+                state.set_trash_status("Trash is empty: nothing to reclaim there.".into());
+            }
+            apply_detected_package_tabs(&state, &detected);
+            apply_capacity_state(&state, &capacity_view);
+            apply_resource_status(&state, &resource_status);
+        });
+    });
+}
+
+/// Periodic background monitor for high disk or memory usage.
+fn spawn_resource_pressure_watcher(ui_weak: slint::Weak<AppWindow>, shared_config: SharedConfig) {
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(Duration::from_secs(30));
+            let config = config_snapshot(&shared_config);
+            let status = read_resource_status(&config);
+            if ui_weak
+                .upgrade_in_event_loop(move |ui| {
+                    apply_resource_status(&ui.global::<AppState>(), &status);
+                })
+                .is_err()
+            {
+                break;
+            }
+        }
+    });
+}
+
+fn read_resource_status(config: &CleantonConfig) -> ResourceStatus {
+    let (disk_pct, mem_pct) = if config.background.enabled {
+        (
+            config.background.disk_pressure_percent,
+            config.background.memory_pressure_percent,
+        )
+    } else {
+        (0, 0)
+    };
+    snapshot_resource_status(disk_pct, mem_pct)
+}
+
+fn apply_resource_status(state: &AppState, status: &ResourceStatus) {
+    if status.memory_total_bytes > 0 {
+        let total = status.memory_total_bytes;
+        let available = status.memory_available_bytes;
+        let pct = status.memory_used_percent;
+        let used = total.saturating_sub(available);
+        let ratio = (used as f64 / total as f64) as f32;
+        state.set_memory_ready(true);
+        state.set_memory_total(display::human_bytes(total).into());
+        state.set_memory_used(format!("{} ({pct}%)", display::human_bytes(used)).into());
+        state.set_memory_available(display::human_bytes(available).into());
+        state.set_memory_used_ratio(ratio.clamp(0.0, 1.0));
+    } else {
+        state.set_memory_ready(false);
+        state.set_memory_total("--".into());
+        state.set_memory_used("Unavailable".into());
+        state.set_memory_available("--".into());
+        state.set_memory_used_ratio(0.0);
+    }
+
+    // Re-arm dismissed banners once usage drops comfortably below threshold.
+    if status.disk_offer.is_none() {
+        DISK_OFFER_DISMISSED.store(false, Ordering::Relaxed);
+    }
+    if status.memory_offer.is_none() {
+        MEMORY_OFFER_DISMISSED.store(false, Ordering::Relaxed);
+    }
+
+    if let Some((advice, offer)) = &status.disk_offer
+        && !DISK_OFFER_DISMISSED.load(Ordering::Relaxed)
+    {
+        let pct = status.disk_used_percent;
+        let avail = display::human_bytes(status.disk_available_bytes);
+        state.set_disk_offer_headline(
+            format!("Disk usage is high ({pct}% used, {avail} free) - disk cleanup recommended")
+                .into(),
+        );
+        let detail = match offer {
+            CleanupOffer::Disk {
+                estimated_reclaimable_bytes,
+                candidates,
+            } if *estimated_reclaimable_bytes > 0 => {
+                let top = candidates
+                    .iter()
+                    .take(3)
+                    .map(|c| format!("{} ({})", c.label, display::human_bytes(c.bytes)))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "Detected ~{} in quick-relief targets ({top}). Run Scan & Review to move safe caches and build artifacts to the Trash.",
+                    display::human_bytes(*estimated_reclaimable_bytes),
+                )
+            }
+            _ => advice.clone(),
+        };
+        state.set_disk_offer_detail(detail.into());
+        state.set_disk_offer_active(true);
+    } else {
+        state.set_disk_offer_active(false);
+    }
+
+    if let Some((advice, offer)) = &status.memory_offer
+        && !MEMORY_OFFER_DISMISSED.load(Ordering::Relaxed)
+    {
+        let pct = status.memory_used_percent;
+        let avail = display::human_bytes(status.memory_available_bytes);
+        state.set_memory_offer_headline(
+            format!(
+                "Memory usage is high ({pct}% used, {avail} available) - memory cleanup recommended"
+            )
+            .into(),
+        );
+        let detail = match offer {
+            CleanupOffer::Memory { top_processes, .. } if !top_processes.is_empty() => {
+                let top = top_processes
+                    .iter()
+                    .take(4)
+                    .map(|p| format!("{} ({})", p.name, display::human_bytes(p.rss_bytes)))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "Top resident processes: {top}. Reclaim idle allocator pages or review running background services."
+                )
+            }
+            _ => advice.clone(),
+        };
+        state.set_memory_offer_detail(detail.into());
+        state.set_memory_offer_active(true);
+    } else {
+        state.set_memory_offer_active(false);
+    }
 }
 
 /// Background thread that polls for externally-removed apps and, on detection,
@@ -1699,6 +1931,7 @@ fn start_package_load(ui: &AppWindow, idx: i32, config: &SharedConfig) {
     PKG_INVENTORY.with(|cell| *cell.borrow_mut() = None);
     PKG_KEEP.with(|cell| cell.borrow_mut().clear());
 
+    let load_id = PACKAGE_LOAD_ID.fetch_add(1, Ordering::SeqCst) + 1;
     let ui_weak = ui.as_weak();
     let roots = package_scan_roots(&config_snapshot(config));
     std::thread::spawn(move || {
@@ -1706,6 +1939,9 @@ fn start_package_load(ui: &AppWindow, idx: i32, config: &SharedConfig) {
             // Phase 1 — read the inventory and SHOW it immediately. The slow,
             // network-bound update check runs separately in phase 2.
             let inventory = PackageManagers::inventory(kind).await;
+            if PACKAGE_LOAD_ID.load(Ordering::SeqCst) != load_id {
+                return;
+            }
             let any = !inventory.packages.is_empty();
             let do_usage = matches!(kind, ManagerKind::Homebrew) && any;
             let names: Vec<String> = if do_usage {
@@ -1714,6 +1950,9 @@ fn start_package_load(ui: &AppWindow, idx: i32, config: &SharedConfig) {
                 Vec::new()
             };
             let _ = ui_weak.upgrade_in_event_loop(move |ui| {
+                if PACKAGE_LOAD_ID.load(Ordering::SeqCst) != load_id {
+                    return;
+                }
                 let state = ui.global::<AppState>();
                 state.set_package_loading(false);
                 apply_inventory(&state, inventory);
@@ -1739,12 +1978,18 @@ fn start_package_load(ui: &AppWindow, idx: i32, config: &SharedConfig) {
             // Phase 2 — slow probes: update check (every manager) plus the
             // codebase-usage scan (Homebrew only). Fill the list in progressively.
             let outdated = PackageManagers::outdated(kind).await;
+            if PACKAGE_LOAD_ID.load(Ordering::SeqCst) != load_id {
+                return;
+            }
             let usage = if do_usage {
                 scan_usage(&names, &roots)
             } else {
                 HashMap::new()
             };
             let _ = ui_weak.upgrade_in_event_loop(move |ui| {
+                if PACKAGE_LOAD_ID.load(Ordering::SeqCst) != load_id {
+                    return;
+                }
                 let state = ui.global::<AppState>();
                 let update_count = apply_outdated(&state, &outdated);
                 if do_usage {
@@ -2307,13 +2552,12 @@ fn refresh_trash_state(state: &AppState) {
     let has_items = trash_ops::trash_has_items();
     state.set_trash_has_items(has_items);
     if !has_items && !state.get_empty_trash_pending() {
-        state.set_trash_status("Trash is empty \u{2014} nothing to reclaim there.".into());
+        state.set_trash_status("Trash is empty: nothing to reclaim there.".into());
     }
 }
 
 fn initialise_app_state(ui: &AppWindow, config: &CleantonConfig) {
     let state = ui.global::<AppState>();
-    refresh_trash_state(&state);
 
     // Version of the build actually running (Settings > About).
     state.set_app_version(SharedString::from(env!("CARGO_PKG_VERSION")));
@@ -2324,8 +2568,21 @@ fn initialise_app_state(ui: &AppWindow, config: &CleantonConfig) {
         Vec::<ServiceRow>::new(),
     ))));
 
-    // Populate the package-manager selector (all five, greyed when not installed).
-    let detected = PackageManagers::detect();
+    // Populate initial package-manager tabs synchronously without spawning
+    // subprocesses; `spawn_startup_probes` updates availability off the UI thread.
+    let tabs: Vec<PkgManagerTab> = PKG_MANAGER_ORDER
+        .iter()
+        .map(|kind| PkgManagerTab {
+            id: SharedString::from(kind.id()),
+            label: SharedString::from(kind.label()),
+            available: true,
+        })
+        .collect();
+    state.set_active_package_tab(0);
+    state.set_package_tabs(ModelRc::from(Rc::new(VecModel::from(tabs))));
+}
+
+fn apply_detected_package_tabs(state: &AppState, detected: &[ManagerKind]) {
     let tabs: Vec<PkgManagerTab> = PKG_MANAGER_ORDER
         .iter()
         .map(|kind| PkgManagerTab {
@@ -2334,13 +2591,14 @@ fn initialise_app_state(ui: &AppWindow, config: &CleantonConfig) {
             available: detected.contains(kind),
         })
         .collect();
-    // Default the active tab to the first available manager.
-    let first_available = PKG_MANAGER_ORDER
-        .iter()
-        .position(|kind| detected.contains(kind))
-        .unwrap_or(0);
-    state.set_active_package_tab(clamp_to_i32(first_available));
     state.set_package_tabs(ModelRc::from(Rc::new(VecModel::from(tabs))));
+    if state.get_package_count() == 0 && !state.get_package_loading() {
+        let first_available = PKG_MANAGER_ORDER
+            .iter()
+            .position(|kind| detected.contains(kind))
+            .unwrap_or(0);
+        state.set_active_package_tab(clamp_to_i32(first_available));
+    }
 }
 
 /// Read the current config snapshot, recovering the inner value if the lock was
@@ -2381,6 +2639,8 @@ fn populate_settings(state: &AppState, config: &CleantonConfig) {
     state.set_setting_max_action_gb(
         i32::try_from(config.safety.max_single_action_gb).unwrap_or(i32::MAX),
     );
+    state.set_setting_disk_pressure_percent(i32::from(config.background.disk_pressure_percent));
+    state.set_setting_memory_pressure_percent(i32::from(config.background.memory_pressure_percent));
 }
 
 /// Read the edited Settings controls back into `config`.
@@ -2403,6 +2663,10 @@ fn read_settings_into_config(state: &AppState, config: &mut CleantonConfig) {
         .unwrap_or(config.safety.max_single_run_gb);
     config.safety.max_single_action_gb = u64::try_from(state.get_setting_max_action_gb().max(1))
         .unwrap_or(config.safety.max_single_action_gb);
+    let disk_pct = state.get_setting_disk_pressure_percent().clamp(0, 99);
+    config.background.disk_pressure_percent = u8::try_from(disk_pct).unwrap_or(0);
+    let mem_pct = state.get_setting_memory_pressure_percent().clamp(0, 99);
+    config.background.memory_pressure_percent = u8::try_from(mem_pct).unwrap_or(0);
 }
 
 fn clamp_to_i32(value: usize) -> i32 {
@@ -3786,6 +4050,7 @@ fn service_type_label(service_type: ServiceType) -> &'static str {
         ServiceType::SystemLaunchAgent => "System agent",
         ServiceType::SystemLaunchDaemon => "Daemon",
         ServiceType::BrewService => "Brew",
+        ServiceType::SystemdUserService => "systemd",
     }
 }
 

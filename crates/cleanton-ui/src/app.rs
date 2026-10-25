@@ -120,8 +120,9 @@ pub struct App {
     pub file_tree_state: Option<FileTreeState>,
     pub pending_cleanup_confirmation: Option<Vec<usize>>,
 
-    // Disk capacity + real usage history (no mock data)
+    // Disk capacity + real usage history + background helper resource snapshot
     pub capacity_view: CapacityView,
+    pub resource_status: cleanton_engine::ResourceStatus,
     pub pending_empty_trash_confirmation: bool,
 
     // Services state
@@ -265,6 +266,7 @@ impl App {
             file_tree_state: None,
             pending_cleanup_confirmation: None,
             capacity_view: CapacityView::default(),
+            resource_status: cleanton_engine::ResourceStatus::default(),
             pending_empty_trash_confirmation: false,
             services: Vec::new(),
             selected_service_idx: 0,
@@ -324,7 +326,23 @@ impl App {
     pub fn refresh_capacity(&mut self) {
         let root = cleanton_common::paths::expand_tilde(&self.config.general.default_root);
         self.capacity_view = capacity::read(&root);
+        self.resource_status = cleanton_engine::snapshot_resource_status(
+            self.config.background.disk_pressure_percent,
+            self.config.background.memory_pressure_percent,
+        );
         self.rebuild_snapshot_review();
+    }
+
+    /// Reclaims unused Cleanton allocator pages and refreshes live memory status.
+    pub fn reclaim_memory(&mut self) {
+        let _ = cleanton_scanner::reclaim_process_memory();
+        self.resource_status = cleanton_engine::snapshot_resource_status(
+            self.config.background.disk_pressure_percent,
+            self.config.background.memory_pressure_percent,
+        );
+        self.set_status(
+            "Memory cleanup: reclaimed unused allocator pages. Review idle background services below.",
+        );
     }
 
     /// Derives the Results-screen snapshot review model from the freshly read

@@ -1,0 +1,21 @@
+[recipe]
+id = "jvm-project-gradle-dirs"
+name = "Gradle Project .gradle Caches"
+description = "Per-project .gradle task history and configuration caches (rebuilt by gradle)"
+category = "jvm"
+safety_level = "safe"
+enabled = true
+priority = 52
+
+[match]
+directory_name = ".gradle"
+parent_must_contain_any = ["build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts"]
+min_age_days = 14
+
+[action]
+type = "trash"
+prompt = "Move {size} of project .gradle caches to Trash?"
+
+[test]
+should_match = ["projects/android-app/.gradle"]
+should_not_match = ["~/.gradle/gradle.properties", "loose/.gradle"]

@@ -14,13 +14,15 @@ priority = 75
 # recipe is `safe`; the age/size floors keep an actively-used cache alone.
 [match]
 path_glob = "~/Library/Caches/ccache/**"
-min_size_mb = 50
 min_age_days = 30
+
+[match.exclude]
+names = ["ccache.conf"]
 
 [[match.any_of]]
 path_glob = "~/.cache/ccache/**"
-min_size_mb = 50
 min_age_days = 30
+exclude = { names = ["ccache.conf"] }
 
 [action]
 type = "trash"
