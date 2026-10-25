@@ -69,12 +69,14 @@ impl WatchOptions {
     /// backoff ceiling kept at least as large as the base interval.
     #[must_use]
     pub fn with_idle_seconds(seconds: u64) -> Self {
+        let defaults = Self::default();
         let idle = Duration::from_secs(seconds.max(1));
-        let mut options = Self::default();
-        options.idle = idle;
-        options.max_idle = options.max_idle.max(idle);
-        options.burst = options.burst.min(idle);
-        options
+        Self {
+            idle,
+            max_idle: defaults.max_idle.max(idle),
+            burst: defaults.burst.min(idle),
+            quiet_ticks_before_backoff: defaults.quiet_ticks_before_backoff,
+        }
     }
 }
 
@@ -211,7 +213,7 @@ impl PackageWatcher {
             let examined = candidates.len();
             for name in &candidates {
                 for dir in expand_entry(&target.root, name) {
-                    events.extend(self.check_package(target.kind, &dir));
+                    events.extend(check_package(&self.advisories, target.kind, &dir));
                 }
             }
             events.push(WatchEvent::RootChanged {
@@ -221,54 +223,6 @@ impl PackageWatcher {
         }
         if events.is_empty() {
             events.push(WatchEvent::Quiet);
-        }
-        events
-    }
-
-    /// Investigate one package directory: advisory lookup, lifecycle hooks, and
-    /// a single-directory content scan.
-    fn check_package(&self, kind: SecurityTargetKind, dir: &Path) -> Vec<WatchEvent> {
-        let Some((ecosystem, name, version)) = package_identity(kind, dir) else {
-            return Vec::new();
-        };
-        let mut events = Vec::new();
-        if let Some(version) = version.as_deref().filter(|version| !version.is_empty()) {
-            let subject = PackageSubject::new(ecosystem, name.clone(), version);
-            for advisory in self.advisories.matches(&subject) {
-                events.push(WatchEvent::Advisory {
-                    package: name.clone(),
-                    version: version.to_owned(),
-                    advisory: advisory.id.clone(),
-                    severity: advisory.severity,
-                    summary: advisory.summary.clone(),
-                    remediation: advisory.remediation(),
-                });
-            }
-        }
-        if let Some(hook) = install_hook(kind, dir) {
-            events.push(WatchEvent::InstallHook {
-                package: name.clone(),
-                hook,
-            });
-        }
-        if kind.is_version_only() {
-            // Version-only ecosystems are never content-scanned; see
-            // `SecurityTargetKind::is_version_only`.
-            return events;
-        }
-        let scanner = Scanner::with_default_engines(ScanConfig::default());
-        if let Ok(report) = scanner.scan_path(dir)
-            && !matches!(report.verdict, Verdict::Clean)
-        {
-            events.push(WatchEvent::ContentFinding {
-                package: name,
-                verdict: report.verdict,
-                findings: report.findings.len(),
-                headline: report
-                    .findings
-                    .first()
-                    .map_or_else(String::new, |finding| finding.title.clone()),
-            });
         }
         events
     }
@@ -298,6 +252,58 @@ impl PackageWatcher {
             sleep_interruptibly(interval, cancel);
         }
     }
+}
+
+/// Investigate one package directory: advisory lookup, lifecycle hooks, and
+/// a single-directory content scan.
+fn check_package(
+    advisories: &AdvisoryDatabase,
+    kind: SecurityTargetKind,
+    dir: &Path,
+) -> Vec<WatchEvent> {
+    let Some((ecosystem, name, version)) = package_identity(kind, dir) else {
+        return Vec::new();
+    };
+    let mut events = Vec::new();
+    if let Some(version) = version.as_deref().filter(|version| !version.is_empty()) {
+        let subject = PackageSubject::new(ecosystem, name.clone(), version);
+        for advisory in advisories.matches(&subject) {
+            events.push(WatchEvent::Advisory {
+                package: name.clone(),
+                version: version.to_owned(),
+                advisory: advisory.id.clone(),
+                severity: advisory.severity,
+                summary: advisory.summary.clone(),
+                remediation: advisory.remediation(),
+            });
+        }
+    }
+    if let Some(hook) = install_hook(kind, dir) {
+        events.push(WatchEvent::InstallHook {
+            package: name.clone(),
+            hook,
+        });
+    }
+    if kind.is_version_only() {
+        // Version-only ecosystems are never content-scanned; see
+        // `SecurityTargetKind::is_version_only`.
+        return events;
+    }
+    let scanner = Scanner::with_default_engines(ScanConfig::default());
+    if let Ok(report) = scanner.scan_path(dir)
+        && !matches!(report.verdict, Verdict::Clean)
+    {
+        events.push(WatchEvent::ContentFinding {
+            package: name,
+            verdict: report.verdict,
+            findings: report.findings.len(),
+            headline: report
+                .findings
+                .first()
+                .map_or_else(String::new, |finding| finding.title.clone()),
+        });
+    }
+    events
 }
 
 /// Sleep in small slices so a cancellation request is honoured promptly.
