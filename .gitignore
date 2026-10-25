@@ -32,3 +32,6 @@ cargo-audit.json
 __pycache__/
 *.py[cod]
 .venv/
+
+# CI diagnostics published by the temporary Agent gate workflow
+.ci/

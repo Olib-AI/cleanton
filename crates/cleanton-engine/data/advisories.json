@@ -1,0 +1,303 @@
+{
+  "schema": 1,
+  "updated": "2026-10-24",
+  "note": "Curated snapshot of widely published dependency advisories, keyed by CVE/RUSTSEC/GO identifiers so each entry can be checked against the reference URL. Ranges are half-open [introduced, fixed); a missing 'fixed' means no remedy is published. Drop OSV-format JSON into ~/.config/cleanton/advisories/ to extend this set. Nothing here is fetched at runtime.",
+  "advisories": [
+    {
+      "id": "CVE-2021-23337",
+      "ecosystem": "npm",
+      "package": "lodash",
+      "severity": "high",
+      "summary": "Command injection through lodash.template",
+      "ranges": [{ "introduced": "0", "fixed": "4.17.21" }],
+      "references": ["https://nvd.nist.gov/vuln/detail/CVE-2021-23337"]
+    },
+    {
+      "id": "CVE-2021-44906",
+      "ecosystem": "npm",
+      "package": "minimist",
+      "severity": "critical",
+      "summary": "Prototype pollution in minimist",
+      "ranges": [
+        { "introduced": "0", "fixed": "0.2.4" },
+        { "introduced": "1.0.0", "fixed": "1.2.6" }
+      ],
+      "references": ["https://nvd.nist.gov/vuln/detail/CVE-2021-44906"]
+    },
+    {
+      "id": "CVE-2022-0235",
+      "ecosystem": "npm",
+      "package": "node-fetch",
+      "severity": "high",
+      "summary": "Exposure of sensitive information to an unauthorized actor in node-fetch",
+      "ranges": [
+        { "introduced": "0", "fixed": "2.6.7" },
+        { "introduced": "3.0.0", "fixed": "3.1.1" }
+      ],
+      "references": ["https://nvd.nist.gov/vuln/detail/CVE-2022-0235"]
+    },
+    {
+      "id": "CVE-2022-46175",
+      "ecosystem": "npm",
+      "package": "json5",
+      "severity": "high",
+      "summary": "Prototype pollution in JSON5 via parse",
+      "ranges": [{ "introduced": "0", "fixed": "2.2.2" }],
+      "references": ["https://nvd.nist.gov/vuln/detail/CVE-2022-46175"]
+    },
+    {
+      "id": "CVE-2023-45857",
+      "ecosystem": "npm",
+      "package": "axios",
+      "severity": "high",
+      "summary": "Axios sends the XSRF token to third-party hosts",
+      "ranges": [{ "introduced": "0", "fixed": "1.6.0" }],
+      "references": ["https://nvd.nist.gov/vuln/detail/CVE-2023-45857"]
+    },
+    {
+      "id": "CVE-2024-29041",
+      "ecosystem": "npm",
+      "package": "express",
+      "severity": "medium",
+      "summary": "Open redirect in express response.location()",
+      "ranges": [{ "introduced": "0", "fixed": "4.19.2" }],
+      "references": ["https://nvd.nist.gov/vuln/detail/CVE-2024-29041"]
+    },
+    {
+      "id": "CVE-2022-25883",
+      "ecosystem": "npm",
+      "package": "semver",
+      "severity": "medium",
+      "summary": "Regular expression denial of service in semver range parsing",
+      "ranges": [
+        { "introduced": "0", "fixed": "6.3.1" },
+        { "introduced": "7.0.0", "fixed": "7.5.2" }
+      ],
+      "references": ["https://nvd.nist.gov/vuln/detail/CVE-2022-25883"]
+    },
+    {
+      "id": "CVE-2023-26136",
+      "ecosystem": "npm",
+      "package": "tough-cookie",
+      "severity": "medium",
+      "summary": "Prototype pollution in tough-cookie",
+      "ranges": [{ "introduced": "0", "fixed": "4.1.3" }],
+      "references": ["https://nvd.nist.gov/vuln/detail/CVE-2023-26136"]
+    },
+    {
+      "id": "CVE-2024-21538",
+      "ecosystem": "npm",
+      "package": "cross-spawn",
+      "severity": "high",
+      "summary": "Regular expression denial of service in cross-spawn",
+      "ranges": [
+        { "introduced": "0", "fixed": "6.0.6" },
+        { "introduced": "7.0.0", "fixed": "7.0.5" }
+      ],
+      "references": ["https://nvd.nist.gov/vuln/detail/CVE-2024-21538"]
+    },
+    {
+      "id": "CVE-2024-45296",
+      "ecosystem": "npm",
+      "package": "path-to-regexp",
+      "severity": "high",
+      "summary": "Backtracking regular expression denial of service in path-to-regexp",
+      "ranges": [{ "introduced": "0", "fixed": "0.1.10" }],
+      "references": ["https://nvd.nist.gov/vuln/detail/CVE-2024-45296"]
+    },
+    {
+      "id": "CVE-2024-4068",
+      "ecosystem": "npm",
+      "package": "braces",
+      "severity": "high",
+      "summary": "Uncontrolled resource consumption in braces",
+      "ranges": [{ "introduced": "0", "fixed": "3.0.3" }],
+      "references": ["https://nvd.nist.gov/vuln/detail/CVE-2024-4068"]
+    },
+    {
+      "id": "CVE-2024-4067",
+      "ecosystem": "npm",
+      "package": "micromatch",
+      "severity": "medium",
+      "summary": "Regular expression denial of service in micromatch",
+      "ranges": [{ "introduced": "0", "fixed": "4.0.8" }],
+      "references": ["https://nvd.nist.gov/vuln/detail/CVE-2024-4067"]
+    },
+    {
+      "id": "CVE-2024-28863",
+      "ecosystem": "npm",
+      "package": "tar",
+      "severity": "medium",
+      "summary": "Denial of service while parsing a crafted tar header",
+      "ranges": [{ "introduced": "0", "fixed": "6.2.1" }],
+      "references": ["https://nvd.nist.gov/vuln/detail/CVE-2024-28863"]
+    },
+    {
+      "id": "CVE-2018-1000620",
+      "ecosystem": "npm",
+      "package": "event-stream",
+      "severity": "critical",
+      "malicious": true,
+      "summary": "Maintainer handover shipped a cryptocurrency-wallet stealer in this exact version",
+      "ranges": [{ "introduced": "3.3.6", "fixed": "3.3.7" }],
+      "references": ["https://github.com/dominictarr/event-stream/issues/116"]
+    },
+    {
+      "id": "CVE-2021-41265",
+      "ecosystem": "npm",
+      "package": "ua-parser-js",
+      "severity": "critical",
+      "malicious": true,
+      "summary": "Hijacked publisher account shipped a miner and credential stealer in these exact versions",
+      "ranges": [
+        { "introduced": "0.7.29", "fixed": "0.7.30" },
+        { "introduced": "0.8.0", "fixed": "0.8.1" },
+        { "introduced": "1.0.0", "fixed": "1.0.1" }
+      ],
+      "references": ["https://github.com/faisalman/ua-parser-js/issues/536"]
+    },
+    {
+      "id": "CVE-2024-35195",
+      "ecosystem": "PyPI",
+      "package": "requests",
+      "severity": "medium",
+      "summary": "Requests keeps trusting a certificate after verify=False was used once",
+      "ranges": [{ "introduced": "0", "fixed": "2.32.0" }],
+      "references": ["https://nvd.nist.gov/vuln/detail/CVE-2024-35195"]
+    },
+    {
+      "id": "CVE-2024-37891",
+      "ecosystem": "PyPI",
+      "package": "urllib3",
+      "severity": "medium",
+      "summary": "Proxy-Authorization header leaked across redirects in urllib3",
+      "ranges": [{ "introduced": "0", "fixed": "2.2.2" }],
+      "references": ["https://nvd.nist.gov/vuln/detail/CVE-2024-37891"]
+    },
+    {
+      "id": "CVE-2024-56201",
+      "ecosystem": "PyPI",
+      "package": "jinja2",
+      "severity": "high",
+      "summary": "Sandbox escape when rendering a crafted template in jinja2",
+      "ranges": [{ "introduced": "0", "fixed": "3.1.5" }],
+      "references": ["https://nvd.nist.gov/vuln/detail/CVE-2024-56201"]
+    },
+    {
+      "id": "CVE-2024-34069",
+      "ecosystem": "PyPI",
+      "package": "werkzeug",
+      "severity": "high",
+      "summary": "Remote code execution through the Werkzeug debugger",
+      "ranges": [{ "introduced": "0", "fixed": "3.0.3" }],
+      "references": ["https://nvd.nist.gov/vuln/detail/CVE-2024-34069"]
+    },
+    {
+      "id": "CVE-2024-39689",
+      "ecosystem": "PyPI",
+      "package": "certifi",
+      "severity": "medium",
+      "summary": "certifi bundles a root certificate that had to be distrusted",
+      "ranges": [{ "introduced": "0", "fixed": "2024.7.4" }],
+      "references": ["https://nvd.nist.gov/vuln/detail/CVE-2024-39689"]
+    },
+    {
+      "id": "CVE-2024-6345",
+      "ecosystem": "PyPI",
+      "package": "setuptools",
+      "severity": "high",
+      "summary": "Remote code execution through setuptools package_index",
+      "ranges": [{ "introduced": "0", "fixed": "70.0.0" }],
+      "references": ["https://nvd.nist.gov/vuln/detail/CVE-2024-6345"]
+    },
+    {
+      "id": "CVE-2024-3651",
+      "ecosystem": "PyPI",
+      "package": "idna",
+      "severity": "medium",
+      "summary": "Denial of service while encoding a crafted IDNA domain",
+      "ranges": [{ "introduced": "0", "fixed": "3.7" }],
+      "references": ["https://nvd.nist.gov/vuln/detail/CVE-2024-3651"]
+    },
+    {
+      "id": "CVE-2025-32434",
+      "ecosystem": "PyPI",
+      "package": "torch",
+      "severity": "critical",
+      "summary": "torch.load with weights_only=True still allows arbitrary code execution",
+      "ranges": [{ "introduced": "0", "fixed": "2.6.0" }],
+      "references": ["https://nvd.nist.gov/vuln/detail/CVE-2025-32434"]
+    },
+    {
+      "id": "RUSTSEC-2020-0071",
+      "aliases": ["CVE-2020-26235"],
+      "ecosystem": "crates.io",
+      "package": "time",
+      "severity": "medium",
+      "summary": "Potential segfault in the time crate's local-time handling",
+      "ranges": [
+        { "introduced": "0.1.0", "fixed": "0.1.45" },
+        { "introduced": "0.2.0", "fixed": "0.2.23" }
+      ],
+      "references": ["https://rustsec.org/advisories/RUSTSEC-2020-0071"]
+    },
+    {
+      "id": "RUSTSEC-2021-0003",
+      "aliases": ["CVE-2021-25900"],
+      "ecosystem": "crates.io",
+      "package": "smallvec",
+      "severity": "high",
+      "summary": "Buffer overflow in smallvec's insert_many",
+      "ranges": [{ "introduced": "0", "fixed": "1.6.1" }],
+      "references": ["https://rustsec.org/advisories/RUSTSEC-2021-0003"]
+    },
+    {
+      "id": "CVE-2023-44487",
+      "ecosystem": "Go",
+      "package": "golang.org/x/net",
+      "severity": "high",
+      "summary": "HTTP/2 rapid reset attack amplification",
+      "ranges": [{ "introduced": "0", "fixed": "0.17.0" }],
+      "references": ["https://nvd.nist.gov/vuln/detail/CVE-2023-44487"]
+    },
+    {
+      "id": "CVE-2024-45337",
+      "ecosystem": "Go",
+      "package": "golang.org/x/crypto",
+      "severity": "critical",
+      "summary": "Misuse of ServerConfig.PublicKeyCallback can bypass authorization in golang.org/x/crypto/ssh",
+      "ranges": [{ "introduced": "0", "fixed": "0.31.0" }],
+      "references": ["https://nvd.nist.gov/vuln/detail/CVE-2024-45337"]
+    },
+    {
+      "id": "CVE-2021-44228",
+      "ecosystem": "Maven",
+      "package": "org.apache.logging.log4j:log4j-core",
+      "severity": "critical",
+      "summary": "Log4Shell: remote code execution through JNDI lookups",
+      "ranges": [{ "introduced": "2.0.0", "fixed": "2.17.1" }],
+      "references": ["https://nvd.nist.gov/vuln/detail/CVE-2021-44228"]
+    },
+    {
+      "id": "CVE-2022-22965",
+      "ecosystem": "Maven",
+      "package": "org.springframework:spring-beans",
+      "severity": "critical",
+      "summary": "Spring4Shell: remote code execution through data binding in Spring Framework",
+      "ranges": [{ "introduced": "0", "fixed": "5.3.18" }],
+      "references": ["https://nvd.nist.gov/vuln/detail/CVE-2022-22965"]
+    },
+    {
+      "id": "CVE-2022-30123",
+      "ecosystem": "RubyGems",
+      "package": "rack",
+      "severity": "high",
+      "summary": "Shell escape and response splitting in Rack's multipart parser",
+      "ranges": [
+        { "introduced": "0", "fixed": "2.2.8.1" },
+        { "introduced": "3.0.0", "fixed": "3.0.4.1" }
+      ],
+      "references": ["https://nvd.nist.gov/vuln/detail/CVE-2022-30123"]
+    }
+  ]
+}

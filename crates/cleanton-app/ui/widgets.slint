@@ -51,7 +51,11 @@ export component Badge inherits Rectangle {
     in property <string> label;
     in property <brush> badge-color: Theme.palette.accent;
 
-    height: 22px;
+    // A layout sizes children from their min/max and ignores `height`, so the
+    // pill's height is pinned there (Slint rejects `height` next to min/max).
+    // Callers centre it vertically with nested layouts, not with `y`.
+    min-height: 22px;
+    max-height: 22px;
     min-width: 50px;
     border-radius: Theme.radius-sm;
     background: badge-color.with-alpha(0.12);
@@ -94,6 +98,76 @@ export component ProgressBar inherits Rectangle {
         font-size: Theme.font-size-xs;
         horizontal-alignment: center;
         vertical-alignment: center;
+    }
+}
+
+// A small rotating activity indicator.
+//
+// Slint has neither a built-in spinner nor an infinite `animate`, so a `Timer`
+// advances the glyph's rotation by a fixed step. The timer only runs while
+// `running` is true, so an idle screen costs nothing.
+export component Spinner inherits Rectangle {
+    in property <bool> running: false;
+    in property <brush> spinner-color: Theme.palette.accent;
+    in property <length> spinner-size: 14px;
+    property <angle> phase: 0deg;
+
+    width: root.spinner-size;
+    height: root.spinner-size;
+    background: transparent;
+
+    Timer {
+        interval: 90ms;
+        running: root.running;
+        triggered => {
+            root.phase += 40deg;
+            if (root.phase >= 360deg) {
+                root.phase -= 360deg;
+            }
+        }
+    }
+
+    FaIcon {
+        glyph: "\u{f110}";
+        icon-color: root.spinner-color;
+        icon-size: root.spinner-size;
+        transform-rotation: root.phase;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+    }
+}
+
+// Indeterminate progress strip: a bar sweeping left to right. Used while a long
+// operation runs (checking for updates, updating, uninstalling) so the screen
+// never looks frozen. Takes zero height when not running.
+export component ActivityBar inherits Rectangle {
+    in property <bool> running: false;
+    in property <brush> bar-color: Theme.palette.accent;
+    property <float> phase: 0.0;
+
+    visible: root.running;
+    height: 4px;
+    background: Theme.palette.surface-elevated;
+    border-radius: 2px;
+    clip: true;
+
+    Timer {
+        interval: 30ms;
+        running: root.running;
+        triggered => {
+            root.phase += 0.012;
+            if (root.phase > 1.0) {
+                root.phase = 0.0;
+            }
+        }
+    }
+
+    Rectangle {
+        width: parent.width * 0.3;
+        height: parent.height;
+        x: (parent.width - self.width) * root.phase;
+        background: root.bar-color;
+        border-radius: 2px;
     }
 }
 
@@ -236,7 +310,11 @@ export component Toggle inherits Rectangle {
     callback toggled(bool);
 
     width: 46px;
-    height: 26px;
+    // Pinned min/max: inside a layout the `height` property is ignored, and a
+    // stretched toggle track no longer lines up with the label beside it.
+    // Slint rejects `height` alongside min/max, so the pin is the height.
+    min-height: 26px;
+    max-height: 26px;
     border-radius: self.height / 2;
     background: root.checked ? Theme.palette.accent : Theme.palette.surface-elevated;
     border-width: 1px;
@@ -849,6 +927,8 @@ export component ServiceListRow inherits Rectangle {
     in property <string> pending-disable-id;
     // Same, for the orphaned-item Remove action.
     in property <string> pending-remove-id;
+    // Same, for deleting a stopped, unprotected service (two-step arm/confirm).
+    in property <string> pending-delete-id;
 
     // First click arms this row; clicking the armed "Confirm" disables it.
     callback arm-disable(string);
@@ -856,11 +936,15 @@ export component ServiceListRow inherits Rectangle {
     // Orphaned-item removal (two-step arm/confirm, like disable).
     callback arm-remove(string);
     callback confirm-remove(string);
+    // Delete a stopped/disabled, unprotected service's startup item (two-step).
+    callback arm-delete(string);
+    callback confirm-delete(string);
     // Enable a stopped/disabled service (non-destructive, single click).
     callback enable(string);
 
     property <bool> armed: root.id != "" && root.id == root.pending-disable-id;
     property <bool> armed-remove: root.id != "" && root.id == root.pending-remove-id;
+    property <bool> armed-delete: root.id != "" && root.id == root.pending-delete-id;
 
     height: 56px;
     background: ta.has-hover ? Theme.palette.surface-elevated : transparent;
@@ -898,33 +982,45 @@ export component ServiceListRow inherits Rectangle {
         // hugs its own text (a bare Badge would fill the cell and let a long
         // label like "System agent" spill past the pill). The type cell is wide
         // enough for the longest kind ("System agent").
+        // Each badge cell centres its pill on BOTH axes: a layout never centres
+        // along its main axis unless `alignment` asks for it, and stretching a
+        // 22px pill over a 56px row is exactly what made these badges sit high.
+        // The outer VerticalLayout (alignment: center) gives the inner row its
+        // natural height and centres it; `x`/`y` are ignored on layout children.
         Rectangle {
             width: 104px;
-            HorizontalLayout {
+            VerticalLayout {
                 alignment: center;
-                Badge {
-                    label: root.kind;
-                    badge-color: Theme.palette.info;
+                HorizontalLayout {
+                    alignment: center;
+                    Badge {
+                        label: root.kind;
+                        badge-color: Theme.palette.info;
+                    }
                 }
             }
         }
         Rectangle {
             width: 104px;
-            HorizontalLayout {
+            VerticalLayout {
                 alignment: center;
-                Badge {
-                    label: root.status;
-                    badge-color: root.running ? Theme.palette.success : Theme.palette.text-muted;
+                HorizontalLayout {
+                    alignment: center;
+                    Badge {
+                        label: root.status;
+                        badge-color: root.running ? Theme.palette.success : Theme.palette.text-muted;
+                    }
                 }
             }
         }
 
         // ACTION column. Protected rows read as locked. Orphaned startup items
         // get a red two-step "Remove" (delete the leftover plist). Otherwise a
-        // running service shows a two-step "Disable" and a stopped one a calm
-        // single-click "Enable".
+        // running service shows a two-step "Disable", and a stopped one a calm
+        // single-click "Enable" next to a two-step "Delete" that removes the
+        // disabled startup item entirely.
         Rectangle {
-            width: 100px;
+            width: 168px;
 
             if root.protected-service: HorizontalLayout {
                 alignment: end;
@@ -1019,11 +1115,14 @@ export component ServiceListRow inherits Rectangle {
                 }
             }
 
-            // Stopped/disabled service: single-click Enable.
+            // Stopped/disabled service: single-click Enable, plus a two-step
+            // Delete that removes the disabled startup item for good.
             if !root.protected-service && !root.orphaned && !root.running: HorizontalLayout {
                 alignment: end;
+                spacing: Theme.spacing-xs;
+
                 Rectangle {
-                    width: 92px;
+                    width: 76px;
                     height: 30px;
                     y: (parent.height - self.height) / 2;
                     border-radius: Theme.radius-sm;
@@ -1038,6 +1137,38 @@ export component ServiceListRow inherits Rectangle {
                     Text {
                         text: "Enable";
                         color: Theme.palette.accent;
+                        font-size: Theme.font-size-xs;
+                        font-weight: 650;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+
+                Rectangle {
+                    width: 76px;
+                    height: 30px;
+                    y: (parent.height - self.height) / 2;
+                    border-radius: Theme.radius-sm;
+                    background: root.armed-delete
+                        ? Theme.palette.danger
+                        : (del-ta.has-hover ? Theme.palette.surface-elevated : transparent);
+                    border-width: 1px;
+                    border-color: root.armed-delete ? Theme.palette.danger : Theme.palette.border;
+                    animate background, border-color { duration: Theme.anim-fast; }
+
+                    del-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            if root.armed-delete {
+                                root.confirm-delete(root.id);
+                            } else {
+                                root.arm-delete(root.id);
+                            }
+                        }
+                    }
+                    Text {
+                        text: root.armed-delete ? "Confirm" : "Delete";
+                        color: root.armed-delete ? #FFFFFF : Theme.palette.danger;
                         font-size: Theme.font-size-xs;
                         font-weight: 650;
                         horizontal-alignment: center;
