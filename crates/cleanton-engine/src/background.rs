@@ -374,8 +374,7 @@ impl PackageWatcher {
             let clear_below = threshold.saturating_sub(PRESSURE_HYSTERESIS_PERCENT);
             if used_percent >= threshold && !self.memory_pressure_active {
                 self.memory_pressure_active = true;
-                let (suggestion, offer) =
-                    build_memory_offer(used_percent, memory.available_bytes);
+                let (suggestion, offer) = build_memory_offer(used_percent, memory.available_bytes);
                 events.push(WatchEvent::ResourcePressure {
                     kind: ResourceKind::Memory,
                     used_percent,
@@ -986,7 +985,10 @@ mod tests {
             used_bytes: 90 * 1024 * 1024 * 1024,
         };
         let (advice, offer) = build_disk_offer(90, &cap, temp.path());
-        assert!(advice.contains("pip"), "expected cache candidate in {advice}");
+        assert!(
+            advice.contains("pip"),
+            "expected cache candidate in {advice}"
+        );
         assert!(matches!(offer, CleanupOffer::Disk { .. }));
         if let CleanupOffer::Disk {
             candidates,

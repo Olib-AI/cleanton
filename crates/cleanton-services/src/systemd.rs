@@ -44,11 +44,7 @@ pub fn list_user_services_in_dir<S: BuildHasher>(
         if path.extension().and_then(|ext| ext.to_str()) != Some("service") || !path.is_file() {
             continue;
         }
-        let Some(unit_id) = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .map(str::to_owned)
-        else {
+        let Some(unit_id) = path.file_name().and_then(|n| n.to_str()).map(str::to_owned) else {
             continue;
         };
         let Ok(contents) = std::fs::read_to_string(&path) else {
@@ -70,23 +66,25 @@ pub fn list_user_services_in_dir<S: BuildHasher>(
     units
         .into_iter()
         .map(|(unit_id, path, parsed, user_id, enabled)| {
-            let status = live_states.get(&unit_id).map_or(ServiceStatus::Stopped, |st| {
-                match (st.active_state.as_str(), st.main_pid) {
-                    ("active" | "activating" | "reloading", Some(pid)) if pid > 0 => {
-                        let (cpu, mem) = proc_stats
-                            .get(&pid)
-                            .map_or((None, None), |&(c, m)| (Some(c), Some(m)));
-                        ServiceStatus::Running {
-                            pid,
-                            cpu_percent: cpu,
-                            memory_bytes: mem,
+            let status = live_states
+                .get(&unit_id)
+                .map_or(ServiceStatus::Stopped, |st| {
+                    match (st.active_state.as_str(), st.main_pid) {
+                        ("active" | "activating" | "reloading", Some(pid)) if pid > 0 => {
+                            let (cpu, mem) = proc_stats
+                                .get(&pid)
+                                .map_or((None, None), |&(c, m)| (Some(c), Some(m)));
+                            ServiceStatus::Running {
+                                pid,
+                                cpu_percent: cpu,
+                                memory_bytes: mem,
+                            }
                         }
+                        ("active", None) => ServiceStatus::Loaded,
+                        ("failed", _) => ServiceStatus::Error("failed".to_owned()),
+                        _ => ServiceStatus::Stopped,
                     }
-                    ("active", None) => ServiceStatus::Loaded,
-                    ("failed", _) => ServiceStatus::Error("failed".to_owned()),
-                    _ => ServiceStatus::Stopped,
-                }
-            });
+                });
             let short_name = parsed.description.unwrap_or_else(|| {
                 unit_id
                     .strip_suffix(".service")
@@ -119,7 +117,10 @@ pub fn run_systemctl_user_action(unit_id: &str, verb: &str, unit_path: &Path) ->
         Err(CleantonError::Execution {
             path: unit_path.to_path_buf(),
             message: if stderr.is_empty() {
-                format!("systemctl --user {verb} {unit_id} exited with {}", output.status)
+                format!(
+                    "systemctl --user {verb} {unit_id} exited with {}",
+                    output.status
+                )
             } else {
                 format!("systemctl --user {verb} {unit_id} failed: {stderr}")
             },
@@ -138,12 +139,7 @@ fn query_systemctl_states(unit_ids: &[&str]) -> HashMap<String, UnitLiveState> {
     if unit_ids.is_empty() {
         return states;
     }
-    let mut args = vec![
-        "--user",
-        "show",
-        "--property=Id,ActiveState,MainPID",
-        "--",
-    ];
+    let mut args = vec!["--user", "show", "--property=Id,ActiveState,MainPID", "--"];
     args.extend_from_slice(unit_ids);
     let Ok(output) = reviewed_process::output("systemctl", args) else {
         return states;

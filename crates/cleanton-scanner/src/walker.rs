@@ -620,13 +620,10 @@ fn should_skip_path(
     }
 
     if options.exclude_external_volumes {
-        let ext_set = ProtectedPaths::configured_only(
-            external_volume_roots()
-                .into_iter()
-                .filter(|ext| {
-                    !ProtectedPaths::configured_only([ext.clone()]).is_protected_fast(scan_root)
-                }),
-        );
+        let ext_set =
+            ProtectedPaths::configured_only(external_volume_roots().into_iter().filter(|ext| {
+                !ProtectedPaths::configured_only([ext.clone()]).is_protected_fast(scan_root)
+            }));
         if ext_set.is_protected_fast(path) {
             return true;
         }

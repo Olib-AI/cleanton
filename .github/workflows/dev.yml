@@ -117,7 +117,7 @@ jobs:
               emit("warning", "FMTDIFF", fmt_diff)
 
           clippy = subprocess.run(
-              ["cargo", "clippy", "--workspace", "--all-targets", "--all-features", "--message-format=short", "--", "-D", "warnings"],
+              ["cargo", "clippy", "--workspace", "--all-targets", "--all-features", "--keep-going", "--message-format=short", "--", "-D", "warnings"],
               capture_output=True, text=True
           )
           if clippy.returncode != 0:
