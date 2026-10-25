@@ -1,5 +1,6 @@
 mod analyzer;
 mod docker;
+mod elevated_trash;
 mod events;
 mod executor;
 mod ml;

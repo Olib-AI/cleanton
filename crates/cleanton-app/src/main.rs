@@ -875,6 +875,56 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     });
 
+    // ── Wire: Delete a disabled service callback ───────────────────────────
+    // Two-step armed in the UI. The backend re-checks protection and refuses
+    // anything that is still running, Homebrew-managed services, and services
+    // whose startup item is already gone. A root-owned plist retries once with
+    // the targeted administrator prompt the services adapter already uses.
+    let ui_weak = ui.as_weak();
+    let config_clone = shared_config.clone();
+    ui.global::<AppCallbacks>().on_delete_service(move |id| {
+        let ui = ui_weak.unwrap();
+        let state = ui.global::<AppState>();
+        let id = id.to_string();
+        if SERVICE_ACTION_IN_FLIGHT.swap(true, Ordering::SeqCst) {
+            state.set_services_status("Another service action is still running.".into());
+            return;
+        }
+        state.set_services_status(format!("Deleting startup item for {id}...").into());
+
+        let ui_weak = ui.as_weak();
+        let config = config_snapshot(&config_clone);
+        std::thread::spawn(move || {
+            worker_runtime().block_on(async move {
+                let manager = ServiceManager::new(config.clone());
+                let mut delete_result = manager.delete_disabled_plist(&id).await;
+                if matches!(
+                    delete_result,
+                    Err(cleanton_common::CleantonError::RootPrivilegesRequired(_))
+                ) {
+                    // Root-owned startup item: ask for admin once, then retry.
+                    delete_result = manager.delete_disabled_plist_elevated(&id).await;
+                }
+                // Re-list so the row disappears without a manual refresh.
+                let relisted = ServiceManager::new(config).list_services().await;
+                let _ = ui_weak.upgrade_in_event_loop(move |ui| {
+                    SERVICE_ACTION_IN_FLIGHT.store(false, Ordering::SeqCst);
+                    let state = ui.global::<AppState>();
+                    state.set_service_pending_delete_id(SharedString::new());
+                    if let Ok(services) = relisted {
+                        ALL_SERVICES.with(|cell| *cell.borrow_mut() = services);
+                    }
+                    rebuild_services_model(&state);
+                    match delete_result {
+                        Ok(()) => state.set_services_status(format!("Deleted {id}.").into()),
+                        Err(err) => state
+                            .set_services_status(format!("Could not delete {id}: {err}").into()),
+                    }
+                });
+            });
+        });
+    });
+
     // ── Wire: Security tab (read-only supply-chain scan, baseline + diff) ──
     let ui_weak = ui.as_weak();
     ui.global::<AppCallbacks>().on_start_security_scan(move || {
@@ -1067,29 +1117,61 @@ fn main() -> Result<(), slint::PlatformError> {
                                 .iter()
                                 .filter(|a| a.status == ExecutionStatus::MovedToTrash)
                                 .count();
-                            state.set_apps_status(
-                                format!(
-                                    "Moved {moved} item(s) ({}) of {app_name} to the Trash{}{}.",
-                                    display::human_bytes(result.moved_to_trash_bytes),
-                                    if result.skipped_actions > 0 {
-                                        format!("; {} skipped", result.skipped_actions)
-                                    } else {
-                                        String::new()
-                                    },
-                                    brew_note
-                                )
-                                .into(),
+                            let failed = result
+                                .actions
+                                .iter()
+                                .filter(|a| a.status == ExecutionStatus::Failed)
+                                .count();
+                            let remaining = result
+                                .actions
+                                .iter()
+                                .filter(|a| a.status == ExecutionStatus::Skipped)
+                                .count();
+                            // The first failure reason is the actionable part; the
+                            // rest are usually the same cause (admin rights).
+                            let first_failure = result
+                                .actions
+                                .iter()
+                                .find(|a| a.status == ExecutionStatus::Failed)
+                                .map(|a| a.message.clone())
+                                .unwrap_or_default();
+
+                            let mut status = format!(
+                                "Moved {moved} item(s) of {app_name} to the Trash ({}){brew_note}.",
+                                display::human_bytes(result.moved_to_trash_bytes),
                             );
-                            // Clear the review panel and reload the inventory.
-                            state.set_selected_app_path(SharedString::new());
-                            state.set_selected_app_name(SharedString::new());
-                            state.set_leftover_count(0);
-                            state.set_leftover_rows(ModelRc::from(Rc::new(VecModel::from(Vec::<
-                                LeftoverRow,
-                            >::new(
-                            )))));
-                            APP_PLAN.with(|cell| *cell.borrow_mut() = None);
-                            start_apps_load(&ui);
+                            if failed > 0 {
+                                status.push_str(&format!(
+                                    " {failed} item(s) could not be removed: {first_failure}"
+                                ));
+                            }
+                            if remaining > 0 {
+                                status.push_str(&format!(" {remaining} skipped."));
+                            }
+                            state.set_apps_status(status.as_str().into());
+
+                            if moved == 0 || failed > 0 {
+                                // Something is still on disk: keep the review
+                                // panel (an empty panel looked like "nothing
+                                // happened") and refresh the leftover list so the
+                                // user sees exactly what remains.
+                                start_apps_load(&ui);
+                                let path = state.get_selected_app_path().to_string();
+                                if !path.is_empty() {
+                                    start_leftover_scan(&ui, path.as_str());
+                                }
+                            } else {
+                                // Everything selected is gone: clear the review
+                                // panel and reload the inventory.
+                                state.set_selected_app_path(SharedString::new());
+                                state.set_selected_app_name(SharedString::new());
+                                state.set_leftover_count(0);
+                                state.set_leftover_rows(ModelRc::from(Rc::new(VecModel::from(
+                                    Vec::<LeftoverRow>::new(),
+                                ))));
+                                APP_PLAN.with(|cell| *cell.borrow_mut() = None);
+                                start_apps_load(&ui);
+                            }
                         }
                         Err(err) => {
                             state.set_apps_status(
@@ -2177,6 +2259,8 @@ fn request_snapshot_delete(state: &AppState) {
 fn initialise_app_state(ui: &AppWindow, config: &CleantonConfig) {
     let state = ui.global::<AppState>();
 
+    // Version of the build actually running (Settings > About).
+    state.set_app_version(SharedString::from(env!("CARGO_PKG_VERSION")));
     state.set_scan_root(config.general.default_root.display().to_string().into());
     populate_settings(&state, config);
     state.set_result_mode("Not scanned".into());
@@ -3747,6 +3831,7 @@ fn app_list_row(app: &InstalledApp, cask_tokens: &[String]) -> AppListRow {
         size: SharedString::from(display::human_bytes(app.bytes)),
         protected: app.protected,
         brew: cask_token_for(app, cask_tokens).is_some(),
+        app_store: app.app_store,
     }
 }
 
