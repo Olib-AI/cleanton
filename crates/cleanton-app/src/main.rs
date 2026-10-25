@@ -29,8 +29,8 @@ use cleanton_common::{
 };
 use cleanton_engine::{
     AnalyzedFull, AnalyzedPlan, AnnotatedAction, DockerAnalysis, DockerCleaner, DockerCleanupPlan,
-    DuplicateSet, EngineEvent, InstalledApp, LargeItem, Orchestrator, SnapshotAnalysis,
-    SecurityRemoval, SnapshotConfirmState, Suggestions, UninstallPlan, cask_token_for,
+    DuplicateSet, EngineEvent, InstalledApp, LargeItem, Orchestrator, SecurityRemoval,
+    SnapshotAnalysis, SnapshotConfirmState, Suggestions, UninstallPlan, cask_token_for,
     delete_local_snapshots, find_leftovers, format_snapshot_date, list_installed_apps,
 };
 use cleanton_packages::{Inventory, ManagerKind, PackageManagers, plan_removal, scan_usage};
@@ -3993,7 +3993,13 @@ fn run_security_removal(ui: &AppWindow, index: i32, config: &SharedConfig) {
         cell.borrow()
             .as_ref()
             .and_then(|report| report.flagged.get(slot))
-            .map(|package| (package.name.clone(), package.path.clone(), package.removal()))
+            .map(|package| {
+                (
+                    package.name.clone(),
+                    package.path.clone(),
+                    package.removal(),
+                )
+            })
     });
     // Defence in depth: a row Cleanton must not remove (a host persistence
     // file) has no Remove button, so reaching here means the index came from

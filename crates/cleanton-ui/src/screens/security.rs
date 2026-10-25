@@ -526,10 +526,7 @@ fn render_help(f: &mut Frame, app: &App, area: Rect) {
                     .fg(app.theme.danger)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(
-                "Confirm   ",
-                Style::default().fg(app.theme.fg),
-            ),
+            Span::styled("Confirm   ", Style::default().fg(app.theme.fg)),
             Span::styled(
                 "[n] ",
                 Style::default()

@@ -461,7 +461,10 @@ fn disk_advice(used_percent: u8, capacity: &VolumeCapacity, home: &Path) -> Stri
         .iter()
         .map(|(name, size)| format!("{name} ({})", human_bytes(*size)))
         .collect();
-    advice.push_str(&format!(" Biggest reclaimable right now: {}.", named.join(", ")));
+    advice.push_str(&format!(
+        " Biggest reclaimable right now: {}.",
+        named.join(", ")
+    ));
     advice.push_str(
         " Run a Cleanton scan to review them, then empty the Trash to actually reclaim the space.",
     );

