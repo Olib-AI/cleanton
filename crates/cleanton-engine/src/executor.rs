@@ -588,28 +588,7 @@ pub(crate) fn trash_uninstall_paths(
             fingerprint,
         };
 
-        // The default protected set necessarily covers /Applications and the
-        // ~/Library subtrees an uninstall legitimately carves into, so defaults
-        // are ignored *there*. Everywhere else — home dotfolders and XDG dirs —
-        // the defaults are enforced, so `~/.ssh`, `~/.config/gcloud`,
-        // `~/.config/cleanton`, and the user-data roots are refused even if
-        // discovery somehow proposed them. Configured protections always win.
-        let is_app_bundle = path
-            .extension()
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("app"));
-        let carve_zone = is_app_bundle || path.starts_with(home.join("Library"));
-        let protection_hit =
-            configured.is_protected(path) || (!carve_zone && defaults.is_protected(path));
-        // A bare `~/.<name>` that is a plain file is a config dotfile (`.zshrc`,
-        // `.gitconfig`, …), never an app-data folder — refuse it regardless of
-        // the app slug that produced it.
-        let bare_dotfile = path.parent() == Some(home.as_path())
-            && path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.starts_with('.'))
-            && !metadata.is_dir();
-        if !is_uninstall_scope(path, &home) || protection_hit || bare_dotfile {
+        if uninstall_path_refused(path, &metadata, &home, &defaults, &configured) {
             result.attempted_actions += 1;
             result.skipped_actions += 1;
             result.actions.push(action_result(
@@ -626,102 +605,151 @@ pub(crate) fn trash_uninstall_paths(
         let _ = event_tx.try_send(EngineEvent::ActionStarted {
             action: action.clone(),
         });
-        match trash::delete(path) {
-            Ok(()) => {
-                result.moved_to_trash_bytes =
-                    result.moved_to_trash_bytes.saturating_add(reclaimable);
-                let _ = event_tx.try_send(EngineEvent::ActionCompleted {
-                    action: action.clone(),
-                    freed: 0,
-                });
-                result.actions.push(action_result(
-                    &action,
-                    ExecutionStatus::MovedToTrash,
-                    reclaimable,
-                    0,
-                    "moved to Trash; bytes are not freed until Trash is emptied",
-                ));
-            }
-            Err(err) => {
-                // Root-owned bundles (App Store installs) and system helpers
-                // cannot be moved by the user's own account. That used to end
-                // the uninstall with a silent no-op. Fall back to a single
-                // targeted administrator move INTO THE SAME TRASH: still fully
-                // recoverable, still only after the user confirmed the uninstall.
-                // One declined prompt stops further prompts, so a long list can
-                // never turn into a prompt storm.
-                let elevated = if elevate_trash_moves {
-                    match crate::elevated_trash::move_to_trash_elevated(path) {
-                        // A successful authorization is cached by macOS for a
-                        // few minutes, so a run of root-owned items does not
-                        // produce a prompt per item.
-                        Ok(destination) => Some(Ok(destination)),
-                        Err(elevated_err) => {
-                            elevate_trash_moves = false;
-                            Some(Err(elevated_err))
-                        }
-                    }
-                } else {
-                    None
-                };
-
-                match elevated {
-                    Some(Ok(destination)) => {
-                        result.moved_to_trash_bytes =
-                            result.moved_to_trash_bytes.saturating_add(reclaimable);
-                        let _ = event_tx.try_send(EngineEvent::ActionCompleted {
-                            action: action.clone(),
-                            freed: 0,
-                        });
-                        result.actions.push(action_result(
-                            &action,
-                            ExecutionStatus::MovedToTrash,
-                            reclaimable,
-                            0,
-                            format!(
-                                "moved to Trash with administrator privileges: {}",
-                                destination.display()
-                            ),
-                        ));
-                    }
-                    Some(Err(elevated_err)) => {
-                        let message = format!(
-                            "needs administrator rights ({err}); elevated move failed: {elevated_err}"
-                        );
-                        let _ = event_tx.try_send(EngineEvent::ActionFailed {
-                            action: action.clone(),
-                            error: message.clone(),
-                        });
-                        result.actions.push(action_result(
-                            &action,
-                            ExecutionStatus::Failed,
-                            0,
-                            0,
-                            message,
-                        ));
-                    }
-                    None => {
-                        let message =
-                            format!("could not be moved ({err}); it may need administrator rights");
-                        let _ = event_tx.try_send(EngineEvent::ActionFailed {
-                            action: action.clone(),
-                            error: message.clone(),
-                        });
-                        result.actions.push(action_result(
-                            &action,
-                            ExecutionStatus::Failed,
-                            0,
-                            0,
-                            message,
-                        ));
-                    }
-                }
-            }
-        }
+        move_uninstall_item(
+            path,
+            &action,
+            reclaimable,
+            event_tx,
+            &mut elevate_trash_moves,
+            &mut result,
+        );
     }
 
     result.log_path = write_execution_log(config, started, &result)?;
     Ok(result)
+}
+
+/// Why an uninstall item may be refused even though the user confirmed the app.
+///
+/// The default protected set necessarily covers `/Applications` and the
+/// `~/Library` subtrees an uninstall legitimately carves into, so defaults are
+/// ignored *there*. Everywhere else (home dotfolders and XDG dirs) the defaults
+/// are enforced, so `~/.ssh`, `~/.config/gcloud`, `~/.config/cleanton`, and the
+/// user-data roots are refused even if discovery somehow proposed them.
+/// Configured protections always win. A bare `~/.<name>` that is a plain file
+/// is a config dotfile (`.zshrc`, `.gitconfig`, ...), never an app-data folder,
+/// so it is refused regardless of the app slug that produced it.
+fn uninstall_path_refused(
+    path: &Path,
+    metadata: &fs::Metadata,
+    home: &Path,
+    defaults: &ProtectedPaths,
+    configured: &ProtectedPaths,
+) -> bool {
+    let is_app_bundle = path
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("app"));
+    let carve_zone = is_app_bundle || path.starts_with(home.join("Library"));
+    let protection_hit =
+        configured.is_protected(path) || (!carve_zone && defaults.is_protected(path));
+    let bare_dotfile = path.parent() == Some(home)
+        && path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with('.'))
+        && !metadata.is_dir();
+    !is_uninstall_scope(path, home) || protection_hit || bare_dotfile
+}
+
+/// Move one reviewed uninstall item to the Trash, falling back once to a
+/// targeted administrator move for root-owned bundles (App Store installs).
+///
+/// `elevate_trash_moves` is cleared by any elevated failure, including a
+/// declined prompt, so a long leftover list can never become a prompt storm;
+/// macOS caches a successful authorization for a few minutes, so a run of
+/// root-owned items does not prompt per item either.
+fn move_uninstall_item(
+    path: &Path,
+    action: &CleanupAction,
+    reclaimable: u64,
+    event_tx: &mpsc::Sender<EngineEvent>,
+    elevate_trash_moves: &mut bool,
+    result: &mut ExecutionResult,
+) {
+    let elevated = match trash::delete(path) {
+        Ok(()) => {
+            record_uninstall_success(action, reclaimable, event_tx, result, None);
+            return;
+        }
+        Err(err) => err,
+    };
+    let elevated_attempt = if *elevate_trash_moves {
+        match crate::elevated_trash::move_to_trash_elevated(path) {
+            Ok(destination) => Some(Ok(destination)),
+            Err(elevated_err) => {
+                *elevate_trash_moves = false;
+                Some(Err(elevated_err))
+            }
+        }
+    } else {
+        None
+    };
+    match elevated_attempt {
+        Some(Ok(destination)) => {
+            record_uninstall_success(action, reclaimable, event_tx, result, Some(&destination));
+        }
+        Some(Err(elevated_err)) => record_uninstall_failure(
+            action,
+            event_tx,
+            result,
+            format!("needs administrator rights ({elevated}); elevated move failed: {elevated_err}"),
+        ),
+        None => record_uninstall_failure(
+            action,
+            event_tx,
+            result,
+            format!("could not be moved ({elevated}); it may need administrator rights"),
+        ),
+    }
+}
+
+fn record_uninstall_success(
+    action: &CleanupAction,
+    reclaimable: u64,
+    event_tx: &mpsc::Sender<EngineEvent>,
+    result: &mut ExecutionResult,
+    elevated_destination: Option<&Path>,
+) {
+    result.moved_to_trash_bytes = result.moved_to_trash_bytes.saturating_add(reclaimable);
+    let _ = event_tx.try_send(EngineEvent::ActionCompleted {
+        action: action.clone(),
+        freed: 0,
+    });
+    let note = elevated_destination.map_or_else(
+        || "moved to Trash; bytes are not freed until Trash is emptied".to_owned(),
+        |destination| {
+            format!(
+                "moved to Trash with administrator privileges: {}",
+                destination.display()
+            )
+        },
+    );
+    result.actions.push(action_result(
+        action,
+        ExecutionStatus::MovedToTrash,
+        reclaimable,
+        0,
+        note,
+    ));
+}
+
+fn record_uninstall_failure(
+    action: &CleanupAction,
+    event_tx: &mpsc::Sender<EngineEvent>,
+    result: &mut ExecutionResult,
+    message: String,
+) {
+    let _ = event_tx.try_send(EngineEvent::ActionFailed {
+        action: action.clone(),
+        error: message.clone(),
+    });
+    result.actions.push(action_result(
+        action,
+        ExecutionStatus::Failed,
+        0,
+        0,
+        message,
+    ));
 }
 
 fn validate_plan(config: &CleantonConfig, plan: &CleanupPlan) -> Result<()> {
