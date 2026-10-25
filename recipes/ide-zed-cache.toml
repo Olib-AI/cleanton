@@ -11,10 +11,21 @@ priority = 50
 path_glob = "~/Library/Caches/dev.zed.Zed*/**"
 min_age_days = 14
 
+# Linux (XDG): Zed's cache directory.
+[[match.any_of]]
+min_age_days = 14
+path_glob = "~/.cache/zed/**"
+
 [action]
 type = "trash"
 prompt = "Move {size} of Zed caches to Trash?"
 
 [test]
-should_match = ["~/Library/Caches/dev.zed.Zed/embeddings/model.bin"]
-should_not_match = ["~/.config/zed/keymap.json"]
+should_match = [
+    "~/Library/Caches/dev.zed.Zed/embeddings/model.bin",
+    "~/.cache/zed/logs/foo",
+]
+should_not_match = [
+    "~/.config/zed/keymap.json",
+    "~/.cache/other/foo",
+]

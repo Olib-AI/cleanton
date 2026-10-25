@@ -33,9 +33,9 @@ pub use ml::{
 pub use orchestrator::{AnalyzedFull, Orchestrator, PipelineResult};
 pub use orphans::{DEFAULT_ORPHAN_MIN_AGE_DAYS, ORPHAN_CATEGORY};
 pub use security::{
-    Assessment, ChangeKind, PackageReport, SecurityFinding, SecurityProgress, SecurityReport,
-    SecurityScanOptions, SecurityTarget, SecurityTargetKind, SeverityCounts, assess,
-    change_kind_label, discover_targets, is_benign_context, is_install_context,
+    Assessment, ChangeKind, PackageReport, SecurityFinding, SecurityProgress, SecurityRemoval,
+    SecurityReport, SecurityScanOptions, SecurityTarget, SecurityTargetKind, SeverityCounts,
+    assess, change_kind_label, discover_targets, is_benign_context, is_install_context,
     lifecycle_script_paths, review_packages, run_security_scan, run_security_scan_with_options,
     scan_targets, scan_targets_with_options, verdict_corroborated,
 };

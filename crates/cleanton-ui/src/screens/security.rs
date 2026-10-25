@@ -1,13 +1,17 @@
-//! Security screen: read-only supply-chain scan diffed against the trusted
-//! baseline.
+//! Security screen: supply-chain scan diffed against the trusted baseline.
 //!
 //! Mirrors the Slint app's Security tab: an idle state explaining the
 //! baseline + diff model, a progress state with a packages-scanned counter,
 //! and a results state with a tone-colored summary banner plus the surfaced
 //! packages (new / updated / changed-without-version-bump) sorted worst-first
-//! — known unchanged packages are collapsed into a count. Detection and
-//! notification only — this screen offers NO destructive action; trusting a
-//! package updates the baseline metadata file, never the package.
+//! — known unchanged packages are collapsed into a count.
+//!
+//! The scan itself stays read-only. A flagged package can additionally be
+//! removed, but only through the same two-step arm/confirm flow the Slint app
+//! uses (`[r]` arms, `[y]` runs, `[n]` cancels), and the policy lives in
+//! `PackageReport::removal()` so both UIs offer exactly the same action. Host
+//! persistence files are the user's own files and are never removable.
+//! Trusting a package updates the baseline metadata file, never the package.
 
 use crate::app::App;
 use cleanton_engine::security::{Verdict, severity_label};
@@ -406,6 +410,51 @@ fn render_findings(f: &mut Frame, app: &App, area: Rect) {
         "  Or press [t] to trust it (updates the baseline only; the package is never touched).",
         Style::default().fg(app.theme.muted),
     )));
+    // Two-step removal, mirroring the Slint Security tab exactly: the armed
+    // panel spells out what [y] would do, and says plainly that nothing has
+    // happened yet. The wording comes from the engine's shared copy.
+    if app.security_pending_remove == Some(app.security_selected) {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            format!(
+                "  \u{26a0} Confirm: {} {}",
+                package.removal().verb(),
+                package.display_name()
+            ),
+            Style::default()
+                .fg(app.theme.danger)
+                .add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::from(Span::styled(
+            format!("  {}", package.removal_explanation()),
+            Style::default().fg(app.theme.fg),
+        )));
+        lines.push(Line::from(Span::styled(
+            "  Press [y] to proceed, [n] to cancel. Nothing has happened yet.",
+            Style::default()
+                .fg(app.theme.warning)
+                .add_modifier(Modifier::BOLD),
+        )));
+    } else if app.security_removing {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            format!("  {} in progress...", package.removal().verb()),
+            Style::default().fg(app.theme.warning),
+        )));
+    } else if package.is_removable() {
+        lines.push(Line::from(Span::styled(
+            format!(
+                "  Or press [r] to {} it (two-step: [y] confirms, [n] cancels).",
+                package.removal().verb().to_lowercase()
+            ),
+            Style::default().fg(app.theme.muted),
+        )));
+    } else {
+        lines.push(Line::from(Span::styled(
+            "  Cleanton will not remove this: it is your own file. Open it and delete the flagged line.",
+            Style::default().fg(app.theme.muted),
+        )));
+    }
 
     f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
 }
@@ -462,13 +511,42 @@ fn render_help(f: &mut Frame, app: &App, area: Rect) {
         ]),
         Line::from(vec![
             Span::styled(
+                "  [r] ",
+                Style::default()
+                    .fg(app.theme.danger)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Remove selected (nothing runs)   ",
+                Style::default().fg(app.theme.fg),
+            ),
+            Span::styled(
+                "[y] ",
+                Style::default()
+                    .fg(app.theme.danger)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Confirm   ",
+                Style::default().fg(app.theme.fg),
+            ),
+            Span::styled(
+                "[n] ",
+                Style::default()
+                    .fg(app.theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("Cancel", Style::default().fg(app.theme.fg)),
+        ]),
+        Line::from(vec![
+            Span::styled(
                 "  [Up/Down] ",
                 Style::default()
                     .fg(app.theme.accent)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                "Browse flagged packages   (read-only: nothing here deletes)",
+                "Browse flagged packages   (moving the cursor disarms a removal)",
                 Style::default().fg(app.theme.fg),
             ),
         ]),

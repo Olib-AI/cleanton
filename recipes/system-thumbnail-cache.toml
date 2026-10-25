@@ -1,0 +1,33 @@
+[recipe]
+id = "system-thumbnail-cache"
+name = "Thumbnail Caches"
+# Both are derived image stores the desktop regenerates whenever a folder is
+# opened again, so removing them never touches the originals.
+description = "OS-generated thumbnail and icon caches (regenerated on demand)"
+category = "system"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/.cache/thumbnails/**"
+min_age_days = 14
+
+# macOS: IconServices' shared thumbnail store.
+[[match.any_of]]
+path_glob = "~/Library/Caches/com.apple.iconservices/**"
+min_age_days = 14
+
+[action]
+type = "trash"
+prompt = "Move {size} of thumbnail caches to Trash?"
+
+[test]
+should_match = [
+    "~/.cache/thumbnails/large/abc.png",
+    "~/Library/Caches/com.apple.iconservices/store/abc",
+]
+should_not_match = [
+    "~/.cache/thumbnails.disabled/abc.png",
+    "~/.cache/other/abc",
+]

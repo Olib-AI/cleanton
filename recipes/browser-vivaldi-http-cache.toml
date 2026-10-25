@@ -1,0 +1,34 @@
+[recipe]
+id = "browser-vivaldi-http-cache"
+name = "Vivaldi HTTP Cache"
+# Matches only the per-profile Cache/Cache_Data subtree that Vivaldi
+# rebuilds while browsing. Profile databases are sibling files and never
+# match.
+description = "Vivaldi per-profile HTTP disk cache (rebuilt while browsing)"
+category = "apps"
+safety_level = "cautious"
+enabled = true
+priority = 55
+
+[match]
+path_glob = "~/Library/Application Support/Vivaldi/*/Cache/Cache_Data/**"
+min_age_days = 7
+
+# Linux (XDG): Vivaldi keeps its profile in ~/.config.
+[[match.any_of]]
+path_glob = "~/.config/vivaldi/*/Cache/Cache_Data/**"
+min_age_days = 7
+
+[action]
+type = "trash"
+prompt = "Move {size} of Vivaldi HTTP cache to Trash?"
+
+[test]
+should_match = [
+    "~/Library/Application Support/Vivaldi/Default/Cache/Cache_Data/f_000001",
+    "~/.config/vivaldi/Default/Cache/Cache_Data/f_000002",
+]
+should_not_match = [
+    "~/Library/Application Support/Vivaldi/Default/History",
+    "~/.config/vivaldi/Default/Bookmarks",
+]

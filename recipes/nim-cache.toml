@@ -1,0 +1,31 @@
+[recipe]
+id = "nim-cache"
+name = "Nim Cache"
+# The nimcache holds generated C sources the compiler writes every build.
+description = "Nim's compiler cache (regenerated on the next build)"
+category = "system"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/.cache/nim/**"
+min_age_days = 30
+
+# macOS: Nim's cache directory.
+[[match.any_of]]
+path_glob = "~/Library/Caches/nim/**"
+min_age_days = 30
+
+[action]
+type = "trash"
+prompt = "Move {size} of Nim cache to Trash?"
+
+[test]
+should_match = [
+    "~/.cache/nim/app_r/foo.c",
+    "~/Library/Caches/nim/app_r/foo.c",
+]
+should_not_match = [
+    "~/.cache/other/foo",
+]

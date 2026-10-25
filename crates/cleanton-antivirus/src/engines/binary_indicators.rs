@@ -442,7 +442,7 @@ fn check_windows_apis(strings: &[Vec<u8>], path: &str) -> Vec<Finding> {
                 Severity::High,
                 Confidence::High,
                 "LoadLibrary + GetProcAddress pairing",
-                "Binary uses LoadLibrary paired with GetProcAddress — common for runtime import \
+                "Binary uses LoadLibrary paired with GetProcAddress: common for runtime import \
                  hiding and reflective DLL injection.",
             )
             .with_rule_id("BIN_WIN_LOADLIB_GETPROC")
@@ -548,7 +548,7 @@ fn check_reverse_shell_triad(strings: &[Vec<u8>], path: &str) -> Option<Finding>
                 Severity::High,
                 Confidence::Medium,
                 "Reverse-shell function triad",
-                "Binary contains socket/connect/dup2 — the canonical POSIX reverse-shell triad.",
+                "Binary contains socket/connect/dup2: the canonical POSIX reverse-shell triad.",
             )
             .with_rule_id("BIN_POSIX_REVERSE_SHELL_TRIAD")
             .with_location(FileLocation::file(path))

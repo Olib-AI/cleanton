@@ -85,6 +85,19 @@ jobs:
           path: packaging/dist/
           if-no-files-found: error
 
+  copy:
+    name: User-visible copy (no em dashes)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Reject em dashes in rendered copy
+        run: python3 scripts/check-ui-copy.py
+
   audit:
     name: cargo audit (required)
     runs-on: ubuntu-latest

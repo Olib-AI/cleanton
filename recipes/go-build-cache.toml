@@ -10,10 +10,21 @@ priority = 50
 [match]
 path_glob = "~/Library/Caches/go-build/**"
 
+# Linux (XDG): GOCACHE defaults to ~/.cache/go-build.
+[[match.any_of]]
+path_glob = "~/.cache/go-build/**"
+
 [action]
 type = "trash"
 prompt = "Move {size} of Go build cache to Trash?"
 
 [test]
-should_match = ["~/Library/Caches/go-build/00/0000000000000000000000000000000000000000-d"]
-should_not_match = ["~/Library/Caches/Yarn", "~/go/bin/gopls"]
+should_match = [
+    "~/Library/Caches/go-build/00/0000000000000000000000000000000000000000-d",
+    "~/.cache/go-build/00/0000000000000000000000000000000000000000-d",
+]
+should_not_match = [
+    "~/Library/Caches/Yarn",
+    "~/go/bin/gopls",
+    "~/.cache/other/thing",
+]

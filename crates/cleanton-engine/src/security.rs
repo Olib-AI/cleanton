@@ -102,6 +102,15 @@ pub enum SecurityTargetKind {
     /// Extracted modules in the Go module cache (`~/go/pkg/mod`).
     /// Version-only.
     GoModuleCache,
+    /// The machine's own persistence surface: per-user launchd jobs, shell
+    /// startup files, cron drops, and systemd user units.
+    ///
+    /// Not a package tree. These are the files whose only job is to run
+    /// something again later, and they are where a worm's second half lives
+    /// after its payload has been cleaned up. Each file becomes its own
+    /// candidate so a flagged `.zshrc` is attributed to `.zshrc` rather than to
+    /// the home directory.
+    HostPersistence,
 }
 
 impl SecurityTargetKind {
@@ -116,6 +125,7 @@ impl SecurityTargetKind {
             Self::RubyGems => "installed gems",
             Self::CargoRegistry => "Cargo registry cache",
             Self::GoModuleCache => "Go module cache",
+            Self::HostPersistence => "host persistence files",
         }
     }
 
@@ -135,6 +145,48 @@ impl SecurityTargetKind {
 pub struct SecurityTarget {
     pub kind: SecurityTargetKind,
     pub root: PathBuf,
+}
+
+/// How Cleanton may remove a flagged package, if at all.
+///
+/// A removal is always user-initiated and always two-step (arm, then confirm).
+/// This enum is the SHARED policy behind that control, so the Slint app and the
+/// TUI offer exactly the same action with the same wording and the same guard
+/// rails, and neither one can invent a removal path of its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SecurityRemoval {
+    /// Uninstall through npm's own CLI, which keeps npm's metadata consistent.
+    Npm,
+    /// Uninstall through pip's own CLI, for the same reason.
+    Pip,
+    /// No package manager owns it: move the package directory to the Trash
+    /// through the executor's reviewed trash path.
+    Trash,
+    /// Cleanton must not remove it. A host persistence file is the user's own
+    /// file, and the remedy is to delete one line, not the file.
+    NotRemovable,
+}
+
+impl SecurityRemoval {
+    /// The button verb for this removal (`"Uninstall"` / `"Remove"`).
+    #[must_use]
+    pub const fn verb(self) -> &'static str {
+        match self {
+            Self::Npm | Self::Pip => "Uninstall",
+            Self::Trash | Self::NotRemovable => "Remove",
+        }
+    }
+
+    /// The command this removal runs, advisory copy shown to the user before
+    /// they confirm. `None` for a Trash move, which is not a shell command.
+    #[must_use]
+    pub fn command(self, name: &str) -> Option<String> {
+        match self {
+            Self::Npm => Some(format!("npm uninstall -g {name}")),
+            Self::Pip => Some(format!("pip uninstall -y {name}")),
+            Self::Trash | Self::NotRemovable => None,
+        }
+    }
 }
 
 // ── Report model ─────────────────────────────────────────────────────────────
@@ -667,6 +719,49 @@ impl PackageReport {
         }
     }
 
+    /// How Cleanton may remove this package. See [`SecurityRemoval`].
+    #[must_use]
+    pub fn removal(&self) -> SecurityRemoval {
+        match self.source {
+            SecurityTargetKind::NodeGlobal => SecurityRemoval::Npm,
+            SecurityTargetKind::PythonSitePackages => SecurityRemoval::Pip,
+            SecurityTargetKind::HostPersistence => SecurityRemoval::NotRemovable,
+            SecurityTargetKind::NodeProject
+            | SecurityTargetKind::EditorExtensions
+            | SecurityTargetKind::RubyGems
+            | SecurityTargetKind::CargoRegistry
+            | SecurityTargetKind::GoModuleCache => SecurityRemoval::Trash,
+        }
+    }
+
+    /// Whether this row may offer a Remove control at all. Persistence files are
+    /// the user's own files, so they are deliberately excluded.
+    #[must_use]
+    pub fn is_removable(&self) -> bool {
+        !matches!(self.removal(), SecurityRemoval::NotRemovable)
+    }
+
+    /// What the armed removal will actually do, spelled out for the confirmation
+    /// panel before the user commits. Shared so both UIs say the same thing.
+    #[must_use]
+    pub fn removal_explanation(&self) -> String {
+        let name = self.name.as_str();
+        let version = self.version.as_deref().unwrap_or("");
+        let path = self.path.display();
+        match self.removal() {
+            SecurityRemoval::Npm => format!(
+                "Run `npm uninstall -g {name}` to remove it (version {version}). npm removes the package directory itself."
+            ),
+            SecurityRemoval::Pip => format!(
+                "Run `pip uninstall -y {name}` to remove it (version {version}). pip removes the package directory itself."
+            ),
+            SecurityRemoval::Trash => format!(
+                "No installed package manager owns this package, so {path} will be moved to the Trash. Recover it from the Trash until you empty it."
+            ),
+            SecurityRemoval::NotRemovable => String::new(),
+        }
+    }
+
     /// A copy-pasteable command the USER can run in their own shell to remove
     /// (alerts) or reinstall from a trusted source (tampers) this package with
     /// its package manager. ADVISORY ONLY — Cleanton never runs it. `None`
@@ -730,6 +825,13 @@ impl PackageReport {
             SecurityTargetKind::CargoRegistry | SecurityTargetKind::GoModuleCache => {
                 return None;
             }
+            // A persistence file is the user's own file, not an installed
+            // package: there is no manager to uninstall it with, and trashing a
+            // `.zshrc` to fix one line would be the wrong remedy. Cleanton
+            // surfaces it and leaves the edit to the user.
+            SecurityTargetKind::HostPersistence => {
+                return None;
+            }
         };
         Some(cmd)
     }
@@ -780,6 +882,8 @@ impl PackageReport {
             lines.push("Reinstall from a trusted source to restore known-good bytes:".to_owned());
             if let Some(cmd) = self.suggested_command() {
                 lines.push(format!("$ {cmd}"));
+            } else if self.source == SecurityTargetKind::HostPersistence {
+                lines.push(PERSISTENCE_REMEDY.to_owned());
             }
         } else if self.is_alert() {
             lines.push(
@@ -789,10 +893,15 @@ impl PackageReport {
             if let Some(file) = self.primary_evidence_file() {
                 lines.push(format!("Inspect first: {}", join_rel(&self.path, file)));
             }
-            lines
-                .push("If you did not expect this, remove it with its package manager:".to_owned());
-            if let Some(cmd) = self.suggested_command() {
-                lines.push(format!("$ {cmd}"));
+            if self.source == SecurityTargetKind::HostPersistence {
+                lines.push(PERSISTENCE_REMEDY.to_owned());
+            } else {
+                lines.push(
+                    "If you did not expect this, remove it with its package manager:".to_owned(),
+                );
+                if let Some(cmd) = self.suggested_command() {
+                    lines.push(format!("$ {cmd}"));
+                }
             }
         } else {
             lines.push(
@@ -1482,6 +1591,28 @@ pub fn discover_default_targets() -> Vec<SecurityTarget> {
         home.join("go/pkg/mod"),
     );
 
+    // Host persistence. Unlike the entries above these are FILE targets: the
+    // roots are scanned for persistence-shaped files by
+    // `enumerate_host_persistence`, never walked as package trees. The home
+    // directory is one of the roots because that is where the shell startup
+    // files live; only the handful of names in `PERSISTENCE_FILE_NAMES` is
+    // picked out of it.
+    push_if_dir(
+        &mut targets,
+        SecurityTargetKind::HostPersistence,
+        home.join("Library/LaunchAgents"),
+    );
+    push_if_dir(
+        &mut targets,
+        SecurityTargetKind::HostPersistence,
+        home.join(".config/systemd/user"),
+    );
+    push_if_dir(
+        &mut targets,
+        SecurityTargetKind::HostPersistence,
+        home.clone(),
+    );
+
     targets
 }
 
@@ -1887,6 +2018,90 @@ fn push_go_package(dir: &Path, out: &mut Vec<PackageCandidate>) {
     });
 }
 
+/// Advice shown instead of a package-manager command when a *persistence file*
+/// is flagged. There is nothing to uninstall: the file is the user's own, and
+/// the fix is to delete the one line that was added, not the file.
+const PERSISTENCE_REMEDY: &str = \
+    "This file is yours, not a package: open it, delete the flagged line, and \
+     mark it reviewed. Do not delete the whole file.";
+
+/// Shell startup files whose basename marks them as per-login/per-shell hooks.
+/// Kept in step with the antivirus persistence engine, which is what recognises
+/// the same paths inside a scanned package.
+const PERSISTENCE_FILE_NAMES: &[&str] = &[
+    ".zshrc",
+    ".zprofile",
+    ".zlogin",
+    ".zshenv",
+    ".bashrc",
+    ".bash_profile",
+    ".bash_login",
+    ".profile",
+    ".login",
+];
+
+/// Which flavour of persistence file a `HostPersistence` root holds, decided by
+/// the root itself rather than by the files in it. That is what keeps the
+/// home-directory root from turning into a home-directory scan: `~` yields only
+/// the shell startup files, `~/Library/LaunchAgents` only its job definitions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PersistenceRoot {
+    /// `~/Library/LaunchAgents` — every `*.plist` is a job definition.
+    LaunchAgents,
+    /// `~/.config/systemd/user` — every `*.service` is a unit.
+    SystemdUser,
+    /// `$HOME` — only the startup files in [`PERSISTENCE_FILE_NAMES`].
+    ShellStartup,
+}
+
+impl PersistenceRoot {
+    fn of(root: &Path) -> Self {
+        let lower = root.to_string_lossy().to_ascii_lowercase();
+        if lower.contains("library/launchagents") || lower.contains("library/launchdaemons") {
+            Self::LaunchAgents
+        } else if lower.contains("systemd/user") {
+            Self::SystemdUser
+        } else {
+            Self::ShellStartup
+        }
+    }
+}
+
+/// Enumerate the persistence files directly inside a `HostPersistence` target
+/// root. The roots are shallow by construction, so this is a single
+/// non-recursive read: at most a few dozen entries for the launchd and systemd
+/// roots, and only the ten names in [`PERSISTENCE_FILE_NAMES`] for `$HOME`.
+fn enumerate_host_persistence(target: &SecurityTarget, out: &mut Vec<PackageCandidate>) {
+    let kind = PersistenceRoot::of(&target.root);
+    let Ok(entries) = std::fs::read_dir(&target.root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().map(|n| n.to_string_lossy().into_owned()) else {
+            continue;
+        };
+        let lower = name.to_ascii_lowercase();
+        let wanted = match kind {
+            PersistenceRoot::LaunchAgents => lower.ends_with(".plist"),
+            PersistenceRoot::SystemdUser => lower.ends_with(".service"),
+            PersistenceRoot::ShellStartup => PERSISTENCE_FILE_NAMES.contains(&lower.as_str()),
+        };
+        if !wanted || !path.is_file() {
+            continue;
+        }
+        out.push(PackageCandidate {
+            name,
+            version: None,
+            display_path: path.clone(),
+            scan_path: path,
+            source: SecurityTargetKind::HostPersistence,
+            ecosystem: None,
+        });
+    }
+    out.sort_by(|a, b| a.display_path.cmp(&b.display_path));
+}
+
 /// All distinct packages across the targets. Identical resolved paths (e.g. a
 /// pnpm symlink farm pointing at one store dir) are scanned once.
 fn enumerate_packages(targets: &[SecurityTarget]) -> Vec<PackageCandidate> {
@@ -1904,6 +2119,9 @@ fn enumerate_packages(targets: &[SecurityTarget]) -> Vec<PackageCandidate> {
             SecurityTargetKind::RubyGems => enumerate_ruby_packages(target, &mut packages),
             SecurityTargetKind::CargoRegistry => enumerate_cargo_packages(target, &mut packages),
             SecurityTargetKind::GoModuleCache => enumerate_go_packages(target, &mut packages),
+            SecurityTargetKind::HostPersistence => {
+                enumerate_host_persistence(target, &mut packages);
+            }
         }
     }
     let mut seen: HashSet<PathBuf> = HashSet::new();

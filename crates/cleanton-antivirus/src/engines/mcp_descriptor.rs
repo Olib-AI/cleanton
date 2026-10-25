@@ -881,7 +881,7 @@ impl McpDescriptorEngine {
                     ThreatCategory::Exfiltration,
                     Severity::Critical,
                     Confidence::High,
-                    "MCP description poison combination — multiple attack signals co-present (MCP_DESC_POISON_COMBO)",
+                    "MCP description poison combination: multiple attack signals co-present (MCP_DESC_POISON_COMBO)",
                     "Two or more high-confidence MCP attack markers co-occur in the same content: \
                      override/imperative language AND (credential exfil directive OR approval/config \
                      disable). This combination is the definitive indicator of MCP tool description \

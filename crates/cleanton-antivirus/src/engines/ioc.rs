@@ -357,7 +357,7 @@ impl IocEngine {
                     Confidence::High,
                     "ICP blockchain canister C2 endpoint",
                     "A reference to an Internet Computer Protocol (ICP) canister gateway \
-(*.icp0.io / *.ic0.app) was found. These endpoints are censorship-resistant — \
+(*.icp0.io / *.ic0.app) was found. These endpoints are censorship-resistant: \
 no domain takedown is possible. Used by CanisterWorm and CanisterSprawl as C2.",
                 )
                 .with_rule_id("IOC_ICP_CANISTER")
@@ -451,7 +451,7 @@ exfil endpoint.",
                     "Hardcoded Telegram bot token or SMTP exfil credential",
                     "A hardcoded Telegram bot token (long-form) or Mailtrap SMTP address \
 was found. In supply-chain packages these are always attacker-controlled exfil \
-channels — used by Flashbots typosquats, SeedSweep, WhiteSnake, and W4SP.",
+channels: used by Flashbots typosquats, SeedSweep, WhiteSnake, and W4SP.",
                 )
                 .with_rule_id("IOC_HARDCODED_SMTP_TELEGRAM")
                 .with_location(FileLocation::at_line(file.rel_path.clone(), line))
@@ -587,7 +587,7 @@ key used to authenticate DNS beacons, or the anti-re-execution env var `__ntw`."
                     Severity::Critical,
                     Confidence::High,
                     "CanisterSprawl exfil endpoint",
-                    "An exfil endpoint from the CanisterSprawl campaign was found — the \
+                    "An exfil endpoint from the CanisterSprawl campaign was found: the \
 first cross-ecosystem npm to PyPI worm. Either the secondary exfil domain \
 `telemetry.api-monitor.com` or the specific ICP canister URL were matched.",
                 )
@@ -809,7 +809,7 @@ and clipboard-hijack malware targeting USDT/USDC.",
                     Confidence::High,
                     "Clipboard wallet-hijack pattern",
                     "Code reads clipboard content (or uses pyperclip.paste/copy) and \
-replaces it with a hardcoded wallet address — a defining pattern of \
+replaces it with a hardcoded wallet address: a defining pattern of \
 clipboard-hijacking crypto-stealers.",
                 )
                 .with_rule_id("IOC_CLIPBOARD_HIJACK")
@@ -2001,7 +2001,7 @@ if looks_like_wallet(addr):
 
     #[test]
     fn fp2_patreon_url_not_flagged() {
-        let content = "https://www.patreon.com/myproject — become a patron!";
+        let content = "https://www.patreon.com/myproject: become a patron!";
         let findings = scan_single("FUNDING.md", content, FileKind::Text);
         let concerning: Vec<_> = findings
             .iter()

@@ -752,7 +752,7 @@ module.exports = { greet };
             .collect();
         // Pad the source above MIN_FILE_SIZE (512) with a realistic-looking
         // preamble so the size gate is cleared.
-        let preamble = "# Shellcode loader — extracted from malware sample\n\
+        let preamble = "# Shellcode loader: extracted from malware sample\n\
                         import struct\nimport ctypes\nimport sys\n\
                         # Decode and run embedded shellcode\n\
                         # fmt: off\n";
