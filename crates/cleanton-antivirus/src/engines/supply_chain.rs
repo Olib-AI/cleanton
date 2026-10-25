@@ -263,7 +263,7 @@ static SCRIPT_RULES: &[ScriptRule] = &[
     },
     ScriptRule {
         rule_id: "SC_INSTALL_NPM_PUBLISH_IN_HOOK",
-        title: "Install script calls `npm publish` — token-theft self-propagation",
+        title: "Install script calls `npm publish`: token-theft self-propagation",
         category: ThreatCategory::SupplyChain,
         severity: Severity::High,
         confidence: Confidence::High,
@@ -1051,7 +1051,7 @@ static WORM_SCRIPT_RULES: &[WormScriptRule] = &[
         severity: Severity::Critical,
         confidence: Confidence::High,
         description: "The /v1/search?text=maintainer:{user} registry call is the canonical worm \
-                       enumeration step — used identically by Shai-Hulud v1/v2, SANDWORM_MODE, \
+                       enumeration step: used identically by Shai-Hulud v1/v2, SANDWORM_MODE, \
                        CanisterWorm, and Phantom Gyp to find all packages they can infect with a \
                        stolen token.",
     },
@@ -1309,7 +1309,7 @@ impl SupplyChainEngine {
                         "Sigstore attestation signer identity differs from package author",
                         "The OIDC signer identity embedded in the package's Sigstore attestation \
                          does not match the declared author email. Phantom Gyp/Miasma forged SLSA \
-                         attestations using stolen OIDC tokens — a signer-domain mismatch is a \
+                         attestations using stolen OIDC tokens: a signer-domain mismatch is a \
                          strong indicator of attestation forgery.",
                     )
                     .with_rule_id("SC_ATTESTATION_SIGNER_DELTA")
@@ -1343,7 +1343,7 @@ impl SupplyChainEngine {
                     ThreatCategory::DependencyConfusion,
                     Severity::High,
                     Confidence::Medium,
-                    "Package version is inflated (major >= 50) — dependency-confusion probe",
+                    "Package version is inflated (major >= 50): dependency-confusion probe",
                     "Version numbers with major >= 50 are used in dependency-confusion probes to \
                      override the internal package version at registry resolution time. Legitimate \
                      packages at v50+ are extremely rare and have extensive published history.",

@@ -138,6 +138,12 @@ export component Spinner inherits Rectangle {
     // Invisible (and taking no visual space in the row) when not running:
     // a static spinner glyph next to a title otherwise never goes away.
     visible: root.running;
+    // NOTE (Slint 1.17): a fixed-size element in a layout is placed at the
+    // START of the cross axis, so a bare Spinner sits at the top of a row (or
+    // hard left in a column) instead of centred. `cross-axis-self-alignment`
+    // would fix that for every caller at once, but it arrives in Slint 1.18,
+    // so each call site centres it instead: either a wrapper `HorizontalLayout
+    // { alignment: center; }` or a parent with `cross-axis-alignment: center`.
 
     Timer {
         interval: 90ms;
@@ -274,6 +280,10 @@ export component ActionButton inherits Rectangle {
     in property <brush> button-color: Theme.palette.accent;
     in property <bool> primary: true;
     in property <bool> enabled: true;
+    // Destructive actions (removals, confirmations) read as danger even in the
+    // outlined style: the label, icon and outline are tinted, so a two-step
+    // removal is never mistaken for an ordinary secondary button.
+    in property <bool> danger: false;
 
     callback clicked();
 
@@ -282,7 +292,9 @@ export component ActionButton inherits Rectangle {
     // primary white-on-light-gray that was invisible. Enabled look is unchanged.
     property <brush> content-color: !root.enabled
         ? Theme.palette.text-muted
-        : (root.primary ? #FFFFFF : Theme.palette.text-secondary);
+        : (root.primary
+            ? #FFFFFF
+            : (root.danger ? Theme.palette.danger : Theme.palette.text-secondary));
 
     height: 38px;
     min-width: 118px;
@@ -291,7 +303,9 @@ export component ActionButton inherits Rectangle {
     // A disabled button keeps a visible outline so it still reads as a control
     // on the light theme's pale elevated surface.
     border-width: !enabled ? 1px : (primary ? 0 : 1px);
-    border-color: Theme.palette.border;
+    border-color: root.danger && root.enabled
+        ? Theme.palette.danger.with-alpha(0.55)
+        : Theme.palette.border;
     opacity: enabled ? 1.0 : 0.9;
 
     animate background { duration: Theme.anim-fast; }
@@ -338,7 +352,15 @@ export component Toggle inherits Rectangle {
     // Slint rejects `height` alongside min/max, so the pin is the height.
     min-height: 26px;
     max-height: 26px;
-    border-radius: self.height / 2;
+    // A literal radius, not `self.height / 2`: the switch reads as a capsule in
+    // every theme, and the knob never renders as a square.
+    //
+    // NOTE (Slint 1.17): the 26px track cannot be stretched, so a default
+    // (cross-axis `stretch`) parent pins it to the TOP of a taller row. Callers
+    // centre it with `cross-axis-alignment: center` on the row (see
+    // `SettingsField`); `cross-axis-self-alignment` would let the component do
+    // it itself but only arrives in Slint 1.18.
+    border-radius: 13px;
     background: root.checked ? Theme.palette.accent : Theme.palette.surface-elevated;
     border-width: 1px;
     border-color: root.checked ? Theme.palette.accent : Theme.palette.border;
@@ -358,12 +380,15 @@ export component Toggle inherits Rectangle {
     Rectangle {
         width: 20px;
         height: 20px;
-        border-radius: self.height / 2;
+        border-radius: 10px;
         y: (parent.height - self.height) / 2;
         x: root.checked ? parent.width - self.width - 3px : 3px;
         background: #FFFFFF;
         border-width: 1px;
-        border-color: #00000022;
+        // A white knob on the pale elevated track is invisible in the light
+        // theme without an outline, so the border is the theme's own border
+        // colour when the switch is off.
+        border-color: root.checked ? #00000022 : Theme.palette.border;
 
         animate x { duration: Theme.anim-fast; easing: ease-out; }
     }
@@ -474,7 +499,7 @@ export component PlanListRow inherits Rectangle {
     property <bool> is-note: root.kind == 2;
     property <length> row-h: root.is-group ? 42px : (root.is-note ? 28px : 38px);
 
-    // A layout governs height via min/max, NOT the `height` property — so to fully
+    // A layout governs height via min/max, NOT the `height` property, so to fully
     // collapse a hidden row (no reserved space) we pin min/max to 0.
     min-height: root.row-visible ? root.row-h : 0px;
     max-height: root.row-visible ? root.row-h : 0px;
@@ -705,6 +730,10 @@ export component FileRow inherits Rectangle {
 // a two-step "Trash" affordance moves the item to the Trash after the user
 // clicks it a second time to confirm.
 export component SuggestionListRow inherits Rectangle {
+    // 0 = an individual item (the default), 1 = a duplicate-set header,
+    // 2 = a muted note. Headers and notes are labels, so they render without
+    // the Reveal / Trash affordances of an item row.
+    in property <int> kind: 0;
     in property <string> title;
     in property <string> detail;
     in property <string> size;
@@ -715,17 +744,74 @@ export component SuggestionListRow inherits Rectangle {
     callback arm-delete();
     callback confirm-delete();
 
-    min-height: 52px;
-    max-height: 52px;
-    background: ta.has-hover ? Theme.palette.surface-elevated : transparent;
+    // A header is a section label: shorter than an item row and never hovered
+    // as a clickable target. Pinned via min/max, which is what a layout reads.
+    min-height: root.kind == 0 ? 52px : 34px;
+    max-height: root.kind == 0 ? 52px : 34px;
+    background: root.kind == 0 && ta.has-hover ? Theme.palette.surface-elevated : transparent;
     border-radius: Theme.radius-sm;
 
     ta := TouchArea {
-        mouse-cursor: pointer;
+        enabled: root.kind == 0;
+        mouse-cursor: root.kind == 0 ? pointer : default;
         clicked => { root.reveal(); }
     }
 
-    HorizontalLayout {
+    // Duplicate-set header: one line naming the set and what collapsing it
+    // would free. The copies follow as individual item rows beneath it.
+    if root.kind == 1: HorizontalLayout {
+        padding-left: Theme.spacing-md;
+        padding-right: Theme.spacing-md;
+        spacing: Theme.spacing-sm;
+
+        Rectangle {
+            width: RowColumns.icon-col;
+            FaIcon {
+                glyph: root.icon-glyph;
+                icon-color: Theme.palette.text-secondary;
+                icon-size: Theme.font-size-sm;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+            }
+        }
+
+        Text {
+            text: root.title;
+            color: Theme.palette.text-secondary;
+            font-size: Theme.font-size-xs;
+            font-weight: 700;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+        }
+
+        Text {
+            text: root.size;
+            color: Theme.palette.text-secondary;
+            font-size: Theme.font-size-xs;
+            font-weight: 700;
+            vertical-alignment: center;
+            horizontal-alignment: right;
+            min-width: RowColumns.size-col;
+        }
+    }
+
+    // Muted note, for example "+3 more copies not listed".
+    if root.kind == 2: HorizontalLayout {
+        padding-left: Theme.spacing-md;
+        padding-right: Theme.spacing-md;
+
+        Text {
+            text: root.title;
+            color: Theme.palette.text-muted;
+            font-size: Theme.font-size-xs;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+        }
+    }
+
+    if root.kind == 0: HorizontalLayout {
         padding-left: Theme.spacing-md;
         padding-right: Theme.spacing-md;
         spacing: Theme.spacing-sm;
@@ -892,7 +978,7 @@ export component PackageListRow inherits Rectangle {
             }
         }
 
-        // Status chip — shown for every row so the keep/remove model is legible:
+        // Status chip, shown for every row so the keep/remove model is legible:
         // kept (green) / removable (danger) / kept-as-dependency (muted).
         CenteredBadge {
             width: 116px;
@@ -915,7 +1001,7 @@ export component PackageListRow inherits Rectangle {
     }
 }
 
-// One row in the Services control panel. Quiet by default — the running status
+// One row in the Services control panel. Quiet by default; the running status
 // dot is the only colour until the destructive Disable action is armed, at
 // which point it becomes an unmistakable red "Confirm". Protected rows read as
 // locked (lock icon + "Protected"), never as a greyed-out disabled control.

@@ -1,0 +1,31 @@
+[recipe]
+id = "ocaml-dune-cache"
+name = "Dune Cache"
+# Dune's XDG cache holds the shared artefacts of previous builds.
+description = "Dune's shared build cache (regenerated on the next build)"
+category = "system"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/.cache/dune/**"
+min_age_days = 30
+
+# macOS: Dune's cache directory.
+[[match.any_of]]
+path_glob = "~/Library/Caches/dune/**"
+min_age_days = 30
+
+[action]
+type = "trash"
+prompt = "Move {size} of Dune cache to Trash?"
+
+[test]
+should_match = [
+    "~/.cache/dune/db/files/v4/abc",
+    "~/Library/Caches/dune/db/files/v4/abc",
+]
+should_not_match = [
+    "~/.cache/other/foo",
+]

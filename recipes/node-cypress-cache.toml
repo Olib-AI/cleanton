@@ -11,10 +11,22 @@ priority = 50
 path_glob = "~/Library/Caches/Cypress/**"
 min_age_days = 30
 
+# Linux (XDG): Cypress' binary cache.
+[[match.any_of]]
+min_age_days = 30
+path_glob = "~/.cache/Cypress/**"
+
 [action]
 type = "trash"
 prompt = "Move {size} of Cypress binaries to Trash?"
 
 [test]
-should_match = ["~/Library/Caches/Cypress/13.10.0/Cypress.app-payload"]
-should_not_match = ["~/Library/Caches/Yarn", "~/Library/Application Support/Cypress/cy/production/projects"]
+should_match = [
+    "~/Library/Caches/Cypress/13.10.0/Cypress.app-payload",
+    "~/.cache/Cypress/12.0.0/Cypress/Cypress",
+]
+should_not_match = [
+    "~/Library/Caches/Yarn",
+    "~/Library/Application Support/Cypress/cy/production/projects",
+    "~/.cache/other/foo",
+]

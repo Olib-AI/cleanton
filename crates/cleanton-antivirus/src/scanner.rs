@@ -18,7 +18,7 @@ use crate::types::{EngineStat, ScanReport};
 /// A configured scanner instance.
 ///
 /// Construct with [`Scanner::new`] (no engines) or
-/// [`Scanner::with_default_engines`] (all 8 bundled engines).
+/// [`Scanner::with_default_engines`] (all bundled engines).
 /// Additional engines can be pushed via [`Scanner::add_engine`].
 pub struct Scanner {
     engines: Vec<Box<dyn DetectionEngine>>,

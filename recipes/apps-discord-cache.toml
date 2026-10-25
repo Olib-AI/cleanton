@@ -1,0 +1,33 @@
+[recipe]
+id = "apps-discord-cache"
+name = "Discord Cache"
+# Matches only the Cache subtree. Local Storage, IndexedDB and settings
+# (which hold your session) are siblings and never match.
+description = "Discord's Chromium disk cache (rebuilt while the app runs)"
+category = "apps"
+safety_level = "cautious"
+enabled = true
+priority = 55
+
+[match]
+path_glob = "~/Library/Application Support/discord/Cache/**"
+min_age_days = 14
+
+# Linux: Discord keeps its Electron profile in ~/.config.
+[[match.any_of]]
+path_glob = "~/.config/discord/Cache/**"
+min_age_days = 14
+
+[action]
+type = "trash"
+prompt = "Move {size} of Discord cache to Trash?"
+
+[test]
+should_match = [
+    "~/Library/Application Support/discord/Cache/f_000001",
+    "~/.config/discord/Cache/f_000002",
+]
+should_not_match = [
+    "~/Library/Application Support/discord/settings.json",
+    "~/.config/discord/Local Storage/leveldb/000003.log",
+]

@@ -1,0 +1,33 @@
+[recipe]
+id = "firebase-emulator-cache"
+name = "Firebase Emulator Caches"
+# Matches only the cache subtree. firebaserc, the credentials file and the
+# emulator's exported data are siblings and never match.
+description = "Firebase emulators' cached downloads and emulator state"
+category = "system"
+safety_level = "cautious"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/.cache/firebase/emulators/**"
+min_age_days = 30
+
+# macOS: the emulators' downloaded jars.
+[[match.any_of]]
+path_glob = "~/Library/Caches/firebase/emulators/**"
+min_age_days = 30
+
+[action]
+type = "trash"
+prompt = "Move {size} of Firebase emulator caches to Trash?"
+
+[test]
+should_match = [
+    "~/.cache/firebase/emulators/firestore-v1.19.8.jar",
+    "~/Library/Caches/firebase/emulators/firestore-v1.19.8.jar",
+]
+should_not_match = [
+    "~/.cache/firebase/other/foo",
+    "~/.config/configstore/firebase-tools.json",
+]
