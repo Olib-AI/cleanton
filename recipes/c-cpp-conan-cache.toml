@@ -35,5 +35,5 @@ should_match = [
 ]
 should_not_match = [
     "~/.conanx/data/zlib/1.2.13/export/conanfile.py",
-    "~/Documents/conan/data/zlib/1.2.13/export/conanfile.py",
+    "~/projects/conan/data/zlib/1.2.13/export/conanfile.py",
 ]

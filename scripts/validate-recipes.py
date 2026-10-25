@@ -63,6 +63,23 @@ SENSITIVE_BASENAMES = {
     ".mcp.json",
 }
 
+# Roots the engine never destructively cleans (mirrors USER_PROTECTED /
+# HARDCODED_PROTECTED in cleanton-common/src/safety.rs). A fixture under any of
+# these makes the recipe fail Rust `validate_protected_test_paths`, which in turn
+# makes `RecipeSet::load_all()` — and therefore `Orchestrator::new` — fail at
+# runtime. Catching this offline avoids a full CI cycle.
+HOME_PROTECTED_ROOTS = (
+    ".ssh", ".gnupg", ".aws", ".azure", ".config/gcloud", ".config/cleanton",
+    ".kube", ".docker/config.json", ".npmrc", ".pypirc", ".netrc",
+    "Library/Keychains", "Library/Mail", "Library/Messages",
+    "Library/Containers", "Library/Group Containers",
+    "Desktop", "Documents", "Downloads", "Pictures", "Music", "Movies",
+)
+ABSOLUTE_PROTECTED_ROOTS = (
+    "/System", "/Library", "/usr", "/bin", "/sbin", "/private", "/etc", "/var",
+    "/Applications",
+)
+
 # Glob metacharacters; a pattern made only of these is "broad" and rejected by
 # the Rust validator (`is_broad_pattern`).
 GLOB_META = set("*?[]{},!")
@@ -267,7 +284,30 @@ def _validate_recipe(rep: Report, path: Path, doc: dict) -> str | None:
                     f"{path}: {label} fixture references sensitive basename: {fixture}"
                 )
 
+    _check_protected_fixtures(rep, path, "should_match", should_match)
+    _check_protected_fixtures(rep, path, "should_not_match", should_not_match)
+
     return rid
+
+
+def _check_protected_fixtures(
+    rep: Report, path: Path, label: str, fixtures: list[str]
+) -> None:
+    for fixture in fixtures:
+        if Path(fixture).is_absolute():
+            if any(fixture.startswith(root) for root in ABSOLUTE_PROTECTED_ROOTS):
+                rep.error(
+                    f"{path}: {label} fixture references protected path: {fixture}"
+                )
+            continue
+        rel = fixture[1:].lstrip("/") if fixture.startswith("~") else fixture
+        rel = rel.replace("\\", "/")
+        for root in HOME_PROTECTED_ROOTS:
+            if rel == root or rel.startswith(root + "/"):
+                rep.error(
+                    f"{path}: {label} fixture references protected path: {fixture}"
+                )
+                break
 
 
 def _builtin_entries() -> set[str]:
