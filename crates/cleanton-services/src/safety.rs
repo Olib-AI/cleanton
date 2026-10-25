@@ -8,11 +8,31 @@ pub enum PrivilegedMutationReason {
     RootOwnedPlist,
 }
 
+const PROTECTED_LINUX_PREFIXES: &[&str] = &[
+    "dbus",
+    "systemd-",
+    "pipewire",
+    "wireplumber",
+    "pulseaudio",
+    "gnome-",
+    "xdg-",
+    "gvfs-",
+    "at-spi",
+    "ssh-agent",
+    "gpg-agent",
+];
+
 #[must_use]
 pub fn is_protected(label: &str, plist_path: &Path) -> bool {
+    let lower = label.to_ascii_lowercase();
     label.starts_with("com.apple.")
+        || PROTECTED_LINUX_PREFIXES
+            .iter()
+            .any(|prefix| lower.starts_with(prefix))
         || plist_path.starts_with("/System/Library")
         || plist_path.starts_with("/Library/Apple")
+        || plist_path.starts_with("/usr/lib/systemd")
+        || plist_path.starts_with("/lib/systemd")
 }
 
 pub fn check_mutation_safety(label: &str, plist_path: &Path) -> Result<()> {

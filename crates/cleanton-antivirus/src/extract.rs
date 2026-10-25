@@ -67,10 +67,7 @@ impl Loader {
         } else {
             let data = read_bounded_file(target, cfg, &mut state.errors)?;
             if let Some(data) = data {
-                let name = target
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| "file".to_string());
+                let name = single_file_rel_path(target);
                 state.ingest_bytes(&name, data, 0, cfg)?;
             }
         }
@@ -86,6 +83,48 @@ impl Loader {
         state.ingest_bytes(name, bytes.to_vec(), 0, cfg)?;
         Ok(state.finish())
     }
+}
+
+/// Derive a relative display path for a single-file scan target. Preserves
+/// persistence-relevant parent directory segments (`Library/LaunchAgents/...`,
+/// `.config/systemd/user/...`, `.config/autostart/...`, `.config/fish/...`,
+/// `etc/cron.d/...`, etc.) so `PersistenceEngine` can classify single-file
+/// targets accurately while ordinary files keep their basename.
+fn single_file_rel_path(target: &Path) -> String {
+    let parts: Vec<String> = target
+        .components()
+        .filter_map(|c| match c {
+            Component::Normal(s) => Some(s.to_string_lossy().into_owned()),
+            _ => None,
+        })
+        .collect();
+    if parts.len() >= 2 {
+        let joined_lower = parts.join("/").to_ascii_lowercase();
+        for marker in [
+            "library/launchagents/",
+            "library/launchdaemons/",
+            ".config/systemd/user/",
+            "systemd/user/",
+            ".config/autostart/",
+            "autostart/",
+            ".config/fish/",
+            "fish/",
+            "etc/profile.d/",
+            "etc/cron",
+            "var/spool/cron/",
+        ] {
+            if let Some(pos) = joined_lower.find(marker) {
+                let full = parts.join("/");
+                if let Some(rel) = full.get(pos..) {
+                    return rel.to_owned();
+                }
+            }
+        }
+    }
+    target
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "file".to_string())
 }
 
 // ── internal bookkeeping ──────────────────────────────────────────────────────

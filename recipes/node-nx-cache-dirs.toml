@@ -1,0 +1,30 @@
+[recipe]
+id = "node-nx-cache-dirs"
+name = "Nx Workspace Task Caches"
+description = "Nx monorepo .nx/cache and .nx/workspace-data task computation caches"
+category = "node"
+safety_level = "safe"
+enabled = true
+priority = 52
+
+[match]
+path_glob = "**/.nx/cache/**"
+min_age_days = 7
+
+[[match.any_of]]
+path_glob = "**/.nx/workspace-data/**"
+min_age_days = 7
+
+[action]
+type = "trash"
+prompt = "Move {size} of Nx workspace caches to Trash?"
+
+[test]
+should_match = [
+    "projects/monorepo/.nx/cache/123456789/outputs",
+    "projects/monorepo/.nx/workspace-data/project-graph.json",
+]
+should_not_match = [
+    "projects/monorepo/.nx/installation/package.json",
+    "projects/monorepo/nx.json",
+]

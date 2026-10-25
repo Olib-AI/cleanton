@@ -1,0 +1,65 @@
+[recipe]
+id = "node-modern-framework-dirs"
+name = "Modern Web Framework Build Caches"
+description = "SvelteKit, Nuxt, Astro, Angular, Docusaurus, Expo and Wrangler generated build caches"
+category = "node"
+safety_level = "safe"
+enabled = true
+priority = 52
+
+[match]
+directory_name = ".svelte-kit"
+parent_must_contain = ["package.json"]
+min_age_days = 7
+
+[[match.any_of]]
+directory_name = ".nuxt"
+parent_must_contain = ["package.json"]
+min_age_days = 7
+
+[[match.any_of]]
+directory_name = ".output"
+parent_must_contain_any = ["nuxt.config.ts", "nuxt.config.js", "nitro.config.ts"]
+min_age_days = 7
+
+[[match.any_of]]
+directory_name = ".astro"
+parent_must_contain = ["package.json"]
+min_age_days = 7
+
+[[match.any_of]]
+directory_name = ".angular"
+parent_must_contain = ["angular.json"]
+min_age_days = 7
+
+[[match.any_of]]
+directory_name = ".docusaurus"
+parent_must_contain = ["package.json"]
+min_age_days = 7
+
+[[match.any_of]]
+directory_name = ".expo"
+parent_must_contain = ["package.json"]
+min_age_days = 7
+
+[[match.any_of]]
+directory_name = ".wrangler"
+parent_must_contain = ["package.json"]
+min_age_days = 7
+
+[action]
+type = "trash"
+prompt = "Move {size} of modern web framework build caches to Trash?"
+
+[test]
+should_match = [
+    "projects/web/.svelte-kit",
+    "projects/web/.nuxt",
+    "projects/web/.output",
+    "projects/web/.astro",
+    "projects/web/.angular",
+    "projects/docs/.docusaurus",
+    "projects/mobile/.expo",
+    "projects/worker/.wrangler",
+]
+should_not_match = ["projects/web/src", "loose/.svelte-kit", "loose/.output"]

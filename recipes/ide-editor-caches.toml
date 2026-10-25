@@ -1,0 +1,69 @@
+[recipe]
+id = "ide-editor-caches"
+name = "Neovim, JetBrains, Fleet, Eclipse & Sublime Caches"
+description = "Regenerable caches and diagnostic logs for Neovim, JetBrains IDEs, Fleet, Eclipse and Sublime Text"
+category = "ide"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/.cache/nvim/**"
+min_age_days = 14
+
+[[match.any_of]]
+path_glob = "~/Library/Caches/nvim/**"
+min_age_days = 14
+
+[[match.any_of]]
+path_glob = "~/Library/Logs/JetBrains/**"
+min_age_days = 14
+
+[[match.any_of]]
+path_glob = "~/.cache/JetBrains/*/log/**"
+min_age_days = 14
+
+[[match.any_of]]
+path_glob = "~/Library/Caches/JetBrains/Fleet/**"
+min_age_days = 14
+
+[[match.any_of]]
+path_glob = "~/.cache/JetBrains/Fleet/**"
+min_age_days = 14
+
+[[match.any_of]]
+path_glob = "~/.eclipse/**/p2/org.eclipse.equinox.p2.core/cache/**"
+min_age_days = 30
+
+[[match.any_of]]
+path_glob = "~/Library/Caches/com.sublimetext.*/**"
+min_age_days = 14
+
+[[match.any_of]]
+path_glob = "~/.cache/sublime-text/Index/**"
+min_age_days = 14
+
+[[match.any_of]]
+path_glob = "~/.cache/sublime-text/Cache/**"
+min_age_days = 14
+
+[action]
+type = "trash"
+prompt = "Move {size} of IDE and editor caches to Trash?"
+
+[test]
+should_match = [
+    "~/.cache/nvim/luac/init.lua",
+    "~/Library/Caches/nvim/lsp.log",
+    "~/Library/Logs/JetBrains/RustRover2025.1/idea.log",
+    "~/.cache/JetBrains/IntelliJIdea2025.1/log/idea.log",
+    "~/Library/Caches/JetBrains/Fleet/caches/index.dat",
+    "~/.eclipse/org.eclipse.platform_4.30/p2/org.eclipse.equinox.p2.core/cache/artifacts.xml",
+    "~/Library/Caches/com.sublimetext.4/Index/00001.ldb",
+    "~/.cache/sublime-text/Index/00001.ldb",
+]
+should_not_match = [
+    "~/.config/nvim/init.lua",
+    "~/.local/share/nvim/lazy/telescope.nvim/README.md",
+    "~/.config/sublime-text/Packages/User/Preferences.sublime-settings",
+]

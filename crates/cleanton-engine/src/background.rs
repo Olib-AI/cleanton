@@ -68,8 +68,8 @@ impl Default for WatchOptions {
             max_idle: Duration::from_mins(15),
             burst: Duration::from_secs(5),
             quiet_ticks_before_backoff: 4,
-            disk_pressure_percent: 90,
-            memory_pressure_percent: 90,
+            disk_pressure_percent: 85,
+            memory_pressure_percent: 85,
         }
     }
 }
@@ -112,15 +112,17 @@ pub enum WatchEvent {
     /// A newly installed package runs a script at install time. Not a verdict,
     /// just the fact that makes install-time compromise possible.
     InstallHook { package: String, hook: String },
-    /// Disk or memory usage crossed its pressure threshold. Edge-triggered:
-    /// emitted once when pressure starts, and again only after usage has
-    /// dropped back below the threshold. `suggestion` is the user-facing
-    /// cleanup advice (the watcher itself never deletes or purges anything).
+    /// Disk or memory usage crossed its pressure threshold. Edge-triggered with
+    /// hysteresis: emitted once when pressure starts, and again only after usage
+    /// has dropped comfortably back below the threshold. `suggestion` is the
+    /// user-facing cleanup advice and `offer` carries concrete candidates so
+    /// CLI/TUI/GUI surfaces can offer one-step reviewed cleanup.
     ResourcePressure {
         kind: ResourceKind,
         used_percent: u8,
         available_bytes: u64,
         suggestion: String,
+        offer: CleanupOffer,
     },
     /// A newly installed package did not come back clean from the content scan.
     ContentFinding {
@@ -129,6 +131,48 @@ pub enum WatchEvent {
         findings: usize,
         headline: String,
     },
+}
+
+/// One measured reclaimable directory surfaced in a disk-pressure cleanup offer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiskReliefCandidate {
+    pub label: String,
+    pub path: PathBuf,
+    pub bytes: u64,
+}
+
+/// One high-RSS user process surfaced in a memory-pressure cleanup offer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemoryProcessCandidate {
+    pub pid: u32,
+    pub name: String,
+    pub rss_bytes: u64,
+}
+
+/// Structured cleanup offer emitted when disk or memory usage is too high.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CleanupOffer {
+    Disk {
+        candidates: Vec<DiskReliefCandidate>,
+        estimated_reclaimable_bytes: u64,
+    },
+    Memory {
+        top_processes: Vec<MemoryProcessCandidate>,
+        recommended_command: String,
+    },
+}
+
+/// Live resource snapshot used by the desktop and terminal UIs' background helper.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ResourceStatus {
+    pub disk_used_percent: u8,
+    pub disk_available_bytes: u64,
+    pub disk_total_bytes: u64,
+    pub memory_used_percent: u8,
+    pub memory_available_bytes: u64,
+    pub memory_total_bytes: u64,
+    pub disk_offer: Option<(String, CleanupOffer)>,
+    pub memory_offer: Option<(String, CleanupOffer)>,
 }
 
 impl WatchEvent {
@@ -165,11 +209,17 @@ struct RootState {
     entries: BTreeMap<String, Option<SystemTime>>,
 }
 
+/// Hysteresis band (in percentage points) below the pressure threshold before a
+/// previously triggered alert rearms, preventing repeated notifications when
+/// usage hovers near the threshold.
+const PRESSURE_HYSTERESIS_PERCENT: u8 = 5;
+
 /// The watcher itself: targets plus their last snapshot.
 #[derive(Debug)]
 pub struct PackageWatcher {
     roots: Vec<(SecurityTarget, RootState)>,
     advisories: AdvisoryDatabase,
+    scanner: Scanner,
     options: WatchOptions,
     disk_pressure_active: bool,
     memory_pressure_active: bool,
@@ -191,6 +241,7 @@ impl PackageWatcher {
                 .map(|target| (target, RootState::default()))
                 .collect(),
             advisories: AdvisoryDatabase::load(),
+            scanner: Scanner::with_default_engines(ScanConfig::default()),
             options,
             disk_pressure_active: false,
             memory_pressure_active: false,
@@ -256,7 +307,12 @@ impl PackageWatcher {
             let examined = candidates.len();
             for name in &candidates {
                 for dir in expand_entry(&target.root, name) {
-                    events.extend(check_package(&self.advisories, target.kind, &dir));
+                    events.extend(check_package(
+                        &self.advisories,
+                        &self.scanner,
+                        target.kind,
+                        &dir,
+                    ));
                 }
             }
             events.push(WatchEvent::RootChanged {
@@ -271,9 +327,9 @@ impl PackageWatcher {
         events
     }
 
-    /// Edge-triggered disk/memory pressure check: two syscalls-scale reads
-    /// (`statfs` on the home volume, `sysconf` for memory), so it is cheap
-    /// enough to run every tick alongside the package-root stats.
+    /// Edge-triggered disk/memory pressure check with hysteresis: two syscall-scale
+    /// reads (`statfs` on the home volume, `/proc/meminfo` or `host_statistics64`
+    /// for memory), cheap enough to run every tick alongside package-root stats.
     fn resource_pressure_events(&mut self) -> Vec<WatchEvent> {
         let mut events = Vec::new();
         if self.options.disk_pressure_percent > 0
@@ -289,16 +345,21 @@ impl PackageWatcher {
             let used_percent = ((capacity.used_bytes as f64 / capacity.total_bytes as f64) * 100.0)
                 .round()
                 .clamp(0.0, 100.0) as u8;
-            let active = used_percent >= self.options.disk_pressure_percent;
-            if active && !self.disk_pressure_active {
+            let threshold = self.options.disk_pressure_percent;
+            let clear_below = threshold.saturating_sub(PRESSURE_HYSTERESIS_PERCENT);
+            if used_percent >= threshold && !self.disk_pressure_active {
+                self.disk_pressure_active = true;
+                let (suggestion, offer) = build_disk_offer(used_percent, &capacity, &home);
                 events.push(WatchEvent::ResourcePressure {
                     kind: ResourceKind::Disk,
                     used_percent,
                     available_bytes: capacity.available_bytes,
-                    suggestion: disk_advice(used_percent, &capacity, &home),
+                    suggestion,
+                    offer,
                 });
+            } else if used_percent <= clear_below {
+                self.disk_pressure_active = false;
             }
-            self.disk_pressure_active = active;
         }
         if self.options.memory_pressure_percent > 0
             && let Some(memory) = cleanton_scanner::memory_usage()
@@ -309,16 +370,22 @@ impl PackageWatcher {
                 clippy::cast_sign_loss
             )]
             let used_percent = (memory.used_fraction * 100.0).round().clamp(0.0, 100.0) as u8;
-            let active = used_percent >= self.options.memory_pressure_percent;
-            if active && !self.memory_pressure_active {
+            let threshold = self.options.memory_pressure_percent;
+            let clear_below = threshold.saturating_sub(PRESSURE_HYSTERESIS_PERCENT);
+            if used_percent >= threshold && !self.memory_pressure_active {
+                self.memory_pressure_active = true;
+                let (suggestion, offer) =
+                    build_memory_offer(used_percent, memory.available_bytes);
                 events.push(WatchEvent::ResourcePressure {
                     kind: ResourceKind::Memory,
                     used_percent,
                     available_bytes: memory.available_bytes,
-                    suggestion: memory_advice(used_percent, memory.available_bytes),
+                    suggestion,
+                    offer,
                 });
+            } else if used_percent <= clear_below {
+                self.memory_pressure_active = false;
             }
-            self.memory_pressure_active = active;
         }
         events
     }
@@ -360,7 +427,51 @@ const RELIEF_ENTRY_CAP: usize = 20_000;
 const RELIEF_MIN_BYTES: u64 = 64 * 1024 * 1024;
 
 /// How many reclaimable directories the advice names.
-const RELIEF_TOP_N: usize = 3;
+const RELIEF_TOP_N: usize = 4;
+
+/// How many high-memory processes are named in memory relief offers.
+const MEMORY_TOP_PROCESSES: usize = 4;
+
+/// Capture a live snapshot of disk and memory usage, computing cleanup offers
+/// only when a configured threshold is exceeded.
+#[must_use]
+pub fn snapshot_resource_status(disk_threshold: u8, memory_threshold: u8) -> ResourceStatus {
+    let mut status = ResourceStatus::default();
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from)
+        && let Ok(capacity) = cleanton_scanner::volume_capacity(&home)
+        && capacity.total_bytes > 0
+    {
+        #[allow(
+            clippy::cast_precision_loss,
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss
+        )]
+        let used_percent = ((capacity.used_bytes as f64 / capacity.total_bytes as f64) * 100.0)
+            .round()
+            .clamp(0.0, 100.0) as u8;
+        status.disk_used_percent = used_percent;
+        status.disk_available_bytes = capacity.available_bytes;
+        status.disk_total_bytes = capacity.total_bytes;
+        if disk_threshold > 0 && used_percent >= disk_threshold {
+            status.disk_offer = Some(build_disk_offer(used_percent, &capacity, &home));
+        }
+    }
+    if let Some(memory) = cleanton_scanner::memory_usage() {
+        #[allow(
+            clippy::cast_precision_loss,
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss
+        )]
+        let used_percent = (memory.used_fraction * 100.0).round().clamp(0.0, 100.0) as u8;
+        status.memory_used_percent = used_percent;
+        status.memory_available_bytes = memory.available_bytes;
+        status.memory_total_bytes = memory.total_bytes;
+        if memory_threshold > 0 && used_percent >= memory_threshold {
+            status.memory_offer = Some(build_memory_offer(used_percent, memory.available_bytes));
+        }
+    }
+    status
+}
 
 /// Sum a directory against a budget shared by the whole measurement, stopping
 /// as soon as it is spent. The figure is therefore a lower bound, which is the
@@ -385,14 +496,11 @@ fn sized_dir(path: &Path, budget: &mut usize) -> u64 {
     total
 }
 
-/// The largest reclaimable directories under the two user cache conventions,
-/// plus the Trash, sorted largest-first and capped at [`RELIEF_TOP_N`].
-///
-/// `~/.Trash` is measured as a single entry rather than per file: emptying it is
-/// one action, and that is precisely why it is worth naming.
-fn reclaimable_top(home: &Path) -> Vec<(String, u64)> {
+/// The largest reclaimable directories under macOS and Linux cache/developer/Trash
+/// locations, sorted largest-first and capped at [`RELIEF_TOP_N`].
+fn measure_disk_relief_candidates(home: &Path) -> Vec<DiskReliefCandidate> {
     let mut budget = RELIEF_ENTRY_CAP;
-    let mut found: Vec<(String, u64)> = Vec::new();
+    let mut found: Vec<DiskReliefCandidate> = Vec::new();
     for root in [home.join("Library/Caches"), home.join(".cache")] {
         let Ok(entries) = std::fs::read_dir(&root) else {
             continue;
@@ -408,18 +516,42 @@ fn reclaimable_top(home: &Path) -> Vec<(String, u64)> {
             let name = entry.file_name().to_string_lossy().into_owned();
             let size = sized_dir(&path, &mut budget);
             if size >= RELIEF_MIN_BYTES {
-                found.push((name, size));
+                found.push(DiskReliefCandidate {
+                    label: name,
+                    path,
+                    bytes: size,
+                });
             }
         }
     }
-    let trash = home.join(".Trash");
-    if trash.is_dir() {
-        let size = sized_dir(&trash, &mut budget);
-        if size >= RELIEF_MIN_BYTES {
-            found.push(("Trash".to_owned(), size));
+
+    for (label, path) in [
+        (
+            "Xcode DerivedData",
+            home.join("Library/Developer/Xcode/DerivedData"),
+        ),
+        ("Cargo registry", home.join(".cargo/registry")),
+        ("Gradle caches", home.join(".gradle/caches")),
+        ("npm cache", home.join(".npm/_cacache")),
+        ("Trash", home.join(".Trash")),
+        ("Trash", home.join(".local/share/Trash/files")),
+    ] {
+        if budget == 0 {
+            break;
+        }
+        if path.is_dir() {
+            let size = sized_dir(&path, &mut budget);
+            if size >= RELIEF_MIN_BYTES {
+                found.push(DiskReliefCandidate {
+                    label: label.to_owned(),
+                    path,
+                    bytes: size,
+                });
+            }
         }
     }
-    found.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+
+    found.sort_by(|a, b| b.bytes.cmp(&a.bytes).then_with(|| a.label.cmp(&b.label)));
     found.truncate(RELIEF_TOP_N);
     found
 }
@@ -443,40 +575,89 @@ fn human_bytes(bytes: u64) -> String {
     }
 }
 
-/// Advice for a disk-pressure event, naming the biggest reclaimable directories
-/// when they can be measured. Falls back to plain guidance when nothing
-/// reclaimable is found (or the walk is not affordable right now).
-fn disk_advice(used_percent: u8, capacity: &VolumeCapacity, home: &Path) -> String {
+fn build_disk_offer(
+    used_percent: u8,
+    capacity: &VolumeCapacity,
+    home: &Path,
+) -> (String, CleanupOffer) {
     let free = human_bytes(capacity.available_bytes);
-    let mut advice = format!("Disk is {used_percent}% full ({free} available).");
-    let top = reclaimable_top(home);
-    if top.is_empty() {
-        advice.push_str(
-            " Run a Cleanton scan to find caches and large files, then empty the Trash: \
-             items you have already trashed keep occupying space until it is emptied.",
-        );
-        return advice;
-    }
-    let named: Vec<String> = top
+    let candidates = measure_disk_relief_candidates(home);
+    let estimated_reclaimable_bytes: u64 = candidates
         .iter()
-        .map(|(name, size)| format!("{name} ({})", human_bytes(*size)))
-        .collect();
-    advice.push_str(" Biggest reclaimable right now: ");
-    advice.push_str(&named.join(", "));
-    advice.push('.');
-    advice.push_str(
-        " Run a Cleanton scan to review them, then empty the Trash to actually reclaim the space.",
-    );
-    advice
+        .fold(0_u64, |acc, item| acc.saturating_add(item.bytes));
+
+    let mut advice = format!("Disk usage is high at {used_percent}% ({free} available).");
+    if candidates.is_empty() {
+        advice.push_str(
+            " Offer disk cleanup: run a Cleanton scan to review caches and build artifacts, \
+             then empty the Trash to reclaim freed space.",
+        );
+    } else {
+        let named: Vec<String> = candidates
+            .iter()
+            .map(|c| format!("{} ({})", c.label, human_bytes(c.bytes)))
+            .collect();
+        advice.push_str(&format!(
+            " At least {} is reclaimable across {}. Run Disk Cleanup to review and move caches to Trash, or empty the Trash.",
+            human_bytes(estimated_reclaimable_bytes),
+            named.join(", ")
+        ));
+    }
+
+    (
+        advice,
+        CleanupOffer::Disk {
+            candidates,
+            estimated_reclaimable_bytes,
+        },
+    )
 }
 
-/// Advice for a memory-pressure event. Cleanton reports; it never kills a
-/// process or purges memory, and the advice says so.
-fn memory_advice(used_percent: u8, available_bytes: u64) -> String {
-    format!(
-        "Memory is {used_percent}% used ({} available). Quit or restart the heaviest app; \
-         Cleanton never kills processes or purges memory for you.",
+fn build_memory_offer(used_percent: u8, available_bytes: u64) -> (String, CleanupOffer) {
+    // Immediately return any unused Cleanton allocator pages back to the OS.
+    let _ = cleanton_scanner::reclaim_process_memory();
+
+    let top_processes: Vec<MemoryProcessCandidate> =
+        cleanton_scanner::top_memory_processes(MEMORY_TOP_PROCESSES)
+            .into_iter()
+            .map(|sample| MemoryProcessCandidate {
+                pid: sample.pid,
+                name: sample.name,
+                rss_bytes: sample.rss_bytes,
+            })
+            .collect();
+
+    let mut advice = format!(
+        "Memory usage is high at {used_percent}% ({} available).",
         human_bytes(available_bytes)
+    );
+    if !top_processes.is_empty() {
+        let summary: Vec<String> = top_processes
+            .iter()
+            .map(|proc_entry| {
+                format!(
+                    "{} ({}, PID {})",
+                    proc_entry.name,
+                    human_bytes(proc_entry.rss_bytes),
+                    proc_entry.pid
+                )
+            })
+            .collect();
+        advice.push_str(" Heaviest user processes: ");
+        advice.push_str(&summary.join(", "));
+        advice.push('.');
+    }
+    advice.push_str(
+        " Offer memory cleanup: stop idle background services in Cleanton Services (`cleanton services list`) \
+         or close unused heavy apps; Cleanton reclaimed its own unused allocator pages and never kills user apps without review.",
+    );
+
+    (
+        advice,
+        CleanupOffer::Memory {
+            top_processes,
+            recommended_command: "cleanton services list".to_owned(),
+        },
     )
 }
 
@@ -484,6 +665,7 @@ fn memory_advice(used_percent: u8, available_bytes: u64) -> String {
 /// a single-directory content scan.
 fn check_package(
     advisories: &AdvisoryDatabase,
+    scanner: &Scanner,
     kind: SecurityTargetKind,
     dir: &Path,
 ) -> Vec<WatchEvent> {
@@ -515,7 +697,6 @@ fn check_package(
         // `SecurityTargetKind::is_version_only`.
         return events;
     }
-    let scanner = Scanner::with_default_engines(ScanConfig::default());
     if let Ok(report) = scanner.scan_path(dir)
         && !matches!(report.verdict, Verdict::Clean)
     {
@@ -790,6 +971,35 @@ mod tests {
         assert_eq!(options.idle, Duration::from_secs(1));
         assert!(options.max_idle >= options.idle);
         assert!(options.burst <= options.idle);
+    }
+
+    #[test]
+    fn disk_and_memory_cleanup_offers_are_populated() {
+        let temp = tempfile::tempdir().unwrap();
+        let big_cache = temp.path().join(".cache/pip");
+        std::fs::create_dir_all(&big_cache).unwrap();
+        std::fs::write(big_cache.join("wheel.bin"), vec![0_u8; 70 * 1024 * 1024]).unwrap();
+
+        let cap = VolumeCapacity {
+            total_bytes: 100 * 1024 * 1024 * 1024,
+            available_bytes: 10 * 1024 * 1024 * 1024,
+            used_bytes: 90 * 1024 * 1024 * 1024,
+        };
+        let (advice, offer) = build_disk_offer(90, &cap, temp.path());
+        assert!(advice.contains("pip"), "expected cache candidate in {advice}");
+        assert!(matches!(offer, CleanupOffer::Disk { .. }));
+        if let CleanupOffer::Disk {
+            candidates,
+            estimated_reclaimable_bytes,
+        } = offer
+        {
+            assert!(!candidates.is_empty());
+            assert!(estimated_reclaimable_bytes >= 64 * 1024 * 1024);
+        }
+
+        let (mem_advice, mem_offer) = build_memory_offer(92, 512 * 1024 * 1024);
+        assert!(mem_advice.contains("Memory usage is high"));
+        assert!(matches!(mem_offer, CleanupOffer::Memory { .. }));
     }
 
     #[test]

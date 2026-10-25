@@ -887,6 +887,12 @@ async fn handle_key_event(
                     || key.code == crossterm::event::KeyCode::Char(' ')
                 {
                     trigger_scan(app, tui_tx);
+                } else if key.code == crossterm::event::KeyCode::Char('m') {
+                    app.reclaim_memory();
+                    app.active_screen = ActiveScreen::Services;
+                    if app.services.is_empty() && !app.is_loading_services {
+                        load_services(app, service_tx);
+                    }
                 }
             }
             ActiveScreen::Packages => handle_packages_key(key, app, tui_tx),

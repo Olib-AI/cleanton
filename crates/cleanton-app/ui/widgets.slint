@@ -132,18 +132,15 @@ export component Spinner inherits Rectangle {
     in property <length> spinner-size: 14px;
     property <angle> phase: 0deg;
 
-    width: root.spinner-size;
-    height: root.spinner-size;
+    // Collapse to zero width when idle and never stretch horizontally inside a
+    // `HorizontalLayout`, while stretching vertically across row height so the
+    // rotating glyph centres itself via `y` without wrapper layouts.
+    min-width: root.running ? root.spinner-size : 0px;
+    max-width: root.running ? root.spinner-size : 0px;
+    min-height: root.spinner-size;
+    horizontal-stretch: 0;
     background: transparent;
-    // Invisible (and taking no visual space in the row) when not running:
-    // a static spinner glyph next to a title otherwise never goes away.
     visible: root.running;
-    // NOTE (Slint 1.17): a fixed-size element in a layout is placed at the
-    // START of the cross axis, so a bare Spinner sits at the top of a row (or
-    // hard left in a column) instead of centred. `cross-axis-self-alignment`
-    // would fix that for every caller at once, but it arrives in Slint 1.18,
-    // so each call site centres it instead: either a wrapper `HorizontalLayout
-    // { alignment: center; }` or a parent with `cross-axis-alignment: center`.
 
     Timer {
         interval: 90ms;
@@ -175,7 +172,9 @@ export component ActivityBar inherits Rectangle {
     property <float> phase: 0.0;
 
     visible: root.running;
-    height: 4px;
+    min-height: root.running ? 4px : 0px;
+    max-height: root.running ? 4px : 0px;
+    vertical-stretch: 0;
     background: Theme.palette.surface-elevated;
     border-radius: 2px;
     clip: true;
@@ -416,13 +415,14 @@ export component SidebarItem inherits Rectangle {
         padding-left: Theme.spacing-sm;
         padding-right: Theme.spacing-sm;
         spacing: Theme.spacing-sm;
+        cross-axis-alignment: center;
 
         Rectangle {
             width: 3px;
-            height: 18px;
+            min-height: 18px;
+            max-height: 18px;
             border-radius: 2px;
             background: active ? Theme.palette.accent : transparent;
-            y: (parent.height - self.height) / 2;
         }
 
         FaIcon {
@@ -851,45 +851,49 @@ export component SuggestionListRow inherits Rectangle {
             HorizontalLayout {
                 alignment: end;
                 spacing: Theme.spacing-xs;
+                cross-axis-alignment: center;
                 Text { text: "Reveal"; color: Theme.palette.accent; font-size: Theme.font-size-xs; font-weight: 600; vertical-alignment: center; }
-                FaIcon { glyph: "\u{f35d}"; icon-color: Theme.palette.accent; icon-size: Theme.font-size-xs; width: 12px; y: (parent.height - self.height) / 2; }
+                FaIcon { glyph: "\u{f35d}"; icon-color: Theme.palette.accent; icon-size: Theme.font-size-xs; width: 12px; }
             }
         }
 
         // Two-step Trash affordance for deletable suggestions.
         Rectangle {
             width: 84px;
-            if root.deletable: HorizontalLayout {
-                alignment: end;
-                Rectangle {
-                    width: 78px;
-                    height: 28px;
-                    y: (parent.height - self.height) / 2;
-                    border-radius: Theme.radius-sm;
-                    background: root.armed-delete
-                        ? Theme.palette.danger
-                        : (del-ta.has-hover ? Theme.palette.surface-elevated : transparent);
-                    border-width: 1px;
-                    border-color: root.armed-delete ? Theme.palette.danger : Theme.palette.border;
-                    animate background, border-color { duration: Theme.anim-fast; }
+            if root.deletable: VerticalLayout {
+                alignment: center;
+                HorizontalLayout {
+                    alignment: end;
+                    Rectangle {
+                        width: 78px;
+                        min-height: 28px;
+                        max-height: 28px;
+                        border-radius: Theme.radius-sm;
+                        background: root.armed-delete
+                            ? Theme.palette.danger
+                            : (del-ta.has-hover ? Theme.palette.surface-elevated : transparent);
+                        border-width: 1px;
+                        border-color: root.armed-delete ? Theme.palette.danger : Theme.palette.border;
+                        animate background, border-color { duration: Theme.anim-fast; }
 
-                    del-ta := TouchArea {
-                        mouse-cursor: pointer;
-                        clicked => {
-                            if root.armed-delete {
-                                root.confirm-delete();
-                            } else {
-                                root.arm-delete();
+                        del-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                if root.armed-delete {
+                                    root.confirm-delete();
+                                } else {
+                                    root.arm-delete();
+                                }
                             }
                         }
-                    }
-                    Text {
-                        text: root.armed-delete ? "Confirm" : "Trash";
-                        color: root.armed-delete ? #FFFFFF : Theme.palette.text-secondary;
-                        font-size: Theme.font-size-xs;
-                        font-weight: 650;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
+                        Text {
+                            text: root.armed-delete ? "Confirm" : "Trash";
+                            color: root.armed-delete ? #FFFFFF : Theme.palette.text-secondary;
+                            font-size: Theme.font-size-xs;
+                            font-weight: 650;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
                     }
                 }
             }
@@ -1117,157 +1121,161 @@ export component ServiceListRow inherits Rectangle {
         Rectangle {
             width: 168px;
 
-            if root.protected-service: HorizontalLayout {
-                alignment: end;
-                spacing: Theme.spacing-xs;
-                FaIcon {
-                    glyph: "\u{f023}";
-                    icon-color: Theme.palette.warning;
-                    icon-size: Theme.font-size-xs;
-                    width: 14px;
-                    y: (parent.height - self.height) / 2;
-                }
-                Text {
-                    text: "Protected";
-                    color: Theme.palette.text-muted;
-                    font-size: Theme.font-size-xs;
-                    vertical-alignment: center;
-                }
-            }
+            VerticalLayout {
+                alignment: center;
 
-            // Orphaned leftover: destructive Remove (two-step).
-            if !root.protected-service && root.orphaned: HorizontalLayout {
-                alignment: end;
-                Rectangle {
-                    width: 92px;
-                    height: 30px;
-                    y: (parent.height - self.height) / 2;
-                    border-radius: Theme.radius-sm;
-                    background: root.armed-remove
-                        ? Theme.palette.danger
-                        : (rm-ta.has-hover ? Theme.palette.surface-elevated : transparent);
-                    border-width: 1px;
-                    border-color: root.armed-remove ? Theme.palette.danger : Theme.palette.border;
-                    animate background, border-color { duration: Theme.anim-fast; }
+                if root.protected-service: HorizontalLayout {
+                    alignment: end;
+                    spacing: Theme.spacing-xs;
+                    cross-axis-alignment: center;
+                    FaIcon {
+                        glyph: "\u{f023}";
+                        icon-color: Theme.palette.warning;
+                        icon-size: Theme.font-size-xs;
+                        width: 14px;
+                    }
+                    Text {
+                        text: "Protected";
+                        color: Theme.palette.text-muted;
+                        font-size: Theme.font-size-xs;
+                        vertical-alignment: center;
+                    }
+                }
 
-                    rm-ta := TouchArea {
-                        mouse-cursor: pointer;
-                        clicked => {
-                            if root.armed-remove {
-                                root.confirm-remove(root.id);
-                            } else {
-                                root.arm-remove(root.id);
+                // Orphaned leftover: destructive Remove (two-step).
+                if !root.protected-service && root.orphaned: HorizontalLayout {
+                    alignment: end;
+                    Rectangle {
+                        width: 92px;
+                        min-height: 30px;
+                        max-height: 30px;
+                        border-radius: Theme.radius-sm;
+                        background: root.armed-remove
+                            ? Theme.palette.danger
+                            : (rm-ta.has-hover ? Theme.palette.surface-elevated : transparent);
+                        border-width: 1px;
+                        border-color: root.armed-remove ? Theme.palette.danger : Theme.palette.border;
+                        animate background, border-color { duration: Theme.anim-fast; }
+
+                        rm-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                if root.armed-remove {
+                                    root.confirm-remove(root.id);
+                                } else {
+                                    root.arm-remove(root.id);
+                                }
                             }
                         }
-                    }
-                    Text {
-                        text: root.armed-remove ? "Confirm" : "Remove";
-                        color: root.armed-remove ? #FFFFFF : Theme.palette.text-secondary;
-                        font-size: Theme.font-size-xs;
-                        font-weight: 650;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
+                        Text {
+                            text: root.armed-remove ? "Confirm" : "Remove";
+                            color: root.armed-remove ? #FFFFFF : Theme.palette.text-secondary;
+                            font-size: Theme.font-size-xs;
+                            font-weight: 650;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
                     }
                 }
-            }
 
-            // Running service: two-step Disable.
-            if !root.protected-service && !root.orphaned && root.running: HorizontalLayout {
-                alignment: end;
+                // Running service: two-step Disable.
+                if !root.protected-service && !root.orphaned && root.running: HorizontalLayout {
+                    alignment: end;
 
-                Rectangle {
-                    width: 92px;
-                    height: 30px;
-                    y: (parent.height - self.height) / 2;
-                    border-radius: Theme.radius-sm;
-                    background: root.armed
-                        ? Theme.palette.danger
-                        : (btn-ta.has-hover ? Theme.palette.surface-elevated : transparent);
-                    border-width: 1px;
-                    border-color: root.armed ? Theme.palette.danger : Theme.palette.border;
+                    Rectangle {
+                        width: 92px;
+                        min-height: 30px;
+                        max-height: 30px;
+                        border-radius: Theme.radius-sm;
+                        background: root.armed
+                            ? Theme.palette.danger
+                            : (btn-ta.has-hover ? Theme.palette.surface-elevated : transparent);
+                        border-width: 1px;
+                        border-color: root.armed ? Theme.palette.danger : Theme.palette.border;
 
-                    animate background, border-color { duration: Theme.anim-fast; }
+                        animate background, border-color { duration: Theme.anim-fast; }
 
-                    btn-ta := TouchArea {
-                        mouse-cursor: pointer;
-                        clicked => {
-                            if root.armed {
-                                root.confirm-disable(root.id);
-                            } else {
-                                root.arm-disable(root.id);
+                        btn-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                if root.armed {
+                                    root.confirm-disable(root.id);
+                                } else {
+                                    root.arm-disable(root.id);
+                                }
                             }
+                        }
+
+                        Text {
+                            text: root.armed ? "Confirm" : "Disable";
+                            color: root.armed ? #FFFFFF : Theme.palette.text-secondary;
+                            font-size: Theme.font-size-xs;
+                            font-weight: 650;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                // Stopped/disabled service: single-click Enable, plus a two-step
+                // Delete that removes the disabled startup item for good.
+                if !root.protected-service && !root.orphaned && !root.running: HorizontalLayout {
+                    alignment: end;
+                    spacing: Theme.spacing-xs;
+
+                    Rectangle {
+                        width: 76px;
+                        min-height: 30px;
+                        max-height: 30px;
+                        border-radius: Theme.radius-sm;
+                        background: en-ta.has-hover ? Theme.palette.surface-elevated : transparent;
+                        border-width: 1px;
+                        border-color: Theme.palette.border;
+
+                        en-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.enable(root.id); }
+                        }
+                        Text {
+                            text: "Enable";
+                            color: Theme.palette.accent;
+                            font-size: Theme.font-size-xs;
+                            font-weight: 650;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
                         }
                     }
 
-                    Text {
-                        text: root.armed ? "Confirm" : "Disable";
-                        color: root.armed ? #FFFFFF : Theme.palette.text-secondary;
-                        font-size: Theme.font-size-xs;
-                        font-weight: 650;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                    }
-                }
-            }
+                    Rectangle {
+                        width: 76px;
+                        min-height: 30px;
+                        max-height: 30px;
+                        border-radius: Theme.radius-sm;
+                        background: root.armed-delete
+                            ? Theme.palette.danger
+                            : (del-ta.has-hover ? Theme.palette.surface-elevated : transparent);
+                        border-width: 1px;
+                        border-color: root.armed-delete ? Theme.palette.danger : Theme.palette.border;
+                        animate background, border-color { duration: Theme.anim-fast; }
 
-            // Stopped/disabled service: single-click Enable, plus a two-step
-            // Delete that removes the disabled startup item for good.
-            if !root.protected-service && !root.orphaned && !root.running: HorizontalLayout {
-                alignment: end;
-                spacing: Theme.spacing-xs;
-
-                Rectangle {
-                    width: 76px;
-                    height: 30px;
-                    y: (parent.height - self.height) / 2;
-                    border-radius: Theme.radius-sm;
-                    background: en-ta.has-hover ? Theme.palette.surface-elevated : transparent;
-                    border-width: 1px;
-                    border-color: Theme.palette.border;
-
-                    en-ta := TouchArea {
-                        mouse-cursor: pointer;
-                        clicked => { root.enable(root.id); }
-                    }
-                    Text {
-                        text: "Enable";
-                        color: Theme.palette.accent;
-                        font-size: Theme.font-size-xs;
-                        font-weight: 650;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                    }
-                }
-
-                Rectangle {
-                    width: 76px;
-                    height: 30px;
-                    y: (parent.height - self.height) / 2;
-                    border-radius: Theme.radius-sm;
-                    background: root.armed-delete
-                        ? Theme.palette.danger
-                        : (del-ta.has-hover ? Theme.palette.surface-elevated : transparent);
-                    border-width: 1px;
-                    border-color: root.armed-delete ? Theme.palette.danger : Theme.palette.border;
-                    animate background, border-color { duration: Theme.anim-fast; }
-
-                    del-ta := TouchArea {
-                        mouse-cursor: pointer;
-                        clicked => {
-                            if root.armed-delete {
-                                root.confirm-delete(root.id);
-                            } else {
-                                root.arm-delete(root.id);
+                        del-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                if root.armed-delete {
+                                    root.confirm-delete(root.id);
+                                } else {
+                                    root.arm-delete(root.id);
+                                }
                             }
                         }
-                    }
-                    Text {
-                        text: root.armed-delete ? "Confirm" : "Delete";
-                        color: root.armed-delete ? #FFFFFF : Theme.palette.danger;
-                        font-size: Theme.font-size-xs;
-                        font-weight: 650;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
+                        Text {
+                            text: root.armed-delete ? "Confirm" : "Delete";
+                            color: root.armed-delete ? #FFFFFF : Theme.palette.danger;
+                            font-size: Theme.font-size-xs;
+                            font-weight: 650;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
                     }
                 }
             }

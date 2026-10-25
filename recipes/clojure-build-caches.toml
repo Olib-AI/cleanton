@@ -1,0 +1,26 @@
+[recipe]
+id = "clojure-build-caches"
+name = "Clojure Build & Classpath Caches"
+description = "Clojure tools.deps .cpcache and Leiningen target build outputs"
+category = "jvm"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+directory_name = ".cpcache"
+parent_must_contain = ["deps.edn"]
+min_age_days = 7
+
+[[match.any_of]]
+directory_name = "target"
+parent_must_contain = ["project.clj"]
+min_age_days = 7
+
+[action]
+type = "trash"
+prompt = "Move {size} of Clojure build caches to Trash?"
+
+[test]
+should_match = ["projects/clj-api/.cpcache", "projects/lein-app/target"]
+should_not_match = ["projects/clj-api/src", "loose/.cpcache"]

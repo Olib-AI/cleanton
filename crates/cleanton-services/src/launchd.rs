@@ -31,14 +31,17 @@ pub struct ParsedPlist {
 
 #[must_use]
 pub fn get_current_uid() -> u32 {
-    let output = reviewed_process::output("id", ["-u"]);
-    if let Ok(out) = output {
-        let stdout = String::from_utf8_lossy(&out.stdout);
-        if let Ok(uid) = stdout.trim().parse::<u32>() {
-            return uid;
+    static UID: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    *UID.get_or_init(|| {
+        let output = reviewed_process::output("id", ["-u"]);
+        if let Ok(out) = output {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            if let Ok(uid) = stdout.trim().parse::<u32>() {
+                return uid;
+            }
         }
-    }
-    501
+        501
+    })
 }
 
 pub fn parse_plist(path: &Path) -> Result<ParsedPlist> {
@@ -101,24 +104,61 @@ pub fn parse_plist(path: &Path) -> Result<ParsedPlist> {
     })
 }
 
+/// Batch snapshot of `launchctl list`: maps each loaded service label to
+/// `Some(pid)` when actively running or `None` when loaded-but-idle.
 #[must_use]
-pub fn get_launchd_pids() -> HashMap<String, u32> {
-    let mut pids = HashMap::new();
+pub fn get_launchctl_snapshot() -> HashMap<String, Option<u32>> {
+    let mut entries = HashMap::new();
     let Ok(output) = reviewed_process::output("launchctl", ["list"]) else {
-        return pids;
+        return entries;
     };
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     for line in stdout.lines().skip(1) {
         let parts: Vec<&str> = line.split_whitespace().collect();
-        if let [pid_str, _, label, ..] = parts.as_slice()
-            && *pid_str != "-"
-            && let Ok(pid) = pid_str.parse::<u32>()
-        {
-            pids.insert((*label).to_string(), pid);
+        if let [pid_str, _, label, ..] = parts.as_slice() {
+            let pid = if *pid_str == "-" {
+                None
+            } else {
+                pid_str.parse::<u32>().ok()
+            };
+            entries.insert((*label).to_string(), pid);
         }
     }
-    pids
+    entries
+}
+
+#[must_use]
+pub fn get_launchd_pids() -> HashMap<String, u32> {
+    get_launchctl_snapshot()
+        .into_iter()
+        .filter_map(|(label, pid)| pid.map(|p| (label, p)))
+        .collect()
+}
+
+/// Resolve status using a pre-captured `launchctl list` snapshot, avoiding
+/// spawning `launchctl list` + `launchctl print` once per plist file.
+#[must_use]
+pub fn get_launchd_status_from_snapshot<S1: BuildHasher, S2: BuildHasher>(
+    label: &str,
+    _service_type: ServiceType,
+    snapshot: &HashMap<String, Option<u32>, S1>,
+    proc_stats: &HashMap<u32, (f32, u64), S2>,
+) -> ServiceStatus {
+    match snapshot.get(label) {
+        Some(Some(pid)) => {
+            let (cpu, mem) = proc_stats
+                .get(pid)
+                .map_or((None, None), |&(c, m)| (Some(c), Some(m)));
+            ServiceStatus::Running {
+                pid: *pid,
+                cpu_percent: cpu,
+                memory_bytes: mem,
+            }
+        }
+        Some(None) => ServiceStatus::Loaded,
+        None => ServiceStatus::Stopped,
+    }
 }
 
 #[must_use]
@@ -127,20 +167,12 @@ pub fn get_launchd_status<S: BuildHasher>(
     service_type: ServiceType,
     proc_stats: &HashMap<u32, (f32, u64), S>,
 ) -> ServiceStatus {
-    let is_daemon = service_type == ServiceType::SystemLaunchDaemon;
-
-    // Fast path: launchctl list
-    let pids = get_launchd_pids();
-    if let Some(&pid) = pids.get(label) {
-        let (cpu, mem) = proc_stats
-            .get(&pid)
-            .map_or((None, None), |&(c, m)| (Some(c), Some(m)));
-        return ServiceStatus::Running {
-            pid,
-            cpu_percent: cpu,
-            memory_bytes: mem,
-        };
+    let snapshot = get_launchctl_snapshot();
+    if !snapshot.is_empty() {
+        return get_launchd_status_from_snapshot(label, service_type, &snapshot, proc_stats);
     }
+
+    let is_daemon = service_type == ServiceType::SystemLaunchDaemon;
 
     // fallback / system daemons or other domains
     let uid = get_current_uid();

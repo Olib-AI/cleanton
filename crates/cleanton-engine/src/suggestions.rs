@@ -676,9 +676,9 @@ fn detect_large_items_with_probe(
         });
     }
 
-    // Subtree sizes: propagate each file's bytes up to every scanned ancestor
-    // directory, mirroring the in-memory ancestor walk in `analyzer.rs`.
-    // O(entries × depth) over in-memory data; no extra disk walks.
+    // Subtree sizes: credit each file to its nearest scanned ancestor directory,
+    // then reduce directories bottom-up so dense scans pay O(entries) instead of
+    // O(entries * depth) while sparse test fixtures still fold accurately.
     let dirs: HashSet<&Path> = scan
         .entries
         .iter()
@@ -691,14 +691,34 @@ fn detect_large_items_with_probe(
         if entry.kind != FileKind::File {
             continue;
         }
-        for ancestor in entry.path.ancestors() {
-            if !dirs.contains(ancestor) {
-                continue;
-            }
+        if let Some(nearest_dir) = entry
+            .path
+            .ancestors()
+            .skip(1)
+            .find(|ancestor| dirs.contains(ancestor))
+        {
             subtree
-                .entry(ancestor)
+                .entry(nearest_dir)
                 .and_modify(|total| *total = total.saturating_add(entry.logical_bytes))
                 .or_insert(entry.logical_bytes);
+        }
+    }
+
+    let mut ordered_dirs: Vec<&Path> = dirs.iter().copied().collect();
+    ordered_dirs.sort_unstable_by_key(|dir| std::cmp::Reverse(dir.components().count()));
+    for dir in ordered_dirs {
+        let Some(bytes) = subtree.get(dir).copied() else {
+            continue;
+        };
+        if let Some(parent_dir) = dir
+            .ancestors()
+            .skip(1)
+            .find(|ancestor| dirs.contains(ancestor))
+        {
+            subtree
+                .entry(parent_dir)
+                .and_modify(|total| *total = total.saturating_add(bytes))
+                .or_insert(bytes);
         }
     }
 

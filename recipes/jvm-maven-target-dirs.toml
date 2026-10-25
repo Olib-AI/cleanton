@@ -1,0 +1,21 @@
+[recipe]
+id = "jvm-maven-target-dirs"
+name = "Maven target Build Directories"
+description = "Maven project target build output directories (rebuilt by mvn package)"
+category = "jvm"
+safety_level = "safe"
+enabled = true
+priority = 55
+
+[match]
+directory_name = "target"
+parent_must_contain = ["pom.xml"]
+min_age_days = 7
+
+[action]
+type = "trash"
+prompt = "Move {size} of Maven target directories to Trash?"
+
+[test]
+should_match = ["projects/spring-service/target"]
+should_not_match = ["projects/spring-service/src", "loose/target"]

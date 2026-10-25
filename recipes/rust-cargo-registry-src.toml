@@ -9,7 +9,7 @@ enabled = true
 priority = 50
 
 [match]
-path_glob = "~/.cargo/registry/src/**"
+path_glob = "~/.cargo/registry/src/*/**"
 min_age_days = 30
 
 [action]

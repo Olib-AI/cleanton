@@ -296,7 +296,7 @@ async fn run_app(cli: Cli) -> Result<i32> {
             interval,
             once,
             print_agent,
-        } => Ok(run_watch(&cli, interval, once, print_agent)),
+        } => Ok(run_watch(&cli, &config, interval, once, print_agent)),
         Command::Interactive => run_interactive(&cli, &config).await,
     }
 }
@@ -701,37 +701,62 @@ async fn run_clean(cli: &Cli, config: &CleantonConfig, dry_run: bool, yes: bool)
 /// BEFORE the exit code is computed, so `--review-all` on a surfaced set
 /// exits 0.
 /// The background watcher: a slow, cheap loop that checks packages the moment
-/// they appear.
-fn run_watch(cli: &Cli, interval: u64, once: bool, print_agent: bool) -> i32 {
+/// they appear and offers disk or memory cleanup when system resources run high.
+fn run_watch(
+    cli: &Cli,
+    config: &CleantonConfig,
+    interval: u64,
+    once: bool,
+    print_agent: bool,
+) -> i32 {
     use cleanton_engine::background::{PackageWatcher, WatchEvent, WatchOptions};
 
-    let options = WatchOptions::with_idle_seconds(interval);
+    let mut options = WatchOptions::with_idle_seconds(interval);
+    options.disk_pressure_percent = config.background.disk_pressure_percent;
+    options.memory_pressure_percent = config.background.memory_pressure_percent;
     let mut watcher = PackageWatcher::for_default_targets(options);
 
     if print_agent {
-        println!("{}", launch_agent_plist(interval));
+        if cfg!(target_os = "linux") {
+            println!("{}", systemd_user_unit(interval));
+        } else {
+            println!("{}", launch_agent_plist(interval));
+        }
         return 0;
     }
 
     if !cli.json {
         let roots = watcher.roots().collect::<Vec<_>>();
-        if roots.is_empty() {
+        let monitors_resources =
+            options.disk_pressure_percent > 0 || options.memory_pressure_percent > 0;
+        if roots.is_empty() && !monitors_resources {
             println!(
-                "No package locations found to watch (no global node_modules, \
-                 site-packages, gem tree, Cargo registry, or Go module cache exists)."
+                "No package locations found to watch and resource pressure thresholds are disabled."
             );
             return 0;
         }
-        println!(
-            "Watching {} package location(s); idle interval {}s, backing off to {}s while quiet.",
-            roots.len(),
-            options.idle.as_secs(),
-            options.max_idle.as_secs()
-        );
-        for target in roots {
-            println!("  - {} ({})", target.root.display(), target.kind.label());
+        if roots.is_empty() {
+            println!(
+                "Monitoring disk (>={}%) and memory (>={}%) pressure; idle interval {}s, backing off to {}s while quiet.",
+                options.disk_pressure_percent,
+                options.memory_pressure_percent,
+                options.idle.as_secs(),
+                options.max_idle.as_secs()
+            );
+        } else {
+            println!(
+                "Watching {} package location(s) plus disk (>={}%) and memory (>={}%) usage; idle interval {}s, backing off to {}s while quiet.",
+                roots.len(),
+                options.disk_pressure_percent,
+                options.memory_pressure_percent,
+                options.idle.as_secs(),
+                options.max_idle.as_secs()
+            );
+            for target in roots {
+                println!("  - {} ({})", target.root.display(), target.kind.label());
+            }
         }
-        println!("Ctrl-C stops the watcher. Nothing is ever removed.");
+        println!("Ctrl-C stops the watcher. Nothing is ever removed without confirmation.");
     }
 
     let cancel = std::sync::atomic::AtomicBool::new(false);
@@ -767,7 +792,7 @@ fn run_watch(cli: &Cli, interval: u64, once: bool, print_agent: bool) -> i32 {
 
 /// One watch event as JSON (the `--json` stream shape).
 fn watch_event_json(event: &cleanton_engine::background::WatchEvent) -> serde_json::Value {
-    use cleanton_engine::background::WatchEvent;
+    use cleanton_engine::background::{CleanupOffer, WatchEvent};
 
     match event {
         WatchEvent::Quiet => serde_json::json!({ "event": "quiet" }),
@@ -802,13 +827,44 @@ fn watch_event_json(event: &cleanton_engine::background::WatchEvent) -> serde_js
             used_percent,
             available_bytes,
             suggestion,
-        } => serde_json::json!({
-            "event": "resource_pressure",
-            "kind": kind.label(),
-            "used_percent": used_percent,
-            "available_bytes": available_bytes,
-            "suggestion": suggestion,
-        }),
+            offer,
+        } => {
+            let offer_json = match offer {
+                CleanupOffer::Disk {
+                    candidates,
+                    estimated_reclaimable_bytes,
+                } => serde_json::json!({
+                    "type": "disk_cleanup",
+                    "estimated_reclaimable_bytes": estimated_reclaimable_bytes,
+                    "recommended_command": "cleanton clean ~",
+                    "candidates": candidates.iter().map(|c| serde_json::json!({
+                        "label": c.label,
+                        "path": c.path.display().to_string(),
+                        "bytes": c.bytes,
+                    })).collect::<Vec<_>>(),
+                }),
+                CleanupOffer::Memory {
+                    top_processes,
+                    recommended_command,
+                } => serde_json::json!({
+                    "type": "memory_cleanup",
+                    "recommended_command": recommended_command,
+                    "top_processes": top_processes.iter().map(|p| serde_json::json!({
+                        "pid": p.pid,
+                        "name": p.name,
+                        "rss_bytes": p.rss_bytes,
+                    })).collect::<Vec<_>>(),
+                }),
+            };
+            serde_json::json!({
+                "event": "resource_pressure",
+                "kind": kind.label(),
+                "used_percent": used_percent,
+                "available_bytes": available_bytes,
+                "suggestion": suggestion,
+                "offer": offer_json,
+            })
+        }
         WatchEvent::ContentFinding {
             package,
             verdict,
@@ -825,7 +881,7 @@ fn watch_event_json(event: &cleanton_engine::background::WatchEvent) -> serde_js
 }
 
 fn print_watch_event(event: &cleanton_engine::background::WatchEvent) {
-    use cleanton_engine::background::WatchEvent;
+    use cleanton_engine::background::{CleanupOffer, WatchEvent};
     use cleanton_engine::security::{severity_label, verdict_label};
 
     match event {
@@ -848,11 +904,29 @@ fn print_watch_event(event: &cleanton_engine::background::WatchEvent) {
             kind,
             used_percent,
             suggestion,
+            offer,
             ..
-        } => println!(
-            "[pressure] {} at {used_percent}% used - {suggestion}",
-            kind.label()
-        ),
+        } => {
+            println!(
+                "[pressure] {} at {used_percent}% used - {suggestion}",
+                kind.label()
+            );
+            match offer {
+                CleanupOffer::Disk { .. } => {
+                    println!(
+                        "  -> Disk cleanup offer: run `cleanton plan ~` to preview or `cleanton clean ~` to move safe caches and build artifacts to Trash."
+                    );
+                }
+                CleanupOffer::Memory {
+                    recommended_command,
+                    ..
+                } => {
+                    println!(
+                        "  -> Memory cleanup offer: run `{recommended_command}` to inspect and stop idle background services."
+                    );
+                }
+            }
+        }
         WatchEvent::ContentFinding {
             package,
             verdict,
@@ -863,6 +937,18 @@ fn print_watch_event(event: &cleanton_engine::background::WatchEvent) {
             verdict_label(*verdict)
         ),
     }
+}
+
+/// A systemd user unit that runs the watcher on Linux (Ubuntu). Printed, not
+/// installed: writing to `~/.config/systemd/user` stays the user's decision.
+fn systemd_user_unit(interval: u64) -> String {
+    let binary = std::env::current_exe().map_or_else(
+        |_| "/usr/local/bin/cleanton".to_owned(),
+        |path| path.display().to_string(),
+    );
+    format!(
+        "[Unit]\nDescription=Cleanton background package and resource helper\n\n[Service]\nType=simple\nExecStart={binary} watch --interval {interval}\nNice=10\nIOSchedulingClass=idle\nRestart=on-failure\n\n[Install]\nWantedBy=default.target"
+    )
 }
 
 /// A launchd agent that runs the watcher as a user background job. Printed, not

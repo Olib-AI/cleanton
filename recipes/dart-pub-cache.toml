@@ -11,9 +11,12 @@ enabled = true
 priority = 50
 
 [match]
-path_glob = "~/.pub-cache/**"
+path_glob = "~/.pub-cache/hosted/*/**"
 min_age_days = 60
-min_size_mb = 50
+
+[[match.any_of]]
+path_glob = "~/.pub-cache/git/**"
+min_age_days = 60
 
 [action]
 type = "trash"

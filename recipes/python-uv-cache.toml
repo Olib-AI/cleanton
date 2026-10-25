@@ -10,12 +10,16 @@ priority = 50
 
 [match]
 path_glob = "~/.cache/uv/**"
-min_size_mb = 100
+min_size_mb = 20
+
+[[match.any_of]]
+path_glob = "~/Library/Caches/uv/**"
+min_size_mb = 20
 
 [action]
 type = "trash"
 prompt = "Move {size} of uv cache to Trash?"
 
 [test]
-should_match = ["~/.cache/uv/archive/foo"]
+should_match = ["~/.cache/uv/archive/foo", "~/Library/Caches/uv/archive/foo"]
 should_not_match = ["~/.cache/other", "~/.local/share/uv/python/cpython-3.12.6-macos-aarch64-none/bin/python3"]

@@ -499,6 +499,10 @@ pub struct HashSignatureEngine {
     /// Additional entries loaded from `ScanConfig::signature_db_paths`.
     /// Stored as owned strings since the paths are runtime data.
     extra: HashMap<String, (String, Severity)>,
+    /// True when `extra` contains at least one 40-hex SHA-1 signature.
+    has_extra_sha1: bool,
+    /// True when `extra` contains at least one 32-hex MD5 signature.
+    has_extra_md5: bool,
 }
 
 impl HashSignatureEngine {
@@ -526,7 +530,13 @@ impl HashSignatureEngine {
                 }
             }
         }
-        Self { extra }
+        let has_extra_sha1 = extra.keys().any(|k| k.len() == 40);
+        let has_extra_md5 = extra.keys().any(|k| k.len() == 32);
+        Self {
+            extra,
+            has_extra_sha1,
+            has_extra_md5,
+        }
     }
 
     /// Look up a single hex hash in both the bundled and extra databases.
@@ -631,11 +641,23 @@ fn parse_db_contents(
 /// Returns true if the file content contains the EICAR test string as a
 /// substring (handles CRLF variants and minor padding).
 fn contains_eicar_string(data: &[u8]) -> bool {
-    // The EICAR string is pure ASCII; a substring-of-bytes search is sufficient.
     let eicar = EICAR_STRING.as_bytes();
-    // Use a simple sliding-window search — safe for adversarial input because
-    // len is bounded by ScanConfig::max_file_size.
-    data.windows(eicar.len()).any(|w| w == eicar)
+    if data.len() < eicar.len() {
+        return false;
+    }
+    let last_start = data.len() - eicar.len();
+    let mut pos = 0usize;
+    while pos <= last_start {
+        let Some(rel) = data.get(pos..=last_start).and_then(|s| s.iter().position(|&b| b == b'X')) else {
+            return false;
+        };
+        let idx = pos + rel;
+        if data.get(idx..idx + eicar.len()) == Some(eicar) {
+            return true;
+        }
+        pos = idx + 1;
+    }
+    false
 }
 
 // ─── DetectionEngine impl ────────────────────────────────────────────────────
@@ -666,39 +688,43 @@ impl DetectionEngine for HashSignatureEngine {
                 emit_if_new(f, &label, &mut findings);
             }
 
-            // 2. SHA-1
-            let sha1 = Self::sha1_hex(&file.data);
-            if let Some((label, sev)) = self.lookup(&sha1) {
-                let f = self.finding_for_hash(file, "sha1", &sha1, &label, sev);
-                emit_if_new(f, &label, &mut findings);
+            // 2. SHA-1 — only the 68-byte EICAR entry in `BUNDLED_HASHES` uses
+            //    SHA-1 unless an operator-supplied DB added 40-char digests.
+            if self.has_extra_sha1 || file.data.len() == EICAR_STRING.len() {
+                let sha1 = Self::sha1_hex(&file.data);
+                if let Some((label, sev)) = self.lookup(&sha1) {
+                    let f = self.finding_for_hash(file, "sha1", &sha1, &label, sev);
+                    emit_if_new(f, &label, &mut findings);
+                }
             }
 
-            // 3. MD5
-            let md5 = Self::md5_hex(&file.data);
-            if let Some((label, sev)) = self.lookup(&md5) {
-                let f = self.finding_for_hash(file, "md5", &md5, &label, sev);
-                emit_if_new(f, &label, &mut findings);
+            // 3. MD5 — only the 68-byte EICAR entry in `BUNDLED_HASHES` uses
+            //    MD5 unless an operator-supplied DB added 32-char digests.
+            if self.has_extra_md5 || file.data.len() == EICAR_STRING.len() {
+                let md5 = Self::md5_hex(&file.data);
+                if let Some((label, sev)) = self.lookup(&md5) {
+                    let f = self.finding_for_hash(file, "md5", &md5, &label, sev);
+                    emit_if_new(f, &label, &mut findings);
+                }
             }
 
             // 4. EICAR string scan — catches the test file even if its hash
             //    differs (e.g. wrapped in a ZIP that wasn't extracted).
-            if contains_eicar_string(&file.data) {
-                let label = "EICAR_TEST_FILE";
-                if !emitted_labels.iter().any(|l| l == label) {
-                    let f = Finding::new(
-                        "hashdb",
-                        ThreatCategory::KnownMalware,
-                        Severity::Critical,
-                        Confidence::High,
-                        "EICAR Anti-Virus Test File (string match)",
-                        "File contains the canonical EICAR test string. \
-                         This is the industry-standard test for antivirus detection.",
-                    )
-                    .with_rule_id(label)
-                    .with_location(FileLocation::file(&file.rel_path))
-                    .with_evidence("EICAR_STRING_MATCH:X5O!P%@AP[4\\PZX54(P^)7CC)7}$...", 160);
-                    findings.push(f);
-                }
+            let label = "EICAR_TEST_FILE";
+            if !emitted_labels.iter().any(|l| l == label) && contains_eicar_string(&file.data) {
+                let f = Finding::new(
+                    "hashdb",
+                    ThreatCategory::KnownMalware,
+                    Severity::Critical,
+                    Confidence::High,
+                    "EICAR Anti-Virus Test File (string match)",
+                    "File contains the canonical EICAR test string. \
+                     This is the industry-standard test for antivirus detection.",
+                )
+                .with_rule_id(label)
+                .with_location(FileLocation::file(&file.rel_path))
+                .with_evidence("EICAR_STRING_MATCH:X5O!P%@AP[4\\PZX54(P^)7CC)7}$...", 160);
+                findings.push(f);
             }
         }
 

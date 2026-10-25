@@ -1,0 +1,21 @@
+[recipe]
+id = "godot-import-cache"
+name = "Godot .godot Imported Asset Cache"
+description = "Godot 4 .godot shader and imported resource cache (re-imported automatically)"
+category = "gamedev"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+directory_name = ".godot"
+parent_must_contain = ["project.godot"]
+min_age_days = 14
+
+[action]
+type = "trash"
+prompt = "Move {size} of Godot .godot import caches to Trash?"
+
+[test]
+should_match = ["projects/platformer/.godot"]
+should_not_match = ["projects/platformer/scenes", "loose/.godot"]
