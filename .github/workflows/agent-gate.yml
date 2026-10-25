@@ -1,0 +1,152 @@
+# ============================================================================
+# Agent gate (TEMPORARY — remove before merge)
+# ============================================================================
+# The authoring sandbox has no Rust toolchain and cannot read Actions job logs
+# (only api.github.com is reachable). This workflow:
+#
+#   1. formats the workspace and commits the result back to the branch, so
+#      `cargo fmt --all --check` in ci.yml passes without a local toolchain;
+#   2. surfaces compiler/clippy/test diagnostics as check-run ANNOTATIONS, which
+#      *are* readable through the API (`/check-runs/{id}/annotations`).
+#
+# It is a development aid only and is deleted once the branch is green.
+
+name: Agent gate
+
+on:
+  push:
+    branches:
+      - "arena/**"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: never
+  RUST_BACKTRACE: 1
+
+jobs:
+  fmt-fix:
+    name: Format and commit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Install Rust toolchain (1.99.1)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.99.1"
+          components: rustfmt
+
+      - name: cargo fmt
+        run: cargo fmt --all
+
+      - name: Commit formatting (if any)
+        run: |
+          if git diff --quiet; then
+            echo "already formatted"
+            exit 0
+          fi
+          git config user.name "Agent Gate"
+          git config user.email "agent-gate@users.noreply.github.com"
+          git add -A
+          git commit -m "chore(fmt): cargo fmt [skip ci]"
+          git push origin "HEAD:${{ github.ref_name }}"
+
+  rust-check:
+    name: Clippy and tests (annotated)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgl1-mesa-dev libegl1-mesa-dev libxkbcommon-dev libwayland-dev \
+            libxcb1-dev libx11-dev libxrandr-dev libxi-dev libxcursor-dev \
+            libfontconfig1-dev pkg-config
+
+      - name: Install Rust toolchain (1.99.1)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.99.1"
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Clippy
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo clippy --workspace --all-targets --all-features --message-format=json -- -D warnings 2>&1 \
+            | tee clippy.jsonl >/dev/null
+          status=$?
+          python3 - <<'PY'
+          import json, sys
+          shown = 0
+          for line in open('clippy.jsonl', errors='replace'):
+              try:
+                  msg = json.loads(line)
+              except Exception:
+                  continue
+              if msg.get('reason') != 'compiler-message':
+                  continue
+              d = msg.get('message') or {}
+              level = d.get('level')
+              if level not in ('error', 'warning'):
+                  continue
+              text = (d.get('message') or '').replace('\n', ' ')
+              spans = [s for s in (d.get('spans') or []) if s.get('is_primary')]
+              if spans:
+                  s = spans[0]
+                  print(f"::error file={s.get('file_name')},line={s.get('line_start')},col={s.get('column_start')},title={d.get('code',{}).get('code') or 'clippy'}::{text}")
+              else:
+                  print(f"::error title={level}::{text}")
+              shown += 1
+              if shown >= 40:
+                  print("::error::more diagnostics truncated")
+                  break
+          PY
+          exit $status
+
+      - name: Tests
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --workspace --all-features --no-fail-fast --message-format=json 2>&1 \
+            | tee tests.jsonl >/dev/null
+          status=$?
+          python3 - <<'PY'
+          import json
+          failures = []
+          compile_errors = 0
+          for line in open('tests.jsonl', errors='replace'):
+              try:
+                  msg = json.loads(line)
+              except Exception:
+                  continue
+              if msg.get('reason') == 'compiler-message':
+                  d = msg.get('message') or {}
+                  if d.get('level') != 'error':
+                      continue
+                  text = (d.get('message') or '').replace('\n', ' ')
+                  spans = [s for s in (d.get('spans') or []) if s.get('is_primary')]
+                  if spans:
+                      s = spans[0]
+                      print(f"::error file={s.get('file_name')},line={s.get('line_start')}::test build: {text}")
+                  else:
+                      print(f"::error::test build: {text}")
+                  compile_errors += 1
+                  if compile_errors >= 30:
+                      break
+              elif msg.get('reason') == 'test' and msg.get('event') == 'failed':
+                  name = msg.get('name') or '?'
+                  stdout = (msg.get('stdout') or '').replace('\n', ' | ')[:400]
+                  failures.append((name, stdout))
+          for name, stdout in failures[:20]:
+              print(f"::error title=test failed::{name}: {stdout}")
+          PY
+          exit $status

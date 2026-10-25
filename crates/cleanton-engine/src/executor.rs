@@ -562,6 +562,11 @@ pub(crate) fn trash_uninstall_paths(
         actions: Vec::new(),
     };
 
+    // At most ONE administrator prompt per uninstall run: the first item that
+    // cannot be moved offers the elevated path, and any failure (including a
+    // declined prompt) stops further prompts.
+    let mut elevate_trash_moves = true;
+
     for path in paths {
         let Ok(metadata) = fs::symlink_metadata(path) else {
             // Already gone (e.g. trashed with an earlier item): skip quietly.
@@ -638,17 +643,80 @@ pub(crate) fn trash_uninstall_paths(
                 ));
             }
             Err(err) => {
-                let _ = event_tx.try_send(EngineEvent::ActionFailed {
-                    action: action.clone(),
-                    error: format!("trash move failed: {err}"),
-                });
-                result.actions.push(action_result(
-                    &action,
-                    ExecutionStatus::Failed,
-                    0,
-                    0,
-                    format!("trash move failed: {err}"),
-                ));
+                // Root-owned bundles (App Store installs) and system helpers
+                // cannot be moved by the user's own account. That used to end
+                // the uninstall with a silent no-op. Fall back to a single
+                // targeted administrator move INTO THE SAME TRASH: still fully
+                // recoverable, still only after the user confirmed the uninstall.
+                // One declined prompt stops further prompts, so a long list can
+                // never turn into a prompt storm.
+                let elevated = if elevate_trash_moves {
+                    match crate::elevated_trash::move_to_trash_elevated(path) {
+                        // A successful authorization is cached by macOS for a
+                        // few minutes, so a run of root-owned items does not
+                        // produce a prompt per item.
+                        Ok(destination) => Some(Ok(destination)),
+                        Err(elevated_err) => {
+                            elevate_trash_moves = false;
+                            Some(Err(elevated_err))
+                        }
+                    }
+                } else {
+                    None
+                };
+
+                match elevated {
+                    Some(Ok(destination)) => {
+                        result.moved_to_trash_bytes =
+                            result.moved_to_trash_bytes.saturating_add(reclaimable);
+                        let _ = event_tx.try_send(EngineEvent::ActionCompleted {
+                            action: action.clone(),
+                            freed: 0,
+                        });
+                        result.actions.push(action_result(
+                            &action,
+                            ExecutionStatus::MovedToTrash,
+                            reclaimable,
+                            0,
+                            format!(
+                                "moved to Trash with administrator privileges: {}",
+                                destination.display()
+                            ),
+                        ));
+                    }
+                    Some(Err(elevated_err)) => {
+                        let message = format!(
+                            "needs administrator rights ({err}); elevated move failed: {elevated_err}"
+                        );
+                        let _ = event_tx.try_send(EngineEvent::ActionFailed {
+                            action: action.clone(),
+                            error: message.clone(),
+                        });
+                        result.actions.push(action_result(
+                            &action,
+                            ExecutionStatus::Failed,
+                            0,
+                            0,
+                            message,
+                        ));
+                    }
+                    None => {
+                        let message = format!(
+                            "could not be moved ({err}); it may need administrator rights"
+                        );
+                        let _ = event_tx.try_send(EngineEvent::ActionFailed {
+                            action: action.clone(),
+                            error: message.clone(),
+                        });
+                        result.actions.push(action_result(
+                            &action,
+                            ExecutionStatus::Failed,
+                            0,
+                            0,
+                            message,
+                        ));
+                    }
+                }
             }
         }
     }
