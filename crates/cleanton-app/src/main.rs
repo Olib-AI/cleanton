@@ -29,9 +29,9 @@ use cleanton_common::{
 };
 use cleanton_engine::{
     AnalyzedFull, AnalyzedPlan, AnnotatedAction, DockerAnalysis, DockerCleaner, DockerCleanupPlan,
-    DuplicateSet, EngineEvent, InstalledApp, LargeItem, Orchestrator, SnapshotAnalysis,
-    SnapshotConfirmState, Suggestions, UninstallPlan, cask_token_for, delete_local_snapshots,
-    find_leftovers, format_snapshot_date, list_installed_apps,
+    DuplicateSet, EngineEvent, InstalledApp, LargeItem, Orchestrator, SecurityRemoval,
+    SnapshotAnalysis, SnapshotConfirmState, Suggestions, UninstallPlan, cask_token_for,
+    delete_local_snapshots, find_leftovers, format_snapshot_date, list_installed_apps,
 };
 use cleanton_packages::{Inventory, ManagerKind, PackageManagers, plan_removal, scan_usage};
 use cleanton_scanner::ScanOptions;
@@ -81,6 +81,10 @@ static APPS_LOADING: AtomicBool = AtomicBool::new(false);
 /// prevents wasted duplicate work from rapid clicks). Because at most one scan
 /// is ever in flight, its completion closure can never be stale.
 static SECURITY_SCAN_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
+
+/// One security removal at a time. Removal is the one destructive action on the
+/// Security screen, so a double-click must never fire two uninstalls.
+static SECURITY_REMOVE_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 
 /// One uninstall at a time.
 static UNINSTALL_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
@@ -962,6 +966,33 @@ fn main() -> Result<(), slint::PlatformError> {
             security_trust(&ui, None);
         }
     });
+
+    let ui_weak = ui.as_weak();
+    ui.global::<AppCallbacks>()
+        .on_security_request_remove(move |index| {
+            if let Some(ui) = ui_weak.upgrade() {
+                arm_security_removal(&ui, index);
+            }
+        });
+
+    let config_clone = shared_config.clone();
+    let ui_weak = ui.as_weak();
+    ui.global::<AppCallbacks>()
+        .on_security_confirm_remove(move |index| {
+            if let Some(ui) = ui_weak.upgrade() {
+                run_security_removal(&ui, index, &config_clone);
+            }
+        });
+
+    let ui_weak = ui.as_weak();
+    ui.global::<AppCallbacks>()
+        .on_security_cancel_remove(move || {
+            if let Some(ui) = ui_weak.upgrade() {
+                let state = ui.global::<AppState>();
+                state.set_security_pending_remove_index(-1);
+                state.set_security_remove_status(SharedString::new());
+            }
+        });
 
     // ── Wire: Applications tab ─────────────────────────────────────────────
     let ui_weak = ui.as_weak();
@@ -2686,15 +2717,16 @@ fn selected_docker_plan(_state: &AppState) -> Option<DockerCleanupPlan> {
 
 /// Maximum suggestion rows rendered per subsection.
 const MAX_SUGGESTION_ROWS: usize = 50;
+/// Maximum duplicate sets rendered (each set also renders one row per copy).
+const MAX_DUPLICATE_SETS: usize = 25;
+/// Maximum copies rendered under a single duplicate set. `DuplicateSet.paths`
+/// is already capped by the engine; this keeps one pathological set from
+/// flooding the Results list.
+const MAX_DUPLICATE_COPIES: usize = 12;
 
 /// Populate the review-only Suggestions section (duplicate sets + large items).
 fn apply_suggestions_state(state: &AppState, suggestions: &Suggestions) {
-    let dup_rows = suggestions
-        .duplicates
-        .iter()
-        .take(MAX_SUGGESTION_ROWS)
-        .map(duplicate_row)
-        .collect::<Vec<_>>();
+    let dup_rows = duplicate_rows(&suggestions.duplicates);
     state.set_duplicate_count(clamp_to_i32(suggestions.duplicates.len()));
     state.set_duplicate_reclaimable(display::human_bytes(suggestions.duplicate_reclaimable).into());
     state.set_duplicate_rows(ModelRc::from(Rc::new(VecModel::from(dup_rows))));
@@ -2731,29 +2763,114 @@ fn apply_suggestions_state(state: &AppState, suggestions: &Suggestions) {
     state.set_installer_rows(ModelRc::from(Rc::new(VecModel::from(installer_rows))));
 }
 
-fn duplicate_row(set: &DuplicateSet) -> SuggestionRow {
-    let first = set.paths.first();
-    let path = first.map(|p| p.display().to_string()).unwrap_or_default();
-    let name = first
-        .and_then(|p| p.file_name())
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "duplicate".to_owned());
-    SuggestionRow {
-        title: SharedString::from(format!(
-            "{} copies of {} ({} each)",
-            set.count,
-            name,
-            display::human_bytes(set.file_bytes)
-        )),
-        detail: SharedString::from(path.clone()),
-        size: SharedString::from(display::human_bytes(set.reclaimable_bytes)),
-        icon: SharedString::from("\u{f0c5}"),
-        path: SharedString::from(path),
-        // Reveal-only: a duplicate *set* has no single unambiguous copy to
-        // trash (deleting the first-sorted copy is rarely what the user means).
-        // The user reveals each copy in Finder and removes the right one.
-        deletable: false,
+/// One duplicate set renders as a header row plus one row per copy, so the
+/// user can see (and trash) every file in the set instead of only the first.
+///
+/// Layout kinds match `SuggestionListRow.kind` in `widgets.slint`:
+/// `1` = set header, `0` = an individual copy, `2` = a muted "+N more" note.
+/// Every row carries the set index in `group`, which is what lets
+/// [`prune_duplicate_row`] collapse a set once it drops below two copies.
+fn duplicate_rows(sets: &[DuplicateSet]) -> Vec<SuggestionRow> {
+    let mut rows: Vec<SuggestionRow> = Vec::new();
+    for (index, set) in sets.iter().take(MAX_DUPLICATE_SETS).enumerate() {
+        let group = i32::try_from(index).unwrap_or(0);
+        let listed = set.paths.len().min(MAX_DUPLICATE_COPIES);
+        let name = set
+            .paths
+            .first()
+            .and_then(|path| path.file_name())
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "duplicate".to_owned());
+
+        rows.push(SuggestionRow {
+            kind: 1,
+            group,
+            title: SharedString::from(format!(
+                "{} identical copies of {} ({} each)",
+                set.count,
+                name,
+                display::human_bytes(set.file_bytes)
+            )),
+            detail: SharedString::new(),
+            size: SharedString::from(display::human_bytes(set.reclaimable_bytes)),
+            icon: SharedString::from("\u{f0c5}"),
+            // A set is a label, not a target: nothing to reveal or trash here.
+            path: SharedString::new(),
+            deletable: false,
+        });
+
+        for copy in set.paths.iter().take(listed) {
+            let path = copy.display().to_string();
+            rows.push(SuggestionRow {
+                kind: 0,
+                group,
+                title: SharedString::from(
+                    copy.file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| path.clone()),
+                ),
+                detail: SharedString::from(path.clone()),
+                size: SharedString::from(display::human_bytes(set.file_bytes)),
+                icon: SharedString::from("\u{f15b}"),
+                path: SharedString::from(path),
+                // Each copy is one concrete file, so it can go to the Trash
+                // after the row's own two-step confirmation.
+                deletable: true,
+            });
+        }
+
+        if set.count > listed {
+            rows.push(SuggestionRow {
+                kind: 2,
+                group,
+                title: SharedString::from(format!(
+                    "+{} more {} not listed",
+                    set.count.saturating_sub(listed),
+                    if set.count.saturating_sub(listed) == 1 {
+                        "copy"
+                    } else {
+                        "copies"
+                    }
+                )),
+                detail: SharedString::new(),
+                size: SharedString::new(),
+                icon: SharedString::new(),
+                path: SharedString::new(),
+                deletable: false,
+            });
+        }
     }
+    rows
+}
+
+/// Drop a trashed duplicate copy from the rendered model. When its set falls
+/// below two remaining copies it is no longer a duplicate, so the whole group
+/// (header, surviving copy, note) is removed and the set count goes down.
+///
+/// Returns the surviving rows and the new number of duplicate sets.
+fn prune_duplicate_row(rows: Vec<SuggestionRow>, trashed: &str) -> (Vec<SuggestionRow>, usize) {
+    let Some(group) = rows
+        .iter()
+        .find(|row| row.kind == 0 && row.path.as_str() == trashed)
+        .map(|row| row.group)
+    else {
+        let sets = rows.iter().filter(|row| row.kind == 1).count();
+        return (rows, sets);
+    };
+
+    let mut kept: Vec<SuggestionRow> = rows
+        .into_iter()
+        .filter(|row| !(row.kind == 0 && row.path.as_str() == trashed))
+        .collect();
+    let survivors = kept
+        .iter()
+        .filter(|row| row.group == group && row.kind == 0)
+        .count();
+    if survivors < 2 {
+        kept.retain(|row| row.group != group);
+    }
+    let sets = kept.iter().filter(|row| row.kind == 1).count();
+    (kept, sets)
 }
 
 fn large_item_row(item: &LargeItem) -> SuggestionRow {
@@ -2780,6 +2897,8 @@ fn large_item_row(item: &LargeItem) -> SuggestionRow {
         "\u{f15b}" // file
     };
     SuggestionRow {
+        kind: 0,
+        group: -1,
         title: SharedString::from(name),
         detail: SharedString::from(detail),
         size: SharedString::from(display::human_bytes(item.bytes)),
@@ -2792,9 +2911,15 @@ fn large_item_row(item: &LargeItem) -> SuggestionRow {
 }
 
 /// Drop a just-trashed suggestion from the displayed models so it disappears
-/// immediately without a full rescan. Only the deletable lists (large items and
-/// screenshots) carry a Trash affordance, so only those are pruned.
+/// immediately without a full rescan. Duplicate copies, large items,
+/// screenshots and installers all carry a Trash affordance, so all four are
+/// pruned; a duplicate set that falls below two copies is dropped with it.
 fn remove_suggestion_row(state: &AppState, path: &str) {
+    let current: Vec<SuggestionRow> = state.get_duplicate_rows().iter().collect();
+    let (duplicates, sets) = prune_duplicate_row(current, path);
+    state.set_duplicate_count(clamp_to_i32(sets));
+    state.set_duplicate_rows(ModelRc::from(Rc::new(VecModel::from(duplicates))));
+
     let large: Vec<SuggestionRow> = state
         .get_large_item_rows()
         .iter()
@@ -2838,6 +2963,8 @@ fn installer_row(item: &LargeItem) -> SuggestionRow {
         format!("{} · {}", item.ml_note, path)
     };
     SuggestionRow {
+        kind: 0,
+        group: -1,
         title: SharedString::from(name),
         detail: SharedString::from(detail),
         size: SharedString::from(display::human_bytes(item.bytes)),
@@ -2867,6 +2994,8 @@ fn screenshot_row(item: &LargeItem) -> SuggestionRow {
         format!("{} · {}", item.ml_note, path)
     };
     SuggestionRow {
+        kind: 0,
+        group: -1,
         title: SharedString::from(name),
         detail: SharedString::from(detail),
         size: SharedString::from(display::human_bytes(item.bytes)),
@@ -3788,7 +3917,163 @@ fn security_row(package: &cleanton_engine::PackageReport) -> SecurityRow {
         actions: SharedString::from(package.action_lines().join("\n")),
         tamper: package.is_tampered(),
         critical: package.is_critical_alert(),
+        // A persistence file is the user's own file (a `.zshrc`, a LaunchAgent
+        // they installed), and the fix is to edit one line, not to delete it.
+        // Only installed packages get the Remove button.
+        removable: package.is_removable(),
+        remove_label: SharedString::from(package.removal().verb()),
     }
+}
+
+/// Package managers detected once per process. Probing `PATH` for every row
+/// would spawn a process per package, so the result is cached.
+fn security_managers() -> &'static [ManagerKind] {
+    static MANAGERS: std::sync::OnceLock<Vec<ManagerKind>> = std::sync::OnceLock::new();
+    MANAGERS.get_or_init(PackageManagers::detect).as_slice()
+}
+
+/// The `cleanton-packages` manager that will perform a removal, when one can.
+///
+/// The POLICY (which packages are removable at all, and how) lives in
+/// `PackageReport::removal()` so the TUI and this app cannot disagree. This only
+/// maps that decision onto the facade that runs it, and returns `None` when the
+/// required manager is not installed on this machine.
+fn removal_manager(removal: SecurityRemoval) -> Option<ManagerKind> {
+    let wanted = match removal {
+        SecurityRemoval::Npm => ManagerKind::Npm,
+        SecurityRemoval::Pip => ManagerKind::Pip,
+        SecurityRemoval::Trash | SecurityRemoval::NotRemovable => return None,
+    };
+    security_managers()
+        .iter()
+        .find(|kind| **kind == wanted)
+        .copied()
+}
+
+/// Arm (or re-arm) the two-step removal for one flagged package row. Nothing
+/// runs here: the panel describes the action and the user confirms.
+fn arm_security_removal(ui: &AppWindow, index: i32) {
+    let state = ui.global::<AppState>();
+    if state.get_security_acting() {
+        return;
+    }
+    let Ok(slot) = usize::try_from(index) else {
+        return;
+    };
+    let explanation = SECURITY_REPORT.with(|cell| {
+        cell.borrow()
+            .as_ref()
+            .and_then(|report| report.flagged.get(slot))
+            .map(cleanton_engine::PackageReport::removal_explanation)
+    });
+    let Some(explanation) = explanation else {
+        return;
+    };
+    state.set_security_remove_status(explanation.into());
+    state.set_security_pending_remove_index(index);
+}
+
+/// Run the confirmed removal for one flagged package row.
+///
+/// Two shapes, both user-confirmed and both safe-by-default: a package manager
+/// uninstall (npm / pip, which keeps the manager's metadata consistent) or a
+/// Trash move of the package directory through the engine executor, which
+/// re-checks protected paths before anything is touched. The Security report is
+/// refreshed afterwards so the row does not linger as a stale finding.
+fn run_security_removal(ui: &AppWindow, index: i32, config: &SharedConfig) {
+    if SECURITY_REMOVE_IN_FLIGHT.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let state = ui.global::<AppState>();
+    let Ok(slot) = usize::try_from(index) else {
+        SECURITY_REMOVE_IN_FLIGHT.store(false, Ordering::SeqCst);
+        return;
+    };
+    let plan = SECURITY_REPORT.with(|cell| {
+        cell.borrow()
+            .as_ref()
+            .and_then(|report| report.flagged.get(slot))
+            .map(|package| {
+                (
+                    package.name.clone(),
+                    package.path.clone(),
+                    package.removal(),
+                )
+            })
+    });
+    // Defence in depth: a row Cleanton must not remove (a host persistence
+    // file) has no Remove button, so reaching here means the index came from
+    // somewhere other than the UI. Refuse rather than trash a user's own file.
+    if let Some((_, _, SecurityRemoval::NotRemovable)) = plan {
+        SECURITY_REMOVE_IN_FLIGHT.store(false, Ordering::SeqCst);
+        return;
+    }
+    let plan = plan.map(|(name, path, removal)| (name, path, removal_manager(removal)));
+    let Some((name, path, manager)) = plan else {
+        SECURITY_REMOVE_IN_FLIGHT.store(false, Ordering::SeqCst);
+        return;
+    };
+
+    state.set_security_pending_remove_index(-1);
+    state.set_security_acting(true);
+    state.set_security_remove_status(format!("Removing {name}...").into());
+
+    let ui_weak = ui.as_weak();
+    let config = config_snapshot(config);
+    std::thread::spawn(move || {
+        // The manager's own uninstaller when one owns the package; the
+        // executor's single-path Trash move otherwise. Both are reviewed,
+        // timeout-bounded paths that already back the Packages tab.
+        let outcome: Result<String, String> = worker_runtime().block_on(async move {
+            match manager {
+                Some(kind) => {
+                    let outcome =
+                        PackageManagers::uninstall(kind, std::slice::from_ref(&name)).await;
+                    if outcome.ok {
+                        Ok(match kind {
+                            ManagerKind::Npm => format!("`npm uninstall -g {name}` finished."),
+                            ManagerKind::Pip => format!("`pip uninstall -y {name}` finished."),
+                            _ => format!("Uninstalled {name}."),
+                        })
+                    } else {
+                        Err(outcome.message)
+                    }
+                }
+                None => {
+                    let orchestrator = match Orchestrator::new(config) {
+                        Ok(orchestrator) => orchestrator,
+                        Err(err) => return Err(err.to_string()),
+                    };
+                    let (event_tx, _event_rx) = mpsc::channel::<EngineEvent>(16);
+                    let execution = match orchestrator.trash_suggestion(&path, &event_tx) {
+                        Ok(execution) => execution,
+                        Err(err) => return Err(err.to_string()),
+                    };
+                    if execution_failed_count(&execution) > 0 {
+                        return Err("the item could not be moved to the Trash".to_owned());
+                    }
+                    Ok(format!("Moved {} to the Trash.", path.display()))
+                }
+            }
+        });
+
+        let _ = ui_weak.upgrade_in_event_loop(move |ui| {
+            SECURITY_REMOVE_IN_FLIGHT.store(false, Ordering::SeqCst);
+            let state = ui.global::<AppState>();
+            state.set_security_acting(false);
+            match outcome {
+                Ok(detail) => {
+                    state.set_security_remove_status(detail.into());
+                    // Refresh so the removed package stops showing as a
+                    // finding, and the baseline diff reflects the new set.
+                    start_security_scan(&ui, false);
+                }
+                Err(err) => {
+                    state.set_security_remove_status(format!("Could not remove: {err}").into());
+                }
+            }
+        });
+    });
 }
 
 /// Load (or reload) the installed-application inventory on a background

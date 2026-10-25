@@ -1,0 +1,32 @@
+[recipe]
+id = "helm-kubernetes-caches"
+name = "Helm Caches"
+# helm pull/helm dependency rebuild both subtrees on demand. ~/.kube and the
+# cluster credentials are never touched.
+description = "Helm's cached chart archives and repository indexes"
+category = "system"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/.cache/helm/**"
+min_age_days = 30
+
+# macOS: Helm's cache directory.
+[[match.any_of]]
+path_glob = "~/Library/Caches/helm/**"
+min_age_days = 30
+
+[action]
+type = "trash"
+prompt = "Move {size} of Helm caches to Trash?"
+
+[test]
+should_match = [
+    "~/.cache/helm/repository/nginx-1.0.0.tgz",
+    "~/Library/Caches/helm/repository/nginx-1.0.0.tgz",
+]
+should_not_match = [
+    "~/.cache/other/foo",
+]

@@ -364,6 +364,10 @@ pub(crate) const BUILTIN_RECIPES: &[(&str, &str)] = &[
         include_str!("../../../recipes/node-puppeteer-cache.toml"),
     ),
     (
+        "recipes/node-bundler-caches.toml",
+        include_str!("../../../recipes/node-bundler-caches.toml"),
+    ),
+    (
         "recipes/node-cypress-cache.toml",
         include_str!("../../../recipes/node-cypress-cache.toml"),
     ),
@@ -560,7 +564,51 @@ pub(crate) const BUILTIN_RECIPES: &[(&str, &str)] = &[
         include_str!("../../../recipes/browser-safari-cache.toml"),
     ),
     (
+        "recipes/browser-edge-http-cache.toml",
+        include_str!("../../../recipes/browser-edge-http-cache.toml"),
+    ),
+    (
+        "recipes/browser-brave-http-cache.toml",
+        include_str!("../../../recipes/browser-brave-http-cache.toml"),
+    ),
+    (
+        "recipes/browser-vivaldi-http-cache.toml",
+        include_str!("../../../recipes/browser-vivaldi-http-cache.toml"),
+    ),
+    (
         "recipes/apps-steam-shader-cache.toml",
         include_str!("../../../recipes/apps-steam-shader-cache.toml"),
+    ),
+    (
+        "recipes/apps-discord-cache.toml",
+        include_str!("../../../recipes/apps-discord-cache.toml"),
+    ),
+    (
+        "recipes/system-thumbnail-cache.toml",
+        include_str!("../../../recipes/system-thumbnail-cache.toml"),
+    ),
+    (
+        "recipes/system-security-scanner-caches.toml",
+        include_str!("../../../recipes/system-security-scanner-caches.toml"),
+    ),
+    (
+        "recipes/system-package-manager-caches.toml",
+        include_str!("../../../recipes/system-package-manager-caches.toml"),
+    ),
+    (
+        "recipes/helm-kubernetes-caches.toml",
+        include_str!("../../../recipes/helm-kubernetes-caches.toml"),
+    ),
+    (
+        "recipes/firebase-emulator-cache.toml",
+        include_str!("../../../recipes/firebase-emulator-cache.toml"),
+    ),
+    (
+        "recipes/nim-cache.toml",
+        include_str!("../../../recipes/nim-cache.toml"),
+    ),
+    (
+        "recipes/ocaml-dune-cache.toml",
+        include_str!("../../../recipes/ocaml-dune-cache.toml"),
     ),
 ];

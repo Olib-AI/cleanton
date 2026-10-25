@@ -22,7 +22,8 @@
 //! - [`extract`] — the loader: directory walk + archive extraction + file-kind
 //!   identification + zip-bomb / size / depth limits.
 //! - [`engines`] — the detection engines (hashdb, rules, entropy, ioc,
-//!   script_behavior, binary_indicators, supply_chain, typosquat).
+//!   script_behavior, binary_indicators, supply_chain, typosquat, and the
+//!   worm_propagation / persistence pair that look for live infection).
 //! - [`scoring`] — the policy that turns findings into a score and verdict.
 //! - [`scanner`] — the [`Scanner`] facade tying it all together.
 //!

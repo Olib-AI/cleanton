@@ -212,6 +212,15 @@ regardless of how broad a recipe's glob is.
 | **Action** | Trash |
 | **Notes** | Downloaded dependencies and compilation cache for Deno. |
 
+### `node-bundler-caches`
+| Field | Value |
+|---|---|
+| **Name** | Node Bundler Caches |
+| **Safety** | `safe` |
+| **Match** | `**/node_modules/.cache/{babel-loader,swc,nx,storybook}/**` inside a directory containing `package.json` |
+| **Action** | Trash |
+| **Notes** | Each tool rebuilds its own subdirectory on the next run. |
+
 ---
 
 ## Category: `python`
@@ -502,6 +511,46 @@ not propose fake `docker-dummy-*` path actions.
 | **Min Age** | 60 days |
 | **Action** | Trash |
 
+### `browser-edge-http-cache`
+| Field | Value |
+|---|---|
+| **Name** | Edge HTTP Cache |
+| **Safety** | `cautious` |
+| **Match** | `~/Library/Application Support/Microsoft Edge/*/Cache/Cache_Data/**`, `~/.config/microsoft-edge/*/Cache/Cache_Data/**` |
+| **Min Age** | 7 days |
+| **Action** | Trash |
+| **Notes** | Profile databases (History, Bookmarks, Login Data) are siblings and never match. |
+
+### `browser-brave-http-cache`
+| Field | Value |
+|---|---|
+| **Name** | Brave HTTP Cache |
+| **Safety** | `cautious` |
+| **Match** | `~/Library/Application Support/BraveSoftware/Brave-Browser/*/Cache/Cache_Data/**`, `~/.config/BraveSoftware/Brave-Browser/*/Cache/Cache_Data/**` |
+| **Min Age** | 7 days |
+| **Action** | Trash |
+| **Notes** | Profile databases (History, Bookmarks, Login Data) are siblings and never match. |
+
+### `browser-vivaldi-http-cache`
+| Field | Value |
+|---|---|
+| **Name** | Vivaldi HTTP Cache |
+| **Safety** | `cautious` |
+| **Match** | `~/Library/Application Support/Vivaldi/*/Cache/Cache_Data/**`, `~/.config/vivaldi/*/Cache/Cache_Data/**` |
+| **Min Age** | 7 days |
+| **Action** | Trash |
+| **Notes** | Profile databases (History, Bookmarks, Login Data) are siblings and never match. |
+
+### `apps-discord-cache`
+| Field | Value |
+|---|---|
+| **Name** | Discord Cache |
+| **Safety** | `cautious` |
+| **Match** | `~/Library/Application Support/discord/Cache/**`, `~/.config/discord/Cache/**` |
+| **Min Age** | 14 days |
+| **Action** | Trash |
+| **Notes** | Only the Cache subtree; Local Storage, IndexedDB and settings hold your session and never match. |
+
 ---
 
 ## Category: `system`
@@ -561,6 +610,76 @@ not propose fake `docker-dummy-*` path actions.
 | **Min Age** | 14 days |
 | **Action** | Trash |
 | **Notes** | Crash reports may be needed for symbolication, bug reports, and app support. |
+
+### `system-thumbnail-cache`
+| Field | Value |
+|---|---|
+| **Name** | Thumbnail Caches |
+| **Safety** | `safe` |
+| **Match** | `~/.cache/thumbnails/**`, `~/Library/Caches/com.apple.iconservices/**` |
+| **Min Age** | 14 days |
+| **Action** | Trash |
+| **Notes** | Derived image stores the desktop regenerates on demand; originals are untouched. |
+
+### `system-security-scanner-caches`
+| Field | Value |
+|---|---|
+| **Name** | Security Scanner Caches |
+| **Safety** | `safe` |
+| **Match** | `~/.cache/{trivy,grype,snyk}/**`, `~/Library/Caches/{trivy,grype}/**` |
+| **Min Age** | 14 days |
+| **Action** | Trash |
+| **Notes** | Local copies of the vulnerability feeds; every scanner re-downloads them. |
+
+### `system-package-manager-caches`
+| Field | Value |
+|---|---|
+| **Name** | System Package Manager Caches |
+| **Safety** | `safe` |
+| **Match** | `~/.cache/{snapcraft,flatpak,packagekit}/**` |
+| **Min Age** | 30 days |
+| **Action** | Trash |
+| **Notes** | `/var/cache/apt` is deliberately not matched because only root may clear it. |
+
+### `helm-kubernetes-caches`
+| Field | Value |
+|---|---|
+| **Name** | Helm Caches |
+| **Safety** | `safe` |
+| **Match** | `~/.cache/helm/**`, `~/Library/Caches/helm/**` |
+| **Min Age** | 30 days |
+| **Action** | Trash |
+| **Notes** | Cached chart archives and repository indexes; `~/.kube` is never touched. |
+
+### `firebase-emulator-cache`
+| Field | Value |
+|---|---|
+| **Name** | Firebase Emulator Caches |
+| **Safety** | `cautious` |
+| **Match** | `~/.cache/firebase/emulators/**`, `~/Library/Caches/firebase/emulators/**` |
+| **Min Age** | 30 days |
+| **Action** | Trash |
+| **Notes** | Downloaded emulator jars only; credentials and exported data are siblings. |
+
+### `nim-cache`
+| Field | Value |
+|---|---|
+| **Name** | Nim Cache |
+| **Safety** | `safe` |
+| **Match** | `~/.cache/nim/**`, `~/Library/Caches/nim/**` |
+| **Min Age** | 30 days |
+| **Action** | Trash |
+| **Notes** | Generated C sources the compiler rewrites on every build. |
+
+### `ocaml-dune-cache`
+| Field | Value |
+|---|---|
+| **Name** | Dune Cache |
+| **Safety** | `safe` |
+| **Match** | `~/.cache/dune/**`, `~/Library/Caches/dune/**` |
+| **Min Age** | 30 days |
+| **Action** | Trash |
+| **Notes** | Dune's shared build artefacts. |
 
 ---
 

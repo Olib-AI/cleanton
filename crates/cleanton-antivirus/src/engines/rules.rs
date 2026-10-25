@@ -201,7 +201,7 @@ static RULE_EVAL_ATOB_NET: Rule = Rule {
     confidence: Confidence::High,
     title: "eval(atob(…)) combined with network access",
     desc: "Decodes a base64 payload at runtime and immediately eval()s it alongside \
-           a network call — characteristic of stealthy JS loaders and npm supply-chain backdoors.",
+           a network call: characteristic of stealthy JS loaders and npm supply-chain backdoors.",
     patterns: &[
         Pattern::Regex(r"\beval\s*\(\s*atob\s*\("),
         Pattern::Regex(r#"\beval\s*\(\s*Buffer\.from\s*\(.*["']base64["']"#),
@@ -271,7 +271,7 @@ static RULE_EXFIL_WEBHOOK: Rule = Rule {
     confidence: Confidence::High,
     title: "Data exfiltration to webhook / paste service",
     desc: "Sends data to a Discord webhook, Telegram bot API, Pastebin, RequestBin, \
-           webhook.site, or similar paste/hook service — common npm supply-chain exfil channel.",
+           webhook.site, or similar paste/hook service: common npm supply-chain exfil channel.",
     patterns: &[
         Pattern::Regex(r"https://discord(?:app)?\.com/api/webhooks/\d+/[A-Za-z0-9_-]+"),
         Pattern::Regex(r"https://api\.telegram\.org/bot[A-Za-z0-9_-]+:[A-Za-z0-9_-]+/"),
@@ -382,7 +382,7 @@ static RULE_REVSHELL_PYTHON: Rule = Rule {
     confidence: Confidence::High,
     title: "Python reverse shell (socket + subprocess/exec)",
     desc: "Python code combining socket connection to an attacker-controlled IP with \
-           subprocess.call/os.execl/exec() — classic Python reverse shell pattern.",
+           subprocess.call/os.execl/exec(): classic Python reverse shell pattern.",
     patterns: &[
         Pattern::Regex(r"import\s+socket"),
         Pattern::Regex(r"\.connect\s*\(\s*\("),
@@ -399,7 +399,7 @@ static RULE_NPM_WORM: Rule = Rule {
     confidence: Confidence::High,
     title: "npm worm: token theft + self-propagating publish",
     desc: "Combines npm authentication token access with npm publish or registry \
-           API calls — hallmark of self-propagating npm supply-chain worms.",
+           API calls: hallmark of self-propagating npm supply-chain worms.",
     patterns: &[
         Pattern::Regex(r"(?:NPM_TOKEN|NPM_AUTH_TOKEN|_authToken|npm\s+login)"),
         Pattern::Regex(r"npm\s+publish"),
@@ -506,7 +506,7 @@ static RULE_B64_EXEC: Rule = Rule {
     confidence: Confidence::Medium,
     title: "Base64 decode followed by exec/eval/spawn",
     desc: "Decodes a base64 string and immediately executes it via eval, exec, spawn, \
-           or shell — used to conceal payloads from static analysis.",
+           or shell: used to conceal payloads from static analysis.",
     patterns: &[
         Pattern::Regex(r"(?:atob|Buffer\.from|base64\.b64decode|base64_decode)\s*\("),
         Pattern::Regex(
@@ -560,7 +560,7 @@ static RULE_NPM_LIFECYCLE_DOWNLOADER: Rule = Rule {
     confidence: Confidence::High,
     title: "npm lifecycle script downloads remote payload",
     desc: "An npm preinstall/postinstall/install script fetches a remote binary or \
-           script — used to bypass npm registry scanning by fetching the payload at install time.",
+           script: used to bypass npm registry scanning by fetching the payload at install time.",
     patterns: &[
         Pattern::Regex(
             r#""(?:pre|post)?install"\s*:\s*"[^"]*(?:curl|wget|fetch|http|https)[^"]*""#,
@@ -626,7 +626,7 @@ static RULE_CLIPBOARD_HIJACK: Rule = Rule {
     category: ThreatCategory::CryptoStealer,
     severity: Severity::Critical,
     confidence: Confidence::High,
-    title: "Clipboard hijack — crypto address substitution",
+    title: "Clipboard hijack: crypto address substitution",
     desc: "Reads clipboard content and replaces cryptocurrency wallet addresses \
            (Bitcoin/Ethereum/Monero patterns), a classic crypto-stealer technique.",
     patterns: &[
@@ -647,7 +647,7 @@ static RULE_PERSISTENCE: Rule = Rule {
     confidence: Confidence::Medium,
     title: "Persistence via crontab or Windows Registry Run key",
     desc: "Modifies crontab or Windows HKCU/HKLM Run keys to achieve persistence \
-           across reboots — common in dropper and RAT payloads.",
+           across reboots: common in dropper and RAT payloads.",
     patterns: &[
         Pattern::Regex(r"crontab\s+-[leu]"),
         Pattern::Regex(r#"(?:echo|printf)\s+["'][^"']*\*[^"']*["']\s*>+\s*/etc/cron"#),
@@ -665,7 +665,7 @@ static RULE_EVAL_DYNAMIC: Rule = Rule {
     severity: Severity::High,
     confidence: Confidence::Medium,
     title: "eval() / exec() on dynamic/external input",
-    desc: "eval() or exec() called on a variable, HTTP response, or socket data — \
+    desc: "eval() or exec() called on a variable, HTTP response, or socket data: \
            enables remote code execution if the input source is attacker-controlled.",
     patterns: &[
         Pattern::Regex(
@@ -693,7 +693,7 @@ static RULE_CRYPTO_WALLET_FILES: Rule = Rule {
     title: "Cryptocurrency wallet store / seed-phrase file access",
     desc: "References local wallet stores (Solana id.json, Exodus wallet, MetaMask \
            extension LevelDB, Ethereum keystore, Bitcoin wallet.dat) or seed-phrase \
-           files — the harvest targets of BeaverTail/W4SP-class crypto stealers.",
+           files: the harvest targets of BeaverTail/W4SP-class crypto stealers.",
     patterns: &[
         Pattern::Regex(r"\.config[/\\]solana[/\\]id\.json"),
         Pattern::Literal("exodus.wallet"),
@@ -718,7 +718,7 @@ static RULE_CRED_RUBYGEMS: Rule = Rule {
     severity: Severity::High,
     confidence: Confidence::Medium,
     title: "RubyGems publish credential access",
-    desc: "References ~/.gem/credentials or RubyGems API-key material — the \
+    desc: "References ~/.gem/credentials or RubyGems API-key material: the \
            RubyGems analogue of .npmrc token theft, used by cross-ecosystem \
            supply-chain worms to republish trojanized gems.",
     patterns: &[

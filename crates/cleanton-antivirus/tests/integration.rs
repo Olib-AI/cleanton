@@ -1,7 +1,8 @@
 //! Integration tests for the [`cleanton_antivirus::Scanner`] facade.
 //!
 //! These tests exercise the full stack: Loader → engines → ScoringPolicy → ScanReport.
-//! Each test uses [`Scanner::with_default_engines`] so all 8 engines participate.
+//! Each test uses [`Scanner::with_default_engines`] so every bundled engine
+//! participates.
 
 use cleanton_antivirus::extract::Loader;
 use cleanton_antivirus::{AvError, ScanConfig, Scanner, ThreatCategory, Verdict};

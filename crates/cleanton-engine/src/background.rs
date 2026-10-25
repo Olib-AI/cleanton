@@ -31,6 +31,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime};
 
 use cleanton_antivirus::{ScanConfig, Scanner, Verdict};
+use cleanton_scanner::VolumeCapacity;
 
 use crate::advisories::{AdvisoryDatabase, Ecosystem, PackageSubject};
 use crate::security::{self, SecurityTarget, SecurityTargetKind, Severity};
@@ -294,8 +295,7 @@ impl PackageWatcher {
                     kind: ResourceKind::Disk,
                     used_percent,
                     available_bytes: capacity.available_bytes,
-                    suggestion: "Disk is nearly full: run a Cleanton scan and clean                                  caches, or empty the Trash to reclaim trashed space."
-                        .to_owned(),
+                    suggestion: disk_advice(used_percent, &capacity, &home),
                 });
             }
             self.disk_pressure_active = active;
@@ -315,8 +315,7 @@ impl PackageWatcher {
                     kind: ResourceKind::Memory,
                     used_percent,
                     available_bytes: memory.available_bytes,
-                    suggestion: "Memory is nearly full: quit memory-heavy apps, or                                  restart the heaviest one. Cleanton does not kill                                  processes or purge memory for you."
-                        .to_owned(),
+                    suggestion: memory_advice(used_percent, memory.available_bytes),
                 });
             }
             self.memory_pressure_active = active;
@@ -349,6 +348,136 @@ impl PackageWatcher {
             sleep_interruptibly(interval, cancel);
         }
     }
+}
+
+/// Entry budget for one disk-relief measurement. A pressure event is
+/// edge-triggered (it fires once when the disk fills up, not once per tick), so
+/// a one-off walk is affordable — but it must still never become an unbounded
+/// traversal of a huge or actively-written cache tree on the watcher thread.
+const RELIEF_ENTRY_CAP: usize = 20_000;
+
+/// Candidates smaller than this are not worth naming in the advice.
+const RELIEF_MIN_BYTES: u64 = 64 * 1024 * 1024;
+
+/// How many reclaimable directories the advice names.
+const RELIEF_TOP_N: usize = 3;
+
+/// Sum a directory against a budget shared by the whole measurement, stopping
+/// as soon as it is spent. The figure is therefore a lower bound, which is the
+/// safe direction for cleanup advice: it under-promises rather than over-promises.
+fn sized_dir(path: &Path, budget: &mut usize) -> u64 {
+    let mut total = 0_u64;
+    for entry in walkdir::WalkDir::new(path).follow_links(false) {
+        if *budget == 0 {
+            break;
+        }
+        *budget = budget.saturating_sub(1);
+        let Ok(entry) = entry else {
+            continue;
+        };
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        if let Ok(metadata) = entry.metadata() {
+            total = total.saturating_add(metadata.len());
+        }
+    }
+    total
+}
+
+/// The largest reclaimable directories under the two user cache conventions,
+/// plus the Trash, sorted largest-first and capped at [`RELIEF_TOP_N`].
+///
+/// `~/.Trash` is measured as a single entry rather than per file: emptying it is
+/// one action, and that is precisely why it is worth naming.
+fn reclaimable_top(home: &Path) -> Vec<(String, u64)> {
+    let mut budget = RELIEF_ENTRY_CAP;
+    let mut found: Vec<(String, u64)> = Vec::new();
+    for root in [home.join("Library/Caches"), home.join(".cache")] {
+        let Ok(entries) = std::fs::read_dir(&root) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            if budget == 0 {
+                break;
+            }
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let size = sized_dir(&path, &mut budget);
+            if size >= RELIEF_MIN_BYTES {
+                found.push((name, size));
+            }
+        }
+    }
+    let trash = home.join(".Trash");
+    if trash.is_dir() {
+        let size = sized_dir(&trash, &mut budget);
+        if size >= RELIEF_MIN_BYTES {
+            found.push(("Trash".to_owned(), size));
+        }
+    }
+    found.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    found.truncate(RELIEF_TOP_N);
+    found
+}
+
+/// Bytes as a short human figure (`18.4 GB`). Local to this module: the engine
+/// does not take on a formatting dependency for one string.
+fn human_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    #[allow(clippy::cast_precision_loss)]
+    let mut value = bytes as f64;
+    let mut unit = 0_usize;
+    while value >= 1024.0 && unit + 1 < UNITS.len() {
+        value /= 1024.0;
+        unit = unit.saturating_add(1);
+    }
+    let label = UNITS.get(unit).copied().unwrap_or("TB");
+    if unit == 0 || value >= 100.0 {
+        format!("{value:.0} {label}")
+    } else {
+        format!("{value:.1} {label}")
+    }
+}
+
+/// Advice for a disk-pressure event, naming the biggest reclaimable directories
+/// when they can be measured. Falls back to plain guidance when nothing
+/// reclaimable is found (or the walk is not affordable right now).
+fn disk_advice(used_percent: u8, capacity: &VolumeCapacity, home: &Path) -> String {
+    let free = human_bytes(capacity.available_bytes);
+    let mut advice = format!("Disk is {used_percent}% full ({free} available).");
+    let top = reclaimable_top(home);
+    if top.is_empty() {
+        advice.push_str(
+            " Run a Cleanton scan to find caches and large files, then empty the Trash: \
+             items you have already trashed keep occupying space until it is emptied.",
+        );
+        return advice;
+    }
+    let named: Vec<String> = top
+        .iter()
+        .map(|(name, size)| format!("{name} ({})", human_bytes(*size)))
+        .collect();
+    advice.push_str(" Biggest reclaimable right now: ");
+    advice.push_str(&named.join(", "));
+    advice.push('.');
+    advice.push_str(
+        " Run a Cleanton scan to review them, then empty the Trash to actually reclaim the space.",
+    );
+    advice
+}
+
+/// Advice for a memory-pressure event. Cleanton reports; it never kills a
+/// process or purges memory, and the advice says so.
+fn memory_advice(used_percent: u8, available_bytes: u64) -> String {
+    format!(
+        "Memory is {used_percent}% used ({} available). Quit or restart the heaviest app; \
+         Cleanton never kills processes or purges memory for you.",
+        human_bytes(available_bytes)
+    )
 }
 
 /// Investigate one package directory: advisory lookup, lifecycle hooks, and
@@ -489,6 +618,10 @@ fn package_identity(
             let (name, version) = security::split_versioned_dir_name(&fallback)?;
             Some((Ecosystem::Go, name, Some(version)))
         }
+        // A persistence file has no manifest and no advisory feed; the content
+        // engines are the only thing that can judge it, and they run without an
+        // ecosystem. Returning `None` keeps the watcher from inventing one.
+        SecurityTargetKind::HostPersistence => None,
     }
 }
 

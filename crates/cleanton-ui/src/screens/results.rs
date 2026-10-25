@@ -265,6 +265,9 @@ fn render_review_panel(f: &mut Frame, app: &App, area: Rect) {
 
 /// How many snapshot rows the review panel shows at once.
 const SNAPSHOT_ROWS_SHOWN: usize = 3;
+/// Copies listed per duplicate set. The panel is narrow, so this is a preview:
+/// the Slint app lists every copy and is the place to act on a set.
+const DUPLICATE_COPIES_SHOWN: usize = 4;
 
 /// Panel height for the snapshot block: 0 hides it entirely (query succeeded
 /// with zero snapshots), a short block discloses a failed query, and the full
@@ -570,6 +573,23 @@ fn render_suggestions(f: &mut Frame, app: &App, area: Rect) {
                 ),
                 Style::default().fg(app.theme.fg),
             )));
+            // Parity with the Slint app: every copy is listed, not just the
+            // first, so the user can see which file lives where.
+            for copy in set.paths.iter().take(DUPLICATE_COPIES_SHOWN) {
+                lines.push(Line::from(Span::styled(
+                    format!("      {}", path_tail(copy)),
+                    Style::default().fg(app.theme.muted),
+                )));
+            }
+            if set.paths.len() > DUPLICATE_COPIES_SHOWN {
+                lines.push(Line::from(Span::styled(
+                    format!(
+                        "      +{} more not listed",
+                        set.paths.len().saturating_sub(DUPLICATE_COPIES_SHOWN)
+                    ),
+                    Style::default().fg(app.theme.muted),
+                )));
+            }
         }
     }
 

@@ -8,6 +8,7 @@ pub mod entropy;
 pub mod hashdb;
 pub mod ioc;
 pub mod mcp_descriptor;
+pub mod persistence;
 pub mod rules;
 pub mod script_behavior;
 pub mod supply_chain;
@@ -19,6 +20,7 @@ pub use entropy::EntropyEngine;
 pub use hashdb::HashSignatureEngine;
 pub use ioc::IocEngine;
 pub use mcp_descriptor::McpDescriptorEngine;
+pub use persistence::PersistenceEngine;
 pub use rules::RuleEngine;
 pub use script_behavior::ScriptBehaviorEngine;
 pub use supply_chain::SupplyChainEngine;
@@ -35,6 +37,7 @@ pub fn default_engines() -> Vec<Box<dyn crate::engine::DetectionEngine>> {
         Box::new(RuleEngine),
         Box::new(McpDescriptorEngine),
         Box::new(WormPropagationEngine),
+        Box::new(PersistenceEngine),
         Box::new(EntropyEngine),
         Box::new(IocEngine),
         Box::new(ScriptBehaviorEngine),

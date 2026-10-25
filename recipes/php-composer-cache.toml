@@ -16,10 +16,22 @@ priority = 50
 path_glob = "~/Library/Caches/composer/**"
 min_age_days = 30
 
+# Linux (XDG): Composer's cache lives in ~/.cache/composer.
+[[match.any_of]]
+min_age_days = 30
+path_glob = "~/.cache/composer/**"
+
 [action]
 type = "trash"
 prompt = "Move {size} of Composer cache to Trash?"
 
 [test]
-should_match = ["~/Library/Caches/composer/files/vendor/package/1.0.0.zip"]
-should_not_match = ["~/.composer/composer.json", "~/.composer/auth.json"]
+should_match = [
+    "~/Library/Caches/composer/files/vendor/package/1.0.0.zip",
+    "~/.cache/composer/files/foo",
+]
+should_not_match = [
+    "~/.composer/composer.json",
+    "~/.composer/auth.json",
+    "~/.cache/other/foo",
+]

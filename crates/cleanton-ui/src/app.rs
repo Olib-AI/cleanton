@@ -196,6 +196,13 @@ pub struct App {
     pub security_progress: (usize, usize),
     /// Cursor into `security_report.flagged`.
     pub security_selected: usize,
+    /// Two-step removal armed for one flagged row: `[r]` arms, `[y]` runs,
+    /// `[n]` cancels. Holds the armed row's index so moving the cursor disarms.
+    /// Mirrors the Slint Security tab's arm/confirm pair; the policy itself
+    /// lives in `PackageReport::removal()` so the two UIs cannot disagree.
+    pub security_pending_remove: Option<usize>,
+    /// A removal is in flight; the row controls are disabled until it returns.
+    pub security_removing: bool,
     /// Monotonic scan generation; stale background results are discarded.
     pub security_scan_id: u64,
     /// Cooperative cancellation for the in-flight security scan.
@@ -291,6 +298,8 @@ impl App {
             security_scanning: false,
             security_progress: (0, 0),
             security_selected: 0,
+            security_pending_remove: None,
+            security_removing: false,
             security_scan_id: 0,
             security_cancel: Arc::new(AtomicBool::new(false)),
             execution_progress: 0.0,

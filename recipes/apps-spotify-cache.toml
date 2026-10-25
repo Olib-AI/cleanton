@@ -13,10 +13,22 @@ priority = 50
 path_glob = "~/Library/Caches/com.spotify.client/**"
 min_age_days = 14
 
+# Linux (XDG): Spotify's cached media under XDG_CACHE_HOME.
+[[match.any_of]]
+min_age_days = 14
+path_glob = "~/.cache/spotify/**"
+
 [action]
 type = "trash"
 prompt = "Move {size} of Spotify cache to Trash?"
 
 [test]
-should_match = ["~/Library/Caches/com.spotify.client/Data/ab/abcdef.file"]
-should_not_match = ["~/Library/Application Support/Spotify/prefs", "~/Library/Application Support/Spotify/PersistentCache/Storage/00/00abcdef.file"]
+should_match = [
+    "~/Library/Caches/com.spotify.client/Data/ab/abcdef.file",
+    "~/.cache/spotify/Data/foo",
+]
+should_not_match = [
+    "~/Library/Application Support/Spotify/prefs",
+    "~/Library/Application Support/Spotify/PersistentCache/Storage/00/00abcdef.file",
+    "~/.cache/other/foo",
+]

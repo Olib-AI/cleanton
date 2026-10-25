@@ -14,10 +14,22 @@ priority = 50
 path_glob = "~/Library/Caches/us.zoom.xos/**"
 min_age_days = 14
 
+# Linux (XDG): Zoom's cache directory.
+[[match.any_of]]
+min_age_days = 14
+path_glob = "~/.cache/zoom/**"
+
 [action]
 type = "trash"
 prompt = "Move {size} of Zoom cache to Trash?"
 
 [test]
-should_match = ["~/Library/Caches/us.zoom.xos/Cache.db"]
-should_not_match = ["~/Library/Application Support/zoom.us/data/zoomus.db", "~/Library/Caches/us.zoom.videomeetings.plist"]
+should_match = [
+    "~/Library/Caches/us.zoom.xos/Cache.db",
+    "~/.cache/zoom/logs/foo",
+]
+should_not_match = [
+    "~/Library/Application Support/zoom.us/data/zoomus.db",
+    "~/Library/Caches/us.zoom.videomeetings.plist",
+    "~/.cache/other/foo",
+]
