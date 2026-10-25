@@ -132,23 +132,22 @@ impl Scanner {
         // parallel on a bounded worker pool while preserving canonical engine
         // ordering. Small per-package scans stay inline to avoid thread-spawn
         // overhead when callers already parallelize across packages.
-        let results: Vec<(EngineStat, Vec<crate::types::Finding>)> =
+        type EngineRunOutput = (EngineStat, Vec<crate::types::Finding>);
+        let results: Vec<EngineRunOutput> =
             if loaded.files.len() >= 64 && self.engines.len() >= 2 {
                 let next = std::sync::atomic::AtomicUsize::new(0);
                 let workers = std::thread::available_parallelism()
                     .map_or(2, std::num::NonZeroUsize::get)
                     .clamp(1, 4)
                     .min(self.engines.len());
-                let slots: std::sync::Mutex<
-                    Vec<Option<(EngineStat, Vec<crate::types::Finding>)>>,
-                > = std::sync::Mutex::new((0..self.engines.len()).map(|_| None).collect());
+                let slots: std::sync::Mutex<Vec<Option<EngineRunOutput>>> =
+                    std::sync::Mutex::new((0..self.engines.len()).map(|_| None).collect());
 
                 std::thread::scope(|scope| {
                     for _ in 0..workers {
                         scope.spawn(|| {
                             loop {
-                                let idx =
-                                    next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                let idx = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                                 let Some(engine) = self.engines.get(idx) else {
                                     break;
                                 };

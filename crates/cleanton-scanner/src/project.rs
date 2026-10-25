@@ -143,11 +143,7 @@ fn marker_for(path: &Path) -> Option<Ecosystem> {
         "package.json" => Some(Ecosystem::Node),
         "pyproject.toml" | "setup.py" | "setup.cfg" => Some(Ecosystem::Python),
         "go.mod" => Some(Ecosystem::Go),
-        "pom.xml"
-        | "build.gradle"
-        | "build.gradle.kts"
-        | "build.sbt"
-        | "deps.edn"
+        "pom.xml" | "build.gradle" | "build.gradle.kts" | "build.sbt" | "deps.edn"
         | "project.clj" => Some(Ecosystem::Jvm),
         "CMakeLists.txt" | "meson.build" => Some(Ecosystem::CCpp),
         "pubspec.yaml" => Some(Ecosystem::Dart),
@@ -305,10 +301,26 @@ mod tests {
         ];
         let detected = detect_project_roots(paths);
         assert_eq!(detected.len(), 5);
-        assert!(detected.iter().any(|p| p.ecosystem == Ecosystem::Node && p.path == Path::new("/workspace/web")));
-        assert!(detected.iter().any(|p| p.ecosystem == Ecosystem::Dotnet && p.path == Path::new("/workspace/api")));
-        assert!(detected.iter().any(|p| p.ecosystem == Ecosystem::Jvm && p.path == Path::new("/workspace/java")));
-        assert!(detected.iter().any(|p| p.ecosystem == Ecosystem::CCpp && p.path == Path::new("/workspace/cpp")));
+        assert!(
+            detected
+                .iter()
+                .any(|p| p.ecosystem == Ecosystem::Node && p.path == Path::new("/workspace/web"))
+        );
+        assert!(
+            detected
+                .iter()
+                .any(|p| p.ecosystem == Ecosystem::Dotnet && p.path == Path::new("/workspace/api"))
+        );
+        assert!(
+            detected
+                .iter()
+                .any(|p| p.ecosystem == Ecosystem::Jvm && p.path == Path::new("/workspace/java"))
+        );
+        assert!(
+            detected
+                .iter()
+                .any(|p| p.ecosystem == Ecosystem::CCpp && p.path == Path::new("/workspace/cpp"))
+        );
         assert!(detected.iter().any(|p| p.ecosystem == Ecosystem::Dart && p.path == Path::new("/workspace/mobile")));
     }
 

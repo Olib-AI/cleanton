@@ -648,7 +648,10 @@ fn contains_eicar_string(data: &[u8]) -> bool {
     let last_start = data.len() - eicar.len();
     let mut pos = 0usize;
     while pos <= last_start {
-        let Some(rel) = data.get(pos..=last_start).and_then(|s| s.iter().position(|&b| b == b'X')) else {
+        let Some(rel) = data
+            .get(pos..=last_start)
+            .and_then(|s| s.iter().position(|&b| b == b'X'))
+        else {
             return false;
         };
         let idx = pos + rel;

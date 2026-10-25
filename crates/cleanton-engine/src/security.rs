@@ -2544,9 +2544,10 @@ pub fn scan_targets_with_options(
                         && advisories.is_empty()
                         && !fingerprint.is_empty()
                         && let Some(baseline) = preloaded_baseline.as_ref()
-                        && let Some(entry) = baseline.entries.get(
-                            &security_baseline::identity_key(candidate.source, &candidate.name),
-                        )
+                        && let Some(entry) = baseline.entries.get(&security_baseline::identity_key(
+                            candidate.source,
+                            &candidate.name,
+                        ))
                         && entry.fingerprint == fingerprint
                     {
                         let verdict = match entry.verdict_at_baseline.as_str() {

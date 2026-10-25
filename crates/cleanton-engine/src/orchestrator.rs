@@ -162,7 +162,8 @@ impl Orchestrator {
         let classifier = MlEngine::embedded();
         let cpu_work = async {
             std::thread::scope(|scope| {
-                let analyzed_handle = scope.spawn(|| self.analyze_with_classifier(scan, &classifier));
+                let analyzed_handle =
+                    scope.spawn(|| self.analyze_with_classifier(scan, &classifier));
                 let mut suggestions = detect_suggestions(scan);
                 crate::ml::annotate_suggestions(&classifier, &mut suggestions, scan);
                 let analyzed = analyzed_handle

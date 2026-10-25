@@ -241,7 +241,10 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
                     .fg(app.theme.success)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled("Scan Disk               ", Style::default().fg(app.theme.fg)),
+            Span::styled(
+                "Scan Disk               ",
+                Style::default().fg(app.theme.fg),
+            ),
             Span::styled(
                 "[m] ",
                 Style::default()

@@ -463,11 +463,7 @@ fn collect_user_process_memory() -> Vec<ProcessMemorySample> {
             flavor: libc::c_int,
             buffer: *mut libc::rusage_info_v2,
         ) -> libc::c_int;
-        fn proc_name(
-            pid: libc::c_int,
-            buffer: *mut libc::c_void,
-            buffersize: u32,
-        ) -> libc::c_int;
+        fn proc_name(pid: libc::c_int, buffer: *mut libc::c_void, buffersize: u32) -> libc::c_int;
     }
 
     let mut pids = vec![0_i32; MAX_PIDS];
@@ -554,6 +550,7 @@ fn collect_user_process_memory() -> Vec<ProcessMemorySample> {
 
 /// Ask the C/system allocator to return unused free heap pages back to the OS kernel.
 /// Safe to invoke after dropping large scan results or when memory pressure is high.
+#[must_use]
 pub fn reclaim_process_memory() -> bool {
     reclaim_process_memory_impl()
 }
@@ -571,20 +568,15 @@ fn reclaim_process_memory_impl() -> bool {
 #[cfg(target_os = "macos")]
 fn reclaim_process_memory_impl() -> bool {
     unsafe extern "C" {
-        fn malloc_zone_pressure_relief(
-            zone: *mut libc::c_void,
-            goal: libc::size_t,
-        ) -> libc::size_t;
+        fn malloc_zone_pressure_relief(zone: *mut libc::c_void, goal: libc::size_t)
+        -> libc::size_t;
     }
     // SAFETY: Passing a null zone pointer instructs libsystem_malloc to relieve unused
     // cached pages across all malloc zones; `goal = 0` requests maximal safe relief.
     unsafe { malloc_zone_pressure_relief(std::ptr::null_mut(), 0) > 0 }
 }
 
-#[cfg(not(any(
-    all(target_os = "linux", target_env = "gnu"),
-    target_os = "macos"
-)))]
+#[cfg(not(any(all(target_os = "linux", target_env = "gnu"), target_os = "macos")))]
 fn reclaim_process_memory_impl() -> bool {
     false
 }

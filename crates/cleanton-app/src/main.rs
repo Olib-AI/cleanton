@@ -747,12 +747,13 @@ fn main() -> Result<(), slint::PlatformError> {
     });
 
     let ui_weak = ui.as_weak();
-    ui.global::<AppCallbacks>().on_dismiss_memory_offer(move || {
-        MEMORY_OFFER_DISMISSED.store(true, Ordering::Relaxed);
-        if let Some(ui) = ui_weak.upgrade() {
-            ui.global::<AppState>().set_memory_offer_active(false);
-        }
-    });
+    ui.global::<AppCallbacks>()
+        .on_dismiss_memory_offer(move || {
+            MEMORY_OFFER_DISMISSED.store(true, Ordering::Relaxed);
+            if let Some(ui) = ui_weak.upgrade() {
+                ui.global::<AppState>().set_memory_offer_active(false);
+            }
+        });
 
     // ── Wire: Services refresh callback ────────────────────────────────────
     let ui_weak = ui.as_weak();
@@ -2655,12 +2656,12 @@ fn populate_settings(state: &AppState, config: &CleantonConfig) {
     state.set_setting_max_action_gb(
         i32::try_from(config.safety.max_single_action_gb).unwrap_or(i32::MAX),
     );
-    state.set_setting_disk_pressure_percent(
-        i32::from(config.background.disk_pressure_percent.unwrap_or(0)),
-    );
-    state.set_setting_memory_pressure_percent(
-        i32::from(config.background.memory_pressure_percent.unwrap_or(0)),
-    );
+    state.set_setting_disk_pressure_percent(i32::from(
+        config.background.disk_pressure_percent.unwrap_or(0),
+    ));
+    state.set_setting_memory_pressure_percent(i32::from(
+        config.background.memory_pressure_percent.unwrap_or(0),
+    ));
 }
 
 /// Read the edited Settings controls back into `config`.

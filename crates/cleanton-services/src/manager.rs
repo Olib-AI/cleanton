@@ -382,11 +382,7 @@ impl ServiceManager {
                 ServiceAction::Stop => "stop",
                 ServiceAction::Restart => "restart",
                 ServiceAction::Enable => {
-                    systemd::run_systemctl_user_action(
-                        &service.id,
-                        "enable",
-                        &service.plist_path,
-                    )?;
+                    systemd::run_systemctl_user_action(&service.id, "enable", &service.plist_path)?;
                     "start"
                 }
                 ServiceAction::Disable => {
@@ -482,8 +478,7 @@ impl ServiceManager {
         backup_service_plist(&service.plist_path)?;
 
         if service.service_type == ServiceType::SystemdUserService {
-            let _ =
-                systemd::run_systemctl_user_action(&service.id, "disable", &service.plist_path);
+            let _ = systemd::run_systemctl_user_action(&service.id, "disable", &service.plist_path);
             let _ = systemd::run_systemctl_user_action(&service.id, "stop", &service.plist_path);
             reviewed_plist_delete::remove_service_plist(&service.plist_path)
                 .map_err(|e| CleantonError::io(&service.plist_path, e))?;
@@ -576,8 +571,7 @@ impl ServiceManager {
         backup_service_plist(&service.plist_path)?;
 
         if service.service_type == ServiceType::SystemdUserService {
-            let _ =
-                systemd::run_systemctl_user_action(&service.id, "disable", &service.plist_path);
+            let _ = systemd::run_systemctl_user_action(&service.id, "disable", &service.plist_path);
             reviewed_plist_delete::remove_service_plist(&service.plist_path)
                 .map_err(|e| CleantonError::io(&service.plist_path, e))?;
         } else if use_elevation {

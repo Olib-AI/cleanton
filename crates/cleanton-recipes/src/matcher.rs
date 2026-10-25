@@ -692,10 +692,7 @@ impl CompiledSpec {
                 Pattern::new(&expanded).ok()
             })
             .collect();
-        let file_name = spec
-            .file_name
-            .as_deref()
-            .map(CompiledNameMatcher::compile);
+        let file_name = spec.file_name.as_deref().map(CompiledNameMatcher::compile);
         let file_extensions = spec.file_extension.as_ref().map(|exts| {
             exts.iter()
                 .map(|ext| ext.strip_prefix('.').unwrap_or(ext).to_owned())
@@ -728,7 +725,7 @@ impl CompiledSpec {
         entry_ext: Option<&str>,
         dir_contains: &impl Fn(&Path, &str) -> bool,
     ) -> bool {
-        if let Some( expected ) = &self.directory_name {
+        if let Some(expected) = &self.directory_name {
             if entry.kind != FileKind::Directory || entry_name != Some(expected.as_str()) {
                 return false;
             }
@@ -1484,7 +1481,10 @@ mod tests {
             ("~/Library/Caches/pip/http/wheel.whl", FileKind::File),
             ("~/.cache/pip/http/wheel.whl", FileKind::File),
             ("~/Projects/app/__pycache__", FileKind::Directory),
-            ("~/Projects/app/__pycache__/mod.cpython-312.pyc", FileKind::File),
+            (
+                "~/Projects/app/__pycache__/mod.cpython-312.pyc",
+                FileKind::File,
+            ),
             ("~/Projects/app/target", FileKind::Directory),
             ("~/Projects/app/node_modules", FileKind::Directory),
             ("~/Projects/app/src/main.rs", FileKind::File),
