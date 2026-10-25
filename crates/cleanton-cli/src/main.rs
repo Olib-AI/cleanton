@@ -132,6 +132,32 @@ enum Command {
         #[arg(long, value_name = "PATH")]
         baseline: Option<PathBuf>,
     },
+    /// Watch installed packages continuously and report new risk as it
+    /// appears (the lightweight background helper).
+    ///
+    /// Cheap by construction: while nothing changes the watcher costs one
+    /// `stat` per package root per tick and sleeps in between, backing off from
+    /// the base interval to 15 minutes on a quiet machine. When a package
+    /// manager installs or updates something, only the affected directories are
+    /// examined: an advisory lookup by version, a lifecycle-hook check, and one
+    /// content scan of that single package — so a newly installed package is
+    /// checked immediately without rescanning everything.
+    ///
+    /// Read-only, like the rest of the security engine: it reports and never
+    /// removes, quarantines, or modifies a package.
+    Watch {
+        /// Base idle interval between checks, in seconds.
+        #[arg(long, default_value_t = 30, value_name = "SECONDS")]
+        interval: u64,
+        /// Take one pass and exit (for cron, or a launchd StartInterval job).
+        #[arg(long)]
+        once: bool,
+        /// Print a launchd agent definition for this watcher and exit (macOS).
+        /// It is printed, never installed: writing to ~/Library/LaunchAgents
+        /// stays the user's decision.
+        #[arg(long)]
+        print_agent: bool,
+    },
     Interactive,
 }
 
@@ -266,6 +292,11 @@ async fn run_app(cli: Cli) -> Result<i32> {
             review_all,
             baseline,
         } => run_security(&cli, establish_baseline, all, &review, review_all, baseline),
+        Command::Watch {
+            interval,
+            once,
+            print_agent,
+        } => run_watch(&cli, interval, once, print_agent),
         Command::Interactive => run_interactive(&cli, &config).await,
     }
 }
@@ -669,6 +700,185 @@ async fn run_clean(cli: &Cli, config: &CleantonConfig, dry_run: bool, yes: bool)
 /// changed without a version bump (same-version tamper). Reviews are applied
 /// BEFORE the exit code is computed, so `--review-all` on a surfaced set
 /// exits 0.
+/// The background watcher: a slow, cheap loop that checks packages the moment
+/// they appear.
+fn run_watch(cli: &Cli, interval: u64, once: bool, print_agent: bool) -> Result<i32> {
+    use cleanton_engine::background::{PackageWatcher, WatchEvent, WatchOptions};
+
+    let options = WatchOptions::with_idle_seconds(interval);
+    let mut watcher = PackageWatcher::for_default_targets(options);
+
+    if print_agent {
+        println!("{}", launch_agent_plist(interval));
+        return Ok(0);
+    }
+
+    if !cli.json {
+        let roots = watcher.roots().collect::<Vec<_>>();
+        if roots.is_empty() {
+            println!(
+                "No package locations found to watch (no global node_modules, \
+                 site-packages, gem tree, Cargo registry, or Go module cache exists)."
+            );
+            return Ok(0);
+        }
+        println!(
+            "Watching {} package location(s); idle interval {}s, backing off to {}s while quiet.",
+            roots.len(),
+            options.idle.as_secs(),
+            options.max_idle.as_secs()
+        );
+        for target in roots {
+            println!("  - {} ({})", target.root.display(), target.kind.label());
+        }
+        println!("Ctrl-C stops the watcher. Nothing is ever removed.");
+    }
+
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    let mut alerts = 0_usize;
+    let mut emit = |event: WatchEvent| {
+        if cli.json {
+            match serde_json::to_string(&watch_event_json(&event)) {
+                Ok(line) => println!("{line}"),
+                Err(err) => eprintln!("warning: could not serialize event: {err}"),
+            }
+            return;
+        }
+        match event {
+            WatchEvent::Quiet | WatchEvent::RootChanged { .. } => {}
+            other => print_watch_event(&other),
+        }
+    };
+    if once {
+        for event in watcher.tick(&cancel) {
+            if matches!(
+                event,
+                WatchEvent::Advisory { .. } | WatchEvent::ContentFinding { .. }
+            ) {
+                alerts = alerts.saturating_add(1);
+            }
+            emit(event);
+        }
+    } else {
+        watcher.run(&cancel, &mut emit);
+    }
+    Ok(if alerts > 0 { 3 } else { 0 })
+}
+
+/// One watch event as JSON (the `--json` stream shape).
+fn watch_event_json(event: &cleanton_engine::background::WatchEvent) -> serde_json::Value {
+    use cleanton_engine::background::WatchEvent;
+
+    match event {
+        WatchEvent::Quiet => serde_json::json!({ "event": "quiet" }),
+        WatchEvent::RootChanged { root, new_packages } => serde_json::json!({
+            "event": "root_changed",
+            "root": root.display().to_string(),
+            "new_packages": new_packages,
+        }),
+        WatchEvent::Advisory {
+            package,
+            version,
+            advisory,
+            severity,
+            summary,
+            remediation,
+        } => serde_json::json!({
+            "event": "advisory",
+            "package": package,
+            "version": version,
+            "advisory": advisory,
+            "severity": cleanton_engine::security::severity_label(*severity),
+            "summary": summary,
+            "remediation": remediation,
+        }),
+        WatchEvent::InstallHook { package, hook } => serde_json::json!({
+            "event": "install_hook",
+            "package": package,
+            "hook": hook,
+        }),
+        WatchEvent::ContentFinding {
+            package,
+            verdict,
+            findings,
+            headline,
+        } => serde_json::json!({
+            "event": "content_finding",
+            "package": package,
+            "verdict": cleanton_engine::security::verdict_label(*verdict),
+            "findings": findings,
+            "headline": headline,
+        }),
+    }
+}
+
+fn print_watch_event(event: &cleanton_engine::background::WatchEvent) {
+    use cleanton_engine::background::WatchEvent;
+    use cleanton_engine::security::{severity_label, verdict_label};
+
+    match event {
+        WatchEvent::Quiet | WatchEvent::RootChanged { .. } => {}
+        WatchEvent::Advisory {
+            package,
+            version,
+            advisory,
+            severity,
+            summary,
+            remediation,
+        } => println!(
+            "[{}] {package} {version}: {advisory} ({summary}) - {remediation}",
+            severity_label(*severity)
+        ),
+        WatchEvent::InstallHook { package, hook } => println!(
+            "[info] {package} runs a `{hook}` script at install time; review it if the package is unfamiliar"
+        ),
+        WatchEvent::ContentFinding {
+            package,
+            verdict,
+            findings,
+            headline,
+        } => println!(
+            "[{}] {package}: {findings} finding(s) - {headline}",
+            verdict_label(*verdict)
+        ),
+    }
+}
+
+/// A launchd agent that runs the watcher as a user background job. Printed, not
+/// installed: the plist path and the decision to load it are the user's.
+fn launch_agent_plist(interval: u64) -> String {
+    let binary = std::env::current_exe()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|_| "/usr/local/bin/cleanton".to_owned());
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>dev.cleanton.watch</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{binary}</string>
+        <string>watch</string>
+        <string>--interval</string>
+        <string>{interval}</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <false/>
+    <key>LowPriorityIO</key>
+    <true/>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/cleanton-watch.err</string>
+</dict>
+</plist>"#
+    )
+}
+
 fn run_security(
     cli: &Cli,
     establish_baseline: bool,

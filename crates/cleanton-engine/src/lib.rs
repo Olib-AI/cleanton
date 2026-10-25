@@ -1,5 +1,6 @@
 mod advisories;
 mod analyzer;
+pub mod background;
 mod docker;
 mod elevated_trash;
 mod events;
@@ -19,6 +20,7 @@ pub use advisories::{
     compare_versions,
 };
 pub use analyzer::AnalyzedPlan;
+pub use background::{PackageWatcher, WatchEvent, WatchOptions};
 pub use docker::{
     BuildCacheInfo, ContainerInfo, DockerAnalysis, DockerCleaner, DockerCleanupPlan,
     DockerCleanupResult, ImageInfo, VolumeInfo,

@@ -1548,7 +1548,7 @@ struct PackageCandidate {
 
 /// Parse `name`/`version` from a `package.json` next to `dir`, falling back to
 /// the directory name.
-fn npm_manifest(dir: &Path, fallback: &str) -> (String, Option<String>) {
+pub(crate) fn npm_manifest(dir: &Path, fallback: &str) -> (String, Option<String>) {
     let manifest = dir.join("package.json");
     let Ok(bytes) = std::fs::read(&manifest) else {
         return (fallback.to_owned(), None);
@@ -1569,7 +1569,7 @@ fn npm_manifest(dir: &Path, fallback: &str) -> (String, Option<String>) {
 
 /// Best-effort version for a site-packages dir `name` from a sibling
 /// `<name>-<version>.dist-info` directory (PEP 376 normalized comparison).
-fn python_dist_info_version(site_packages: &Path, package: &str) -> Option<String> {
+pub(crate) fn python_dist_info_version(site_packages: &Path, package: &str) -> Option<String> {
     let normalized = package.to_lowercase().replace('-', "_");
     for dir in subdirs(site_packages) {
         let Some(file_name) = dir.file_name().map(|n| n.to_string_lossy().into_owned()) else {
@@ -1720,7 +1720,7 @@ fn gemspec_field(text: &str, field: &str) -> Option<String> {
 }
 
 /// Read `name`/`version` from the gemspec inside an installed gem directory.
-fn gem_identity(dir: &Path, fallback: &str) -> (String, Option<String>) {
+pub(crate) fn gem_identity(dir: &Path, fallback: &str) -> (String, Option<String>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return (fallback.to_owned(), None);
     };
@@ -1741,7 +1741,7 @@ fn gem_identity(dir: &Path, fallback: &str) -> (String, Option<String>) {
 }
 
 /// Read `package.name`/`package.version` from a crate's `Cargo.toml`.
-fn cargo_identity(dir: &Path, fallback: &str) -> (String, Option<String>) {
+pub(crate) fn cargo_identity(dir: &Path, fallback: &str) -> (String, Option<String>) {
     let Ok(text) = std::fs::read_to_string(dir.join("Cargo.toml")) else {
         return (fallback.to_owned(), None);
     };
@@ -1765,7 +1765,7 @@ fn cargo_identity(dir: &Path, fallback: &str) -> (String, Option<String>) {
 
 /// Split a cache entry name into `(name, version)`, e.g. `rack-2.2.8` or
 /// `github.com/foo/bar@v1.2.3`.
-fn split_versioned_dir_name(name: &str) -> Option<(String, String)> {
+pub(crate) fn split_versioned_dir_name(name: &str) -> Option<(String, String)> {
     if let Some((package, version)) = name.rsplit_once('@') {
         if !package.is_empty() && !version.is_empty() {
             return Some((package.to_owned(), version.to_owned()));
