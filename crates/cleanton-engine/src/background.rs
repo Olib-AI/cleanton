@@ -592,15 +592,18 @@ fn build_disk_offer(
              then empty the Trash to reclaim freed space.",
         );
     } else {
+        use std::fmt::Write as _;
+
         let named: Vec<String> = candidates
             .iter()
             .map(|c| format!("{} ({})", c.label, human_bytes(c.bytes)))
             .collect();
-        advice.push_str(&format!(
+        let _ = write!(
+            advice,
             " At least {} is reclaimable across {}. Run Disk Cleanup to review and move caches to Trash, or empty the Trash.",
             human_bytes(estimated_reclaimable_bytes),
             named.join(", ")
-        ));
+        );
     }
 
     (
