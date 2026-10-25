@@ -82,12 +82,12 @@ impl PackageManagers {
     }
 
     /// Uninstalls `names` via the manager's dependency-aware uninstaller.
-    /// `MacPorts` prompts for administrator privileges.
+    /// `MacPorts` prompts for administrator privileges. Homebrew casks are
+    /// uninstalled with `--cask` so the `.app` bundle is actually removed.
     pub async fn uninstall(kind: ManagerKind, names: &[String]) -> ActionOutcome {
         match kind {
-            ManagerKind::Homebrew | ManagerKind::HomebrewCask => {
-                managers::homebrew::uninstall(names).await
-            }
+            ManagerKind::Homebrew => managers::homebrew::uninstall(false, names).await,
+            ManagerKind::HomebrewCask => managers::homebrew::uninstall(true, names).await,
             ManagerKind::Npm => managers::npm::uninstall(names).await,
             ManagerKind::Pip => managers::pip::uninstall(names).await,
             ManagerKind::MacPorts => managers::macports::uninstall(names).await,

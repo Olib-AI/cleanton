@@ -416,11 +416,19 @@ fn main() -> Result<(), slint::PlatformError> {
                     state.set_result_mode("Empty plan".into());
                 }
                 Some(plan) => {
+                    let selected = selected_action_indices();
+                    let selected_bytes: u64 = selected
+                        .iter()
+                        .filter_map(|&i| plan.actions.get(i).map(|a| a.reclaimable_bytes))
+                        .fold(0u64, u64::saturating_add);
                     state.set_confirmation_pending(true);
                     state.set_clean_status(
                         format!(
-                            "Confirm cleanup to execute {} reviewed actions.",
-                            plan.actions.len()
+                            "Confirm cleanup: {} of {} action(s) ({}) selected; \
+                             they will move to Trash.",
+                            selected.len(),
+                            plan.actions.len(),
+                            display::human_bytes(selected_bytes)
                         )
                         .into(),
                     );
@@ -2332,7 +2340,7 @@ fn clear_plan_state(state: &AppState) {
     PLAN_ACTION_BYTES.with(|cell| cell.borrow_mut().clear());
     state.set_plan_selected_count(0);
     state.set_plan_selected_reclaimable("0 B".into());
-    state.set_plan_all_selected(true);
+    state.set_plan_all_selected(false);
     state.set_plan_ready(false);
     state.set_confirmation_pending(false);
     state.set_plan_review_status("Scan or refresh a plan to review cleanup actions.".into());
@@ -2792,7 +2800,8 @@ fn plan_review_status(plan: &CleanupPlan) -> String {
         "No cleanup actions were found in the latest plan.".to_owned()
     } else {
         format!(
-            "Review {} actions, then request cleanup confirmation.",
+            "{} actions found. Nothing is selected yet: tick the items or groups you want to \
+             clean, then press \"Clean selected\".",
             plan.actions.len()
         )
     }
@@ -2926,7 +2935,7 @@ fn clear_plan_list_only(state: &AppState) {
     PLAN_ACTION_BYTES.with(|cell| cell.borrow_mut().clear());
     state.set_plan_selected_count(0);
     state.set_plan_selected_reclaimable("0 B".into());
-    state.set_plan_all_selected(true);
+    state.set_plan_all_selected(false);
     state.set_plan_ready(false);
 }
 
@@ -2972,7 +2981,10 @@ fn group_row(group: &ActionGroup, safety: SafetyLevel) -> PlanActionRow {
         action_type: SharedString::from(action_type_label(group.action_type)),
         action_icon: SharedString::from(action_type_icon(group.action_type)),
         recipe_id: SharedString::from(group.recipe_id.clone()),
-        selected: matches!(safety, SafetyLevel::Safe),
+        // Nothing is pre-selected, even "safe" groups: Cleanton is a deleter
+        // and a scan must never end in a state where one click removes every
+        // target. The user opts in by ticking rows or the master checkbox.
+        selected: false,
         count: clamp_to_i32(group.action_count),
         detail: SharedString::from(detail),
     }
@@ -3048,16 +3060,15 @@ fn build_plan_model(
     // Bucket action indices by recipe, and record per-action bytes for totals.
     let mut idx_by_recipe: HashMap<&str, Vec<usize>> = HashMap::new();
     let mut action_bytes: Vec<u64> = Vec::with_capacity(plan.actions.len());
-    let mut selected: HashSet<usize> = HashSet::new();
+    // Selection is empty after a fresh scan: every action must be ticked
+    // explicitly. (`selected` is only ever populated by the user's toggles.)
+    let selected: HashSet<usize> = HashSet::new();
     for (i, action) in plan.actions.iter().enumerate() {
         idx_by_recipe
             .entry(action.recipe_id.0.as_str())
             .or_default()
             .push(i);
         action_bytes.push(action.reclaimable_bytes);
-        if matches!(action.safety_level, SafetyLevel::Safe) {
-            selected.insert(i);
-        }
     }
 
     let home = home_string();

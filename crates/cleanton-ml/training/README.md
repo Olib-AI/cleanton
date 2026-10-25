@@ -62,7 +62,7 @@ enforces, in priority order: safety floors (`safety.rs` protected roots +
 sensitive basenames), recipe `[match.exclude]` author-declared keeps (only
 excludes on path-anchored selectors count — broad reroutes like
 `~/.cache/**` on `**/*.pt` never manufacture keeps), full recipe matches
-under the complete 130-recipe DSL with the engine's first-match-wins
+under the complete 138-recipe DSL with the engine's first-match-wins
 priority order (safe -> safe-to-remove, cautious/aggressive -> likely-junk;
 descendants of a matched directory inherit), keep evidence (.git internals,
 manifests, source/docs/media), near-miss guard failures -> uncertain.

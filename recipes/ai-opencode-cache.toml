@@ -1,0 +1,28 @@
+[recipe]
+id = "ai-opencode-cache"
+name = "OpenCode Cache"
+description = "OpenCode AI coding agent model/log cache; regenerable and re-downloaded on demand"
+category = "ai-tools"
+icon = "fa-terminal"
+safety_level = "cautious"
+enabled = true
+priority = 50
+
+# OpenCode keeps model downloads and logs under `~/.cache/opencode`. The cache
+# is regenerable, but it may hold a locally-built model, so it is `cautious`
+# with a short age gate; the matcher's safety floors still refuse credentials
+# and protected paths regardless of the glob.
+[match]
+path_glob = "~/.cache/opencode/**"
+min_age_days = 14
+
+[action]
+type = "trash"
+prompt = "Move {size} of OpenCode cache to Trash? Models re-download on demand."
+
+[test]
+should_match = ["~/.cache/opencode/models/model.gguf"]
+should_not_match = [
+    "~/.cache/opencodex/models/model.gguf",
+    "~/projects/opencode/models/model.gguf",
+]

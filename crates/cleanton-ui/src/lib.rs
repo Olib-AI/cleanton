@@ -1328,7 +1328,7 @@ fn handle_engine_event(event: EngineEvent, app: &mut App) {
 /// stored separately and never enter the file tree, so they can only ever be
 /// executed by explicit user action against the plan.
 fn apply_analyzed_full(app: &mut App, full: AnalyzedFull) {
-    let status = app.scan_result.as_ref().map_or_else(
+    let scan_status = app.scan_result.as_ref().map_or_else(
         || "Analysis complete! Switch to the Results tab (2) to review.".to_owned(),
         scan_status,
     );
@@ -1338,6 +1338,18 @@ fn apply_analyzed_full(app: &mut App, full: AnalyzedFull) {
         docker,
         suggestions,
     } = full;
+
+    // Nothing is pre-selected: tell the user explicitly, so the empty state is
+    // never mistaken for "clean everything".
+    let target_count = analyzed.plan.actions.len();
+    let status = if target_count == 0 {
+        format!("{scan_status} No cleanable items found.")
+    } else {
+        format!(
+            "{scan_status} {target_count} targets found; none selected. \
+             Tick items with Space, then press c to review and y to confirm."
+        )
+    };
 
     app.is_scanning = false;
     app.file_tree_state = Some(FileTreeState::new(&analyzed.plan, &analyzed.annotations));

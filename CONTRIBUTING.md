@@ -55,6 +55,13 @@ cargo test --workspace --all-features
 
 # Security audit
 ./scripts/audit.sh
+
+# Validate the recipe registry offline (no Rust toolchain needed)
+python3 scripts/validate-recipes.py
+
+# Drive the Dev gate workflow on GitHub Actions (the build "second PC"):
+#   trigger -> watch -> report -> logs
+./scripts/dev-ci.sh all
 ```
 
 ---
