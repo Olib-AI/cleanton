@@ -692,7 +692,9 @@ fn move_uninstall_item(
             action,
             event_tx,
             result,
-            format!("needs administrator rights ({elevated}); elevated move failed: {elevated_err}"),
+            format!(
+                "needs administrator rights ({elevated}); elevated move failed: {elevated_err}"
+            ),
         ),
         None => record_uninstall_failure(
             action,
