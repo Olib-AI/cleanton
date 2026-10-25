@@ -1965,7 +1965,7 @@ export component AppWindow inherits Window {
                                 }
 
                                 Text {
-                                    text: "Review what gets moved to the Trash. Locked items need admin rights: once the app is gone they show up as orphaned on the Services tab and can be removed there.";
+                                    text: "Review what gets moved to the Trash. Items marked with a lock are owned by another account (App Store installs): moving them asks for the administrator password once and they still land in the Trash.";
                                     color: Theme.palette.text-muted;
                                     font-size: Theme.font-size-xs;
                                     wrap: word-wrap;
@@ -1994,7 +1994,7 @@ export component AppWindow inherits Window {
                                             background: leftover-touch.has-hover ? Theme.palette.surface-elevated : transparent;
 
                                             leftover-touch := TouchArea {
-                                                mouse-cursor: row.admin ? default : pointer;
+                                                mouse-cursor: pointer;
                                                 clicked => { AppCallbacks.toggle-leftover(i); }
                                             }
 
@@ -2007,7 +2007,7 @@ export component AppWindow inherits Window {
                                                     width: 20px;
                                                     Checkbox {
                                                         checked: row.selected;
-                                                        enabled: !row.admin && !AppState.uninstalling;
+                                                        enabled: !AppState.uninstalling;
                                                         y: (parent.height - self.height) / 2;
                                                         toggled => { AppCallbacks.toggle-leftover(i); }
                                                     }
