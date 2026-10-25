@@ -60,6 +60,7 @@ pub(crate) fn move_to_trash_elevated(_path: &Path) -> std::io::Result<PathBuf> {
 
 /// A free `~/.Trash/<name>`, suffixed on collision so an existing Trash entry is
 /// never overwritten (an `mv -f` onto an existing name would replace it).
+#[cfg(target_os = "macos")]
 fn unique_trash_destination(path: &Path) -> Option<PathBuf> {
     let home = std::env::var_os("HOME")?;
     let trash = PathBuf::from(home).join(".Trash");
@@ -88,15 +89,17 @@ fn unique_trash_destination(path: &Path) -> Option<PathBuf> {
     None
 }
 
+#[cfg(target_os = "macos")]
 fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
+#[cfg(target_os = "macos")]
 fn applescript_quote(value: &str) -> String {
     format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::*;
 

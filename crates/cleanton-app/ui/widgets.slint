@@ -51,11 +51,9 @@ export component Badge inherits Rectangle {
     in property <string> label;
     in property <brush> badge-color: Theme.palette.accent;
 
-    // `height` alone is overridden when the badge sits in a layout (a layout
-    // sizes children from their min/max, not from `height`). Pinning both is
-    // what keeps the pill compact and lets the caller centre it vertically with
-    // an explicit `y` instead of a stretched, top-aligned pill.
-    height: 22px;
+    // A layout sizes children from their min/max and ignores `height`, so the
+    // pill's height is pinned there (Slint rejects `height` next to min/max).
+    // Callers centre it vertically with nested layouts, not with `y`.
     min-height: 22px;
     max-height: 22px;
     min-width: 50px;
@@ -133,7 +131,7 @@ export component Spinner inherits Rectangle {
         glyph: "\u{f110}";
         icon-color: root.spinner-color;
         icon-size: root.spinner-size;
-        rotation-angle: root.phase;
+        transform-rotation: root.phase;
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
     }
@@ -312,9 +310,9 @@ export component Toggle inherits Rectangle {
     callback toggled(bool);
 
     width: 46px;
-    height: 26px;
     // Pinned min/max: inside a layout the `height` property is ignored, and a
     // stretched toggle track no longer lines up with the label beside it.
+    // Slint rejects `height` alongside min/max, so the pin is the height.
     min-height: 26px;
     max-height: 26px;
     border-radius: self.height / 2;
