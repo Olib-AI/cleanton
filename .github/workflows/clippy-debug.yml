@@ -41,6 +41,40 @@ jobs:
         # so each finding is self-contained once the progress noise is dropped.
         run: cargo clippy --workspace --all-targets --all-features --message-format=short -- -D warnings 2>&1 | tee clippy.log
 
+      - name: Test
+        id: test
+        continue-on-error: true
+        run: cargo test --workspace --all-features 2>&1 | tee test.log
+
+      - name: Emit test output as annotations
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import re
+
+          try:
+              text = open("test.log", encoding="utf-8", errors="replace").read()
+          except OSError:
+              text = "(no test.log produced)"
+          text = re.sub(r"\x1b\[[0-9;]*m", "", text)
+          keep = [
+              line.rstrip()
+              for line in text.splitlines()
+              if re.search(r"(error|warning)(\[|:)", line)
+              or "FAILED" in line
+              or "panicked at" in line
+              or line.startswith(("failures:", "test result:", "     Running"))
+          ]
+          if not keep:
+              keep = ["(no failure lines found)"]
+          flat = "\n".join(keep).replace("%", "%25").replace("\r", "").replace("\n", " ~ ")
+          chunk = 2800
+          total = (len(flat) + chunk - 1) // chunk
+          for index in range(min(total, 20)):
+              piece = flat[index * chunk : (index + 1) * chunk]
+              print(f"::error title=test-{index + 1}::{piece}")
+          PY
+
       - name: Emit output as annotations
         if: always()
         run: |
