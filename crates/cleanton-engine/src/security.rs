@@ -2021,8 +2021,7 @@ fn push_go_package(dir: &Path, out: &mut Vec<PackageCandidate>) {
 /// Advice shown instead of a package-manager command when a *persistence file*
 /// is flagged. There is nothing to uninstall: the file is the user's own, and
 /// the fix is to delete the one line that was added, not the file.
-const PERSISTENCE_REMEDY: &str = \
-    "This file is yours, not a package: open it, delete the flagged line, and \
+const PERSISTENCE_REMEDY: &str = "This file is yours, not a package: open it, delete the flagged line, and \
      mark it reviewed. Do not delete the whole file.";
 
 /// Shell startup files whose basename marks them as per-login/per-shell hooks.
