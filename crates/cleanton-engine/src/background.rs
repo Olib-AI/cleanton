@@ -57,7 +57,7 @@ impl Default for WatchOptions {
     fn default() -> Self {
         Self {
             idle: Duration::from_secs(30),
-            max_idle: Duration::from_secs(15 * 60),
+            max_idle: Duration::from_mins(15),
             burst: Duration::from_secs(5),
             quiet_ticks_before_backoff: 4,
         }
@@ -154,7 +154,6 @@ impl PackageWatcher {
     }
 
     /// Watched roots (for logging / display).
-    #[must_use]
     pub fn roots(&self) -> impl Iterator<Item = &SecurityTarget> {
         self.roots.iter().map(|(target, _)| target)
     }

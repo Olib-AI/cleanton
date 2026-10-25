@@ -1782,13 +1782,14 @@ pub(crate) fn cargo_identity(dir: &Path, fallback: &str) -> (String, Option<Stri
 /// Split a cache entry name into `(name, version)`, e.g. `rack-2.2.8` or
 /// `github.com/foo/bar@v1.2.3`.
 pub(crate) fn split_versioned_dir_name(name: &str) -> Option<(String, String)> {
-    if let Some((package, version)) = name.rsplit_once('@') {
-        if !package.is_empty() && !version.is_empty() {
-            return Some((package.to_owned(), version.to_owned()));
-        }
+    if let Some((package, version)) = name.rsplit_once('@')
+        && !package.is_empty()
+        && !version.is_empty()
+    {
+        return Some((package.to_owned(), version.to_owned()));
     }
     // `name-1.2.3`: split at the last `-` that is followed by a digit.
-    let indices = name
+    let mut indices = name
         .char_indices()
         .filter(|(index, character)| {
             *character == '-'
@@ -1798,7 +1799,7 @@ pub(crate) fn split_versioned_dir_name(name: &str) -> Option<(String, String)> {
                     .is_some_and(|next| next.is_ascii_digit())
         })
         .map(|(index, _)| index);
-    let split = indices.last()?;
+    let split = indices.next_back()?;
     let package = name.get(..split)?;
     let version = name.get(split.saturating_add(1)..)?;
     Some((package.to_owned(), version.to_owned()))
