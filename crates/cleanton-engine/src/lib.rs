@@ -1,3 +1,4 @@
+mod advisories;
 mod analyzer;
 mod docker;
 mod elevated_trash;
@@ -13,6 +14,10 @@ mod snapshots;
 mod suggestions;
 mod uninstall;
 
+pub use advisories::{
+    Advisory, AdvisoryDatabase, AdvisoryMatch, AffectedRange, Ecosystem, PackageSubject,
+    compare_versions,
+};
 pub use analyzer::AnalyzedPlan;
 pub use docker::{
     BuildCacheInfo, ContainerInfo, DockerAnalysis, DockerCleaner, DockerCleanupPlan,
