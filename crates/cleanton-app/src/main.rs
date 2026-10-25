@@ -1726,24 +1726,24 @@ fn spawn_resource_pressure_watcher(ui_weak: slint::Weak<AppWindow>, shared_confi
 }
 
 fn read_resource_status(config: &CleantonConfig) -> ResourceStatus {
-    snapshot_resource_status(
-        config.background.disk_pressure_percent,
-        config.background.memory_pressure_percent,
-    )
+    let (disk_pct, mem_pct) = if config.background.enabled {
+        (
+            config.background.disk_pressure_percent,
+            config.background.memory_pressure_percent,
+        )
+    } else {
+        (0, 0)
+    };
+    snapshot_resource_status(disk_pct, mem_pct)
 }
 
 fn apply_resource_status(state: &AppState, status: &ResourceStatus) {
-    if let (Some(total), Some(available), Some(pct)) = (
-        status.memory_total_bytes,
-        status.memory_available_bytes,
-        status.memory_used_percent,
-    ) {
+    if status.memory_total_bytes > 0 {
+        let total = status.memory_total_bytes;
+        let available = status.memory_available_bytes;
+        let pct = status.memory_used_percent;
         let used = total.saturating_sub(available);
-        let ratio = if total > 0 {
-            (used as f64 / total as f64) as f32
-        } else {
-            0.0
-        };
+        let ratio = (used as f64 / total as f64) as f32;
         state.set_memory_ready(true);
         state.set_memory_total(display::human_bytes(total).into());
         state.set_memory_used(format!("{} ({pct}%)", display::human_bytes(used)).into());
@@ -1765,24 +1765,20 @@ fn apply_resource_status(state: &AppState, status: &ResourceStatus) {
         MEMORY_OFFER_DISMISSED.store(false, Ordering::Relaxed);
     }
 
-    if let Some(offer) = &status.disk_offer
+    if let Some((advice, offer)) = &status.disk_offer
         && !DISK_OFFER_DISMISSED.load(Ordering::Relaxed)
     {
-        let pct = status.disk_used_percent.unwrap_or(0);
-        let avail = status
-            .disk_available_bytes
-            .map(display::human_bytes)
-            .unwrap_or_else(|| "--".to_owned());
+        let pct = status.disk_used_percent;
+        let avail = display::human_bytes(status.disk_available_bytes);
         state.set_disk_offer_headline(
             format!("Disk usage is high ({pct}% used, {avail} free) - disk cleanup recommended")
                 .into(),
         );
         let detail = match offer {
             CleanupOffer::Disk {
-                reclaimable_bytes,
+                estimated_reclaimable_bytes,
                 candidates,
-                recommended_action,
-            } if *reclaimable_bytes > 0 => {
+            } if *estimated_reclaimable_bytes > 0 => {
                 let top = candidates
                     .iter()
                     .take(3)
@@ -1790,16 +1786,11 @@ fn apply_resource_status(state: &AppState, status: &ResourceStatus) {
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!(
-                    "Detected ~{} in quick-relief targets: {}. {}",
-                    display::human_bytes(*reclaimable_bytes),
-                    top,
-                    recommended_action
+                    "Detected ~{} in quick-relief targets ({top}). Run Scan & Review to move safe caches and build artifacts to the Trash.",
+                    display::human_bytes(*estimated_reclaimable_bytes),
                 )
             }
-            CleanupOffer::Disk {
-                recommended_action, ..
-            } => recommended_action.clone(),
-            CleanupOffer::Memory { .. } => String::new(),
+            _ => advice.clone(),
         };
         state.set_disk_offer_detail(detail.into());
         state.set_disk_offer_active(true);
@@ -1807,14 +1798,11 @@ fn apply_resource_status(state: &AppState, status: &ResourceStatus) {
         state.set_disk_offer_active(false);
     }
 
-    if let Some(offer) = &status.memory_offer
+    if let Some((advice, offer)) = &status.memory_offer
         && !MEMORY_OFFER_DISMISSED.load(Ordering::Relaxed)
     {
-        let pct = status.memory_used_percent.unwrap_or(0);
-        let avail = status
-            .memory_available_bytes
-            .map(display::human_bytes)
-            .unwrap_or_else(|| "--".to_owned());
+        let pct = status.memory_used_percent;
+        let avail = display::human_bytes(status.memory_available_bytes);
         state.set_memory_offer_headline(
             format!(
                 "Memory usage is high ({pct}% used, {avail} available) - memory cleanup recommended"
@@ -1822,23 +1810,18 @@ fn apply_resource_status(state: &AppState, status: &ResourceStatus) {
             .into(),
         );
         let detail = match offer {
-            CleanupOffer::Memory {
-                top_processes,
-                recommended_action,
-                ..
-            } if !top_processes.is_empty() => {
+            CleanupOffer::Memory { top_processes, .. } if !top_processes.is_empty() => {
                 let top = top_processes
                     .iter()
                     .take(4)
                     .map(|p| format!("{} ({})", p.name, display::human_bytes(p.rss_bytes)))
                     .collect::<Vec<_>>()
                     .join(", ");
-                format!("Top resident processes: {top}. {recommended_action}")
+                format!(
+                    "Top resident processes: {top}. Reclaim idle allocator pages or review running background services."
+                )
             }
-            CleanupOffer::Memory {
-                recommended_action, ..
-            } => recommended_action.clone(),
-            CleanupOffer::Disk { .. } => String::new(),
+            _ => advice.clone(),
         };
         state.set_memory_offer_detail(detail.into());
         state.set_memory_offer_active(true);
@@ -2656,12 +2639,8 @@ fn populate_settings(state: &AppState, config: &CleantonConfig) {
     state.set_setting_max_action_gb(
         i32::try_from(config.safety.max_single_action_gb).unwrap_or(i32::MAX),
     );
-    state.set_setting_disk_pressure_percent(i32::from(
-        config.background.disk_pressure_percent.unwrap_or(0),
-    ));
-    state.set_setting_memory_pressure_percent(i32::from(
-        config.background.memory_pressure_percent.unwrap_or(0),
-    ));
+    state.set_setting_disk_pressure_percent(i32::from(config.background.disk_pressure_percent));
+    state.set_setting_memory_pressure_percent(i32::from(config.background.memory_pressure_percent));
 }
 
 /// Read the edited Settings controls back into `config`.
@@ -2685,17 +2664,9 @@ fn read_settings_into_config(state: &AppState, config: &mut CleantonConfig) {
     config.safety.max_single_action_gb = u64::try_from(state.get_setting_max_action_gb().max(1))
         .unwrap_or(config.safety.max_single_action_gb);
     let disk_pct = state.get_setting_disk_pressure_percent().clamp(0, 99);
-    config.background.disk_pressure_percent = if disk_pct == 0 {
-        None
-    } else {
-        u8::try_from(disk_pct).ok()
-    };
+    config.background.disk_pressure_percent = u8::try_from(disk_pct).unwrap_or(0);
     let mem_pct = state.get_setting_memory_pressure_percent().clamp(0, 99);
-    config.background.memory_pressure_percent = if mem_pct == 0 {
-        None
-    } else {
-        u8::try_from(mem_pct).ok()
-    };
+    config.background.memory_pressure_percent = u8::try_from(mem_pct).unwrap_or(0);
 }
 
 fn clamp_to_i32(value: usize) -> i32 {

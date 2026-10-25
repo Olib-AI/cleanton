@@ -981,8 +981,12 @@ mod tests {
 
         let cap = VolumeCapacity {
             total_bytes: 100 * 1024 * 1024 * 1024,
+            free_bytes: 10 * 1024 * 1024 * 1024,
             available_bytes: 10 * 1024 * 1024 * 1024,
+            available_for_important_usage_bytes: 10 * 1024 * 1024 * 1024,
             used_bytes: 90 * 1024 * 1024 * 1024,
+            purgeable_estimate_bytes: 0,
+            block_size: 4096,
         };
         let (advice, offer) = build_disk_offer(90, &cap, temp.path());
         assert!(
