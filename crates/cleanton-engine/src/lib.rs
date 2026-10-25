@@ -1,5 +1,8 @@
+mod advisories;
 mod analyzer;
+pub mod background;
 mod docker;
+mod elevated_trash;
 mod events;
 mod executor;
 mod ml;
@@ -12,12 +15,17 @@ mod snapshots;
 mod suggestions;
 mod uninstall;
 
+pub use advisories::{
+    Advisory, AdvisoryDatabase, AdvisoryMatch, AffectedRange, Ecosystem, PackageSubject,
+    compare_versions,
+};
 pub use analyzer::AnalyzedPlan;
+pub use background::{PackageWatcher, WatchEvent, WatchOptions};
 pub use docker::{
     BuildCacheInfo, ContainerInfo, DockerAnalysis, DockerCleaner, DockerCleanupPlan,
     DockerCleanupResult, ImageInfo, VolumeInfo,
 };
-pub use events::EngineEvent;
+pub use events::{EngineEvent, ScanSummary};
 pub use ml::{
     ActionAnnotation, AnnotatedAction, DEFAULT_ML_CONFIDENCE_THRESHOLD, FileClassifier,
     MlAdjustment,

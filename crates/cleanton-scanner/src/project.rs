@@ -28,9 +28,16 @@ pub fn detect_project_roots(paths: impl IntoIterator<Item = PathBuf>) -> Vec<Pro
 
 #[must_use]
 pub fn detect_project_roots_from_entries(entries: &[FileEntry]) -> Vec<ProjectRoot> {
-    let entries_by_path = entries
+    // Index only DIRECTORY entries, and borrow their paths instead of cloning
+    // them. The previous index cloned the path of *every* scanned entry into a
+    // `HashMap<PathBuf, _>` — millions of `PathBuf` allocations and an extra
+    // copy of the whole scan's path data on the analysis hot path — while every
+    // lookup below is a directory lookup. Directory entries are a small fraction
+    // of a scan, and none of them need a clone.
+    let dirs_by_path = entries
         .iter()
-        .map(|entry| (entry.path.clone(), entry))
+        .filter(|entry| entry.kind == FileKind::Directory)
+        .map(|entry| (entry.path.as_path(), entry))
         .collect::<HashMap<_, _>>();
 
     entries
@@ -44,15 +51,15 @@ pub fn detect_project_roots_from_entries(entries: &[FileEntry]) -> Vec<ProjectRo
             let artifact_dirs = artifact_dirs(ecosystem, &root)
                 .into_iter()
                 .filter(|artifact| {
-                    entries_by_path
-                        .get(artifact)
+                    dirs_by_path
+                        .get(artifact.as_path())
                         .is_some_and(|entry| entry.kind == FileKind::Directory)
                 })
                 .collect::<Vec<_>>();
-            let total_size = scan_entry_size(&root, entries, &entries_by_path);
+            let total_size = scan_entry_size(&root, entries, &dirs_by_path);
             let artifact_size = artifact_dirs
                 .iter()
-                .map(|artifact| scan_entry_size(artifact, entries, &entries_by_path))
+                .map(|artifact| scan_entry_size(artifact, entries, &dirs_by_path))
                 .sum();
 
             ProjectRoot {
@@ -69,10 +76,14 @@ pub fn detect_project_roots_from_entries(entries: &[FileEntry]) -> Vec<ProjectRo
 fn scan_entry_size(
     path: &Path,
     entries: &[FileEntry],
-    entries_by_path: &HashMap<PathBuf, &FileEntry>,
+    dirs_by_path: &HashMap<&Path, &FileEntry>,
 ) -> u64 {
-    entries_by_path.get(path).map_or_else(
+    dirs_by_path.get(path).map_or_else(
         || {
+            // The directory itself was not part of the scan (pruned, or beyond
+            // `max_depth`): fall back to the descendant files we did see. This
+            // is the rare path — in a real scan the directory is nearly always
+            // present — so the linear scan stays off the hot path.
             entries
                 .iter()
                 .filter(|entry| {

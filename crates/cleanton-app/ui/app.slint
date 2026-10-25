@@ -1,7 +1,7 @@
 // Cleanton native application UI
 
 import { Theme } from "theme.slint";
-import { Panel, Badge, ProgressBar, MetricTile, ActionButton, SidebarItem, FileRow, PlanListRow, ServiceListRow, SuggestionListRow, PackageListRow, FaIcon, SparkBar, Toggle, Checkbox, RowColumns } from "widgets.slint";
+import { Panel, Badge, ProgressBar, MetricTile, ActionButton, SidebarItem, FileRow, PlanListRow, ServiceListRow, SuggestionListRow, PackageListRow, FaIcon, SparkBar, Toggle, Checkbox, RowColumns, Spinner, ActivityBar } from "widgets.slint";
 import { LineEdit, SpinBox, ScrollView } from "std-widgets.slint";
 
 export struct PlanActionRow {
@@ -105,6 +105,9 @@ export struct AppListRow {
     protected: bool,
     // Installed via a Homebrew cask; the uninstall also runs `brew uninstall`.
     brew: bool,
+    // Installed from the Mac App Store (the bundle carries a MAS receipt). These
+    // bundles are usually root-owned, so the uninstall needs admin rights.
+    app-store: bool,
 }
 
 // One reviewable leftover of an app uninstall.
@@ -327,6 +330,8 @@ export global AppState {
     in-out property <string> service-pending-disable-id;
     // Two-step Remove arming for orphaned startup items (missing executable).
     in-out property <string> service-pending-remove-id;
+    // Two-step Delete arming for a stopped, unprotected service.
+    in-out property <string> service-pending-delete-id;
 
     // Security tab state (read-only supply-chain scan diffed against the
     // trusted baseline; never destructive).
@@ -383,6 +388,8 @@ export global AppState {
     in-out property <int> setting-max-run-gb: 250;
     in-out property <int> setting-max-action-gb: 100;
     in-out property <string> setting-save-status: "No changes saved yet.";
+    // Package version of the running build, filled from CARGO_PKG_VERSION.
+    in-out property <string> app-version: "";
 
     // First-run Full Disk Access guidance. `fda-needs-attention` is set only
     // when a probe positively observed a permission denial; the panel is
@@ -445,6 +452,9 @@ export global AppCallbacks {
     // Remove an orphaned startup item's leftover plist by id (backend only
     // permits this when the referenced executable is missing).
     callback remove-service(string);
+    // Delete a stopped, unprotected service's startup item by id. The backend
+    // refuses protected services and anything that is currently running.
+    callback delete-service(string);
 
     // Security tab: start (or restart) the read-only supply-chain scan of
     // installed packages. Detection + notification only; never destructive.
@@ -589,8 +599,12 @@ export component AppWindow inherits Window {
                     background: Theme.palette.border-subtle;
                 }
 
+                // One fixed-height row so the icon, the label and the switch are
+                // all vertically centred on the same line (a layout puts a
+                // fixed-height child at the top edge, which left the switch
+                // visibly higher than the label).
                 HorizontalLayout {
-                    height: 38px;
+                    height: 32px;
                     spacing: Theme.spacing-sm;
 
                     FaIcon {
@@ -600,6 +614,7 @@ export component AppWindow inherits Window {
                         icon-color: Theme.palette.text-muted;
                         icon-size: Theme.font-size-sm;
                         width: 18px;
+                        height: 32px;
                         vertical-alignment: center;
                     }
 
@@ -607,6 +622,7 @@ export component AppWindow inherits Window {
                         text: Theme.dark-mode ? "Dark" : "Light";
                         color: Theme.palette.text-secondary;
                         font-size: Theme.font-size-sm;
+                        height: 32px;
                         vertical-alignment: center;
                         horizontal-stretch: 1;
                     }
@@ -1368,6 +1384,12 @@ export component AppWindow inherits Window {
                 spacing: Theme.spacing-md;
 
                 HorizontalLayout {
+                    spacing: Theme.spacing-sm;
+                    Spinner {
+                        running: AppState.package-loading || AppState.package-acting || AppState.package-usage-scanning;
+                        spinner-size: 16px;
+                        y: (parent.height - self.height) / 2;
+                    }
                     VerticalLayout {
                         spacing: Theme.spacing-xs;
                         horizontal-stretch: 1;
@@ -1375,6 +1397,12 @@ export component AppWindow inherits Window {
                         Text { text: AppState.package-status; color: Theme.palette.text-secondary; font-size: Theme.font-size-sm; overflow: elide; }
                     }
                     ActionButton { label: AppState.package-loading ? "Loading..." : "Refresh"; icon-glyph: "\u{f021}"; enabled: !AppState.package-loading && !AppState.package-acting; clicked => { AppCallbacks.refresh-packages(); } }
+                }
+
+                // Indeterminate activity strip: always visible feedback that work
+                // is in flight, even when the status line has not changed yet.
+                ActivityBar {
+                    running: AppState.package-loading || AppState.package-acting || AppState.package-usage-scanning;
                 }
 
                 // Manager selector.
@@ -1406,42 +1434,62 @@ export component AppWindow inherits Window {
                     MetricTile { label: AppState.package-supports-keepset ? "Removable (unkept)" : "Selected to remove"; value: AppState.package-removable-count; detail: AppState.package-reclaimable + (AppState.package-supports-keepset ? " · " + AppState.package-kept-dep-count + " kept as deps" : ""); icon-glyph: "\u{f2ed}"; accent-color: Theme.palette.success; ratio: AppState.package-removable-count > 0 ? 1.0 : 0.0; }
                 }
 
-                // Action row.
+                // Action card. The guidance and the live status get the full
+                // panel width, and the buttons sit in their own row underneath:
+                // side by side, three buttons with a fixed minimum width squeezed
+                // the left-hand text until it clipped.
                 Panel {
                     VerticalLayout {
                         padding: Theme.spacing-md;
                         spacing: Theme.spacing-sm;
 
+                        Text {
+                            text: AppState.package-supports-keepset
+                                ? "Uncheck packages you don't want; dependencies still needed by kept packages stay."
+                                : "Uncheck packages to remove them.";
+                            color: Theme.palette.text-secondary;
+                            font-size: Theme.font-size-sm;
+                            wrap: word-wrap;
+                        }
+
+                        if AppState.package-action-status != "": HorizontalLayout {
+                            spacing: Theme.spacing-xs;
+                            Spinner {
+                                running: AppState.package-usage-scanning || AppState.package-acting || AppState.package-loading;
+                                spinner-size: 12px;
+                                y: (parent.height - self.height) / 2;
+                            }
+                            Text {
+                                text: AppState.package-action-status;
+                                color: Theme.palette.text-muted;
+                                font-size: Theme.font-size-xs;
+                                wrap: word-wrap;
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                            }
+                        }
+
+                        Text { text: AppState.package-note; color: Theme.palette.warning; font-size: Theme.font-size-xs; wrap: word-wrap; visible: AppState.package-note != ""; }
+
+                        ActivityBar {
+                            running: AppState.package-acting || AppState.package-loading;
+                        }
+
                         HorizontalLayout {
                             spacing: Theme.spacing-md;
-                            VerticalLayout {
-                                horizontal-stretch: 1;
-                                spacing: Theme.spacing-xs;
-                                Text {
-                                    text: AppState.package-supports-keepset
-                                        ? "Uncheck packages you don't want; dependencies still needed by kept packages stay."
-                                        : "Uncheck packages to remove them.";
-                                    color: Theme.palette.text-secondary;
-                                    font-size: Theme.font-size-sm;
-                                    wrap: word-wrap;
-                                }
-                                if AppState.package-action-status != "": HorizontalLayout {
-                                    spacing: Theme.spacing-xs;
-                                    FaIcon { glyph: "\u{f110}"; icon-color: Theme.palette.accent; icon-size: Theme.font-size-xs; width: 14px; visible: AppState.package-usage-scanning || AppState.package-acting; }
-                                    Text { text: AppState.package-action-status; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; wrap: word-wrap; vertical-alignment: center; horizontal-stretch: 1; }
-                                }
-                                Text { text: AppState.package-note; color: Theme.palette.warning; font-size: Theme.font-size-xs; wrap: word-wrap; visible: AppState.package-note != ""; }
-                            }
+                            alignment: end;
 
                             ActionButton {
-                                label: AppState.package-outdated-count > 0 ? "Update all" : "Up to date";
+                                label: AppState.package-loading
+                                    ? "Checking updates..."
+                                    : (AppState.package-outdated-count > 0 ? "Update all" : "Up to date");
                                 icon-glyph: "\u{f062}";
                                 primary: false;
                                 enabled: AppState.package-outdated-count > 0 && !AppState.package-acting && !AppState.package-loading;
                                 clicked => { AppCallbacks.update-all-packages(); }
                             }
                             ActionButton {
-                                label: "Clean cache";
+                                label: AppState.package-acting ? "Working..." : "Clean cache";
                                 icon-glyph: "\u{f51a}";
                                 primary: false;
                                 enabled: !AppState.package-acting && !AppState.package-loading;
@@ -1501,8 +1549,19 @@ export component AppWindow inherits Window {
                             vertical-stretch: 1;
                             alignment: center;
                             spacing: Theme.spacing-sm;
-                            FaIcon { glyph: AppState.package-loading ? "\u{f110}" : "\u{f1b3}"; icon-color: Theme.palette.text-muted; icon-size: Theme.font-size-xl; }
-                            Text { text: AppState.package-loading ? "Reading inventory..." : (AppState.package-note != "" ? AppState.package-note : "No packages found"); color: Theme.palette.text-secondary; font-size: Theme.font-size-md; font-weight: 600; horizontal-alignment: center; }
+                            Spinner {
+                                running: AppState.package-loading;
+                                spinner-size: 26px;
+                                spinner-color: Theme.palette.text-muted;
+                                visible: AppState.package-loading;
+                            }
+                            FaIcon {
+                                glyph: "\u{f1b3}";
+                                icon-color: Theme.palette.text-muted;
+                                icon-size: Theme.font-size-xl;
+                                visible: !AppState.package-loading;
+                            }
+                            Text { text: AppState.package-loading ? AppState.package-status : (AppState.package-note != "" ? AppState.package-note : "No packages found"); color: Theme.palette.text-secondary; font-size: Theme.font-size-md; font-weight: 600; horizontal-alignment: center; }
                         }
 
                         ScrollView {
@@ -1566,16 +1625,18 @@ export component AppWindow inherits Window {
                         edited => { AppCallbacks.apply-service-filter(); }
                     }
 
-                    // Each label+toggle pair hugs together (alignment: start
-                    // stops the pair from being stretched apart), so a toggle
-                    // can never read as belonging to the neighbouring label.
+                    // Each label+toggle pair is its own 26px row, the exact
+                    // height of the toggle track, so the label and the switch sit
+                    // on one optical line instead of drifting apart.
                     HorizontalLayout {
+                        height: 26px;
                         spacing: Theme.spacing-xs;
                         alignment: start;
                         Text {
                             text: "Startup only";
                             color: Theme.palette.text-secondary;
                             font-size: Theme.font-size-sm;
+                            height: 26px;
                             vertical-alignment: center;
                         }
                         Toggle {
@@ -1585,12 +1646,14 @@ export component AppWindow inherits Window {
                     }
 
                     HorizontalLayout {
+                        height: 26px;
                         spacing: Theme.spacing-xs;
                         alignment: start;
                         Text {
                             text: "Hide protected";
                             color: Theme.palette.text-secondary;
                             font-size: Theme.font-size-sm;
+                            height: 26px;
                             vertical-alignment: center;
                         }
                         Toggle {
@@ -1600,12 +1663,14 @@ export component AppWindow inherits Window {
                     }
 
                     HorizontalLayout {
+                        height: 26px;
                         spacing: Theme.spacing-xs;
                         alignment: start;
                         Text {
                             text: "Running only";
                             color: Theme.palette.text-secondary;
                             font-size: Theme.font-size-sm;
+                            height: 26px;
                             vertical-alignment: center;
                         }
                         Toggle {
@@ -1638,7 +1703,7 @@ export component AppWindow inherits Window {
                                     Text { text: "NAME"; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; font-weight: 700; horizontal-stretch: 1; }
                                     Text { text: "TYPE"; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; font-weight: 700; min-width: 104px; horizontal-alignment: center; }
                                     Text { text: "STATUS"; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; font-weight: 700; min-width: 104px; horizontal-alignment: center; }
-                                    Text { text: "ACTION"; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; font-weight: 700; min-width: 100px; horizontal-alignment: right; }
+                                    Text { text: "ACTION"; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; font-weight: 700; min-width: 168px; horizontal-alignment: right; }
                                 }
 
                                 if AppState.service-count > 0: Rectangle { height: 1px; background: Theme.palette.border-subtle; }
@@ -1681,9 +1746,11 @@ export component AppWindow inherits Window {
                                     orphaned: service.orphaned;
                                     pending-disable-id: AppState.service-pending-disable-id;
                                     pending-remove-id: AppState.service-pending-remove-id;
+                                    pending-delete-id: AppState.service-pending-delete-id;
                                     arm-disable(sid) => {
                                         AppState.service-pending-disable-id = sid;
                                         AppState.service-pending-remove-id = "";
+                                        AppState.service-pending-delete-id = "";
                                     }
                                     confirm-disable(sid) => {
                                         AppCallbacks.disable-service(sid);
@@ -1692,10 +1759,20 @@ export component AppWindow inherits Window {
                                     arm-remove(sid) => {
                                         AppState.service-pending-remove-id = sid;
                                         AppState.service-pending-disable-id = "";
+                                        AppState.service-pending-delete-id = "";
                                     }
                                     confirm-remove(sid) => {
                                         AppCallbacks.remove-service(sid);
                                         AppState.service-pending-remove-id = "";
+                                    }
+                                    arm-delete(sid) => {
+                                        AppState.service-pending-delete-id = sid;
+                                        AppState.service-pending-disable-id = "";
+                                        AppState.service-pending-remove-id = "";
+                                    }
+                                    confirm-delete(sid) => {
+                                        AppCallbacks.delete-service(sid);
+                                        AppState.service-pending-delete-id = "";
                                     }
                                     enable(sid) => { AppCallbacks.enable-service(sid); }
                                 }
@@ -1749,17 +1826,19 @@ export component AppWindow inherits Window {
                             }
 
                             HorizontalLayout {
-                                spacing: Theme.spacing-xs;
+                                height: 26px;
+                                spacing: Theme.spacing-sm;
                                 alignment: start;
+                                Toggle {
+                                    checked <=> AppState.apps-hide-system;
+                                    toggled => { AppCallbacks.apply-app-filter(); }
+                                }
                                 Text {
                                     text: "Hide system apps";
                                     color: Theme.palette.text-secondary;
                                     font-size: Theme.font-size-sm;
+                                    height: 26px;
                                     vertical-alignment: center;
-                                }
-                                Toggle {
-                                    checked <=> AppState.apps-hide-system;
-                                    toggled => { AppCallbacks.apply-app-filter(); }
                                 }
                             }
 
@@ -1793,6 +1872,15 @@ export component AppWindow inherits Window {
                                                     spacing: Theme.spacing-xs;
                                                     alignment: start;
                                                     Text { text: a.name; color: Theme.palette.text-primary; font-size: Theme.font-size-sm; font-weight: 600; overflow: elide; vertical-alignment: center; }
+                                                    // Both pills share the row's
+                                                    // natural height, so they line
+                                                    // up with the app name without
+                                                    // any absolute positioning.
+                                                    if a.app-store: Badge {
+                                                        label: "App Store";
+                                                        badge-color: Theme.palette.info;
+                                                        min-width: 58px;
+                                                    }
                                                     if a.brew: Badge {
                                                         label: "brew";
                                                         badge-color: Theme.palette.warning;
@@ -1855,12 +1943,40 @@ export component AppWindow inherits Window {
                                 HorizontalLayout {
                                     spacing: Theme.spacing-sm;
                                     Text { text: "Uninstall " + AppState.selected-app-name; color: Theme.palette.text-primary; font-size: Theme.font-size-lg; font-weight: 700; horizontal-stretch: 1; overflow: elide; }
-                                    Text { text: AppState.leftover-loading ? "Scanning leftovers..." : AppState.leftover-total + " across " + AppState.leftover-count + " items"; color: Theme.palette.text-secondary; font-size: Theme.font-size-sm; vertical-alignment: center; }
+                                    Spinner {
+                                        running: AppState.leftover-loading || AppState.uninstalling;
+                                        spinner-size: 14px;
+                                        y: (parent.height - self.height) / 2;
+                                    }
+                                    Text {
+                                        text: AppState.uninstalling
+                                            ? "Moving items to the Trash..."
+                                            : (AppState.leftover-loading
+                                                ? "Scanning leftovers..."
+                                                : AppState.leftover-total + " across " + AppState.leftover-count + " items");
+                                        color: Theme.palette.text-secondary;
+                                        font-size: Theme.font-size-sm;
+                                        vertical-alignment: center;
+                                    }
+                                }
+
+                                ActivityBar {
+                                    running: AppState.leftover-loading || AppState.uninstalling;
                                 }
 
                                 Text {
-                                    text: "Review what gets moved to the Trash. Locked items need admin rights: once the app is gone they show up as orphaned on the Services tab and can be removed there.";
+                                    text: "Review what gets moved to the Trash. Items marked with a lock are owned by another account (App Store installs): moving them asks for the administrator password once and they still land in the Trash.";
                                     color: Theme.palette.text-muted;
+                                    font-size: Theme.font-size-xs;
+                                    wrap: word-wrap;
+                                }
+
+                                // Outcome of the last uninstall attempt. Kept in the
+                                // panel (not only in the page header) so the result
+                                // is visible right where the user acted.
+                                if AppState.apps-status != "": Text {
+                                    text: AppState.apps-status;
+                                    color: Theme.palette.text-secondary;
                                     font-size: Theme.font-size-xs;
                                     wrap: word-wrap;
                                 }
@@ -1878,7 +1994,7 @@ export component AppWindow inherits Window {
                                             background: leftover-touch.has-hover ? Theme.palette.surface-elevated : transparent;
 
                                             leftover-touch := TouchArea {
-                                                mouse-cursor: row.admin ? default : pointer;
+                                                mouse-cursor: pointer;
                                                 clicked => { AppCallbacks.toggle-leftover(i); }
                                             }
 
@@ -1891,7 +2007,7 @@ export component AppWindow inherits Window {
                                                     width: 20px;
                                                     Checkbox {
                                                         checked: row.selected;
-                                                        enabled: !row.admin && !AppState.uninstalling;
+                                                        enabled: !AppState.uninstalling;
                                                         y: (parent.height - self.height) / 2;
                                                         toggled => { AppCallbacks.toggle-leftover(i); }
                                                     }
@@ -2517,6 +2633,40 @@ export component AppWindow inherits Window {
                                     label: "ML classification";
                                     description: "Use the on-device model to score cleanup candidates.";
                                     Toggle { checked <=> AppState.setting-ml; }
+                                }
+                            }
+                        }
+
+                        // ── About ───────────────────────────────────────────
+                        Panel {
+                            VerticalLayout {
+                                padding: Theme.spacing-lg;
+                                spacing: Theme.spacing-md;
+
+                                SectionHeader { text: "ABOUT"; }
+
+                                SettingsField {
+                                    label: "Version";
+                                    description: "Cleanton version of this build.";
+                                    Text {
+                                        text: AppState.app-version == "" ? "unknown" : "v" + AppState.app-version;
+                                        color: Theme.palette.text-primary;
+                                        font-size: Theme.font-size-sm;
+                                        font-weight: 600;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                Divider {}
+
+                                SettingsField {
+                                    label: "Engine";
+                                    description: "Recipe-driven scanner with on-device classification.";
+                                    Text {
+                                        text: "local";
+                                        color: Theme.palette.text-secondary;
+                                        font-size: Theme.font-size-sm;
+                                        vertical-alignment: center;
+                                    }
                                 }
                             }
                         }

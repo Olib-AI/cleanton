@@ -1,0 +1,129 @@
+# ============================================================================
+# Agent gate (TEMPORARY — remove before merge)
+# ============================================================================
+# The authoring sandbox has no Rust toolchain and cannot read Actions job logs
+# (only api.github.com is reachable). This workflow:
+#
+#   1. formats the workspace and commits the result back to the branch, so
+#      `cargo fmt --all --check` in ci.yml passes without a local toolchain;
+#   2. captures compiler/clippy/test diagnostics into `.ci/` and commits them back
+#      to the branch, so the sandbox can read them with plain `git pull` (check-run
+#      annotations turned out not to survive the API round trip reliably).
+#
+# It is a development aid only and is deleted once the branch is green.
+
+name: Agent gate
+
+on:
+  push:
+    branches:
+      - "arena/**"
+
+concurrency:
+  group: agent-gate-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: never
+  RUST_BACKTRACE: 1
+
+jobs:
+  fmt-fix:
+    name: Format and commit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Install Rust toolchain (1.99.1)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.99.1"
+          components: rustfmt
+
+      - name: cargo fmt
+        run: cargo fmt --all
+
+      - name: Commit formatting (if any)
+        run: |
+          if git diff --quiet; then
+            echo "already formatted"
+            exit 0
+          fi
+          git config user.name "Agent Gate"
+          git config user.email "agent-gate@users.noreply.github.com"
+          git add -A
+          git commit -m "chore(fmt): cargo fmt [skip ci]"
+          git push origin "HEAD:${{ github.ref_name }}"
+
+  rust-check:
+    name: Clippy and tests (annotated)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgl1-mesa-dev libegl1-mesa-dev libxkbcommon-dev libwayland-dev \
+            libxcb1-dev libx11-dev libxrandr-dev libxi-dev libxcursor-dev \
+            libfontconfig1-dev pkg-config
+
+      - name: Install Rust toolchain (1.99.1)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.99.1"
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Clippy
+        shell: bash
+        continue-on-error: true
+        run: |
+          mkdir -p .ci
+          cargo clippy --workspace --all-targets --all-features --message-format=short -- -D warnings > .ci/clippy.log 2>&1
+          echo "clippy exit=$?" | tee -a .ci/clippy.log
+
+      - name: Tests
+        shell: bash
+        continue-on-error: true
+        run: |
+          mkdir -p .ci
+          cargo test --workspace --all-features --no-fail-fast > .ci/tests.log 2>&1
+          echo "tests exit=$?" | tee -a .ci/tests.log
+
+      - name: Publish diagnostics to the branch
+        shell: bash
+        run: |
+          git config user.name "Agent Gate"
+          git config user.email "agent-gate@users.noreply.github.com"
+          git add -f .ci
+          if git diff --cached --quiet; then
+            echo "no diagnostics to publish"
+            exit 0
+          fi
+          git commit -m "ci: rust diagnostics [skip ci]"
+          for attempt in 1 2 3; do
+            if git push origin "HEAD:${{ github.ref_name }}"; then
+              exit 0
+            fi
+            git pull --rebase origin "${{ github.ref_name }}" || true
+          done
+          exit 1
+
+      - name: Fail when clippy or tests failed
+        shell: bash
+        run: |
+          status=0
+          grep -q "clippy exit=0" .ci/clippy.log || status=1
+          grep -q "tests exit=0" .ci/tests.log || status=1
+          echo "combined status=$status"
+          exit $status
