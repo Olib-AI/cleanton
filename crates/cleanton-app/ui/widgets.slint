@@ -50,27 +50,47 @@ export component Panel inherits Rectangle {
 export component Badge inherits Rectangle {
     in property <string> label;
     in property <brush> badge-color: Theme.palette.accent;
+    // Small pill (table Safety / status columns). A full-size 22px badge in a
+    // narrow table column reads as a coloured block, not a label.
+    in property <bool> compact: false;
 
     // A layout sizes children from their min/max and ignores `height`, so the
     // pill's height is pinned there (Slint rejects `height` next to min/max).
     // Callers centre it vertically with nested layouts, not with `y`.
-    min-height: 22px;
-    max-height: 22px;
-    min-width: 50px;
+    min-height: root.compact ? 18px : 22px;
+    max-height: root.compact ? 18px : 22px;
+    min-width: root.compact ? 0px : 50px;
     border-radius: Theme.radius-sm;
     background: badge-color.with-alpha(0.12);
 
     HorizontalLayout {
         alignment: center;
-        padding-left: Theme.spacing-sm;
-        padding-right: Theme.spacing-sm;
+        padding-left: root.compact ? Theme.spacing-xs : Theme.spacing-sm;
+        padding-right: root.compact ? Theme.spacing-xs : Theme.spacing-sm;
 
         Text {
             text: root.label;
             color: badge-color;
-            font-size: Theme.font-size-xs;
+            font-size: root.compact ? 10px : Theme.font-size-xs;
             font-weight: 600;
             vertical-alignment: center;
+        }
+    }
+}
+
+// Centres a Badge on both axes inside a fixed-width table cell. A bare Badge
+// placed in a Rectangle stretches to fill the cell (the tall coloured pillars
+// seen in the Packages/Results lists); this wrapper lets it hug its label and
+// sit in the middle of the row instead.
+export component CenteredBadge inherits Rectangle {
+    in property <string> label;
+    in property <brush> badge-color: Theme.palette.accent;
+    in property <bool> compact: false;
+    VerticalLayout {
+        alignment: center;
+        HorizontalLayout {
+            alignment: center;
+            Badge { label: root.label; badge-color: root.badge-color; compact: root.compact; }
         }
     }
 }
@@ -115,6 +135,9 @@ export component Spinner inherits Rectangle {
     width: root.spinner-size;
     height: root.spinner-size;
     background: transparent;
+    // Invisible (and taking no visual space in the row) when not running:
+    // a static spinner glyph next to a title otherwise never goes away.
+    visible: root.running;
 
     Timer {
         interval: 90ms;
@@ -548,17 +571,15 @@ export component PlanListRow inherits Rectangle {
             min-width: RowColumns.size-col;
         }
 
-        Rectangle {
+        if root.is-group: CenteredBadge {
             width: RowColumns.safety-col;
-            if root.is-group: Badge {
-                label: root.safety;
-                badge-color: root.safety == "safe" ? Theme.palette.success :
-                             root.safety == "cautious" ? Theme.palette.warning :
-                             Theme.palette.danger;
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2;
-            }
+            label: root.safety;
+            compact: true;
+            badge-color: root.safety == "safe" ? Theme.palette.success :
+                         root.safety == "cautious" ? Theme.palette.warning :
+                         Theme.palette.danger;
         }
+        if !root.is-group: Rectangle { width: RowColumns.safety-col; }
     }
 }
 
@@ -569,7 +590,7 @@ export global RowColumns {
     out property <length> icon-col: 22px;
     out property <length> items-col: 92px;
     out property <length> size-col: 96px;
-    out property <length> safety-col: 104px;
+    out property <length> safety-col: 88px;
 }
 
 // One row in a results/held/suggestions list. Columns are fixed-width and align
@@ -640,12 +661,11 @@ export component FileRow inherits Rectangle {
                 font-weight: 600;
                 overflow: elide;
             }
-            Text {
+            if root.detail != "": Text {
                 text: root.detail;
                 color: Theme.palette.text-muted;
                 font-size: Theme.font-size-xs;
                 overflow: elide;
-                visible: root.detail != "";
             }
         }
 
@@ -668,17 +688,15 @@ export component FileRow inherits Rectangle {
             min-width: RowColumns.size-col;
         }
 
-        Rectangle {
+        if root.show-safety: CenteredBadge {
             width: RowColumns.safety-col;
-            if root.show-safety: Badge {
-                label: root.safety;
-                badge-color: root.safety == "safe" ? Theme.palette.success :
-                             root.safety == "cautious" ? Theme.palette.warning :
-                             Theme.palette.danger;
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2;
-            }
+            label: root.safety;
+            compact: true;
+            badge-color: root.safety == "safe" ? Theme.palette.success :
+                         root.safety == "cautious" ? Theme.palette.warning :
+                         Theme.palette.danger;
         }
+        if !root.show-safety: Rectangle { width: RowColumns.safety-col; }
     }
 }
 
@@ -697,7 +715,8 @@ export component SuggestionListRow inherits Rectangle {
     callback arm-delete();
     callback confirm-delete();
 
-    height: 52px;
+    min-height: 52px;
+    max-height: 52px;
     background: ta.has-hover ? Theme.palette.surface-elevated : transparent;
     border-radius: Theme.radius-sm;
 
@@ -809,7 +828,10 @@ export component PackageListRow inherits Rectangle {
     callback toggle-keep();
     callback update-now();
 
-    height: 54px;
+    // Pin via min/max: a plain `height` is ignored inside a VerticalLayout,
+    // which let rows (and the status pill inside them) stretch unpredictably.
+    min-height: 54px;
+    max-height: 54px;
     background: ta.has-hover ? Theme.palette.surface-elevated : transparent;
     border-radius: Theme.radius-sm;
 
@@ -872,26 +894,13 @@ export component PackageListRow inherits Rectangle {
 
         // Status chip — shown for every row so the keep/remove model is legible:
         // kept (green) / removable (danger) / kept-as-dependency (muted).
-        Rectangle {
+        CenteredBadge {
             width: 116px;
-            if root.state == 0: Badge {
-                label: "keep";
-                badge-color: Theme.palette.success;
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2;
-            }
-            if root.state == 1: Badge {
-                label: "remove";
-                badge-color: Theme.palette.danger;
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2;
-            }
-            if root.state == 2: Badge {
-                label: "needed (dep)";
-                badge-color: Theme.palette.text-muted;
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2;
-            }
+            compact: true;
+            label: root.state == 0 ? "keep" : (root.state == 1 ? "remove" : "needed (dep)");
+            badge-color: root.state == 0 ? Theme.palette.success :
+                         root.state == 1 ? Theme.palette.danger :
+                         Theme.palette.text-muted;
         }
 
         Text {

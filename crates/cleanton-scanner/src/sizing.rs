@@ -76,7 +76,10 @@ fn size_one_target(target: &Path, seen_inodes: &mut HashSet<(u64, u64)>) -> Targ
     let mut file_count = 0_u64;
     let mut unreadable = 0_u64;
 
-    for item in jwalk::WalkDir::new(target).follow_links(false) {
+    for item in jwalk::WalkDir::new(target)
+        .follow_links(false)
+        .parallelism(jwalk::Parallelism::RayonNewPool(4))
+    {
         let Ok(entry) = item else {
             unreadable += 1;
             continue;
@@ -86,8 +89,9 @@ fn size_one_target(target: &Path, seen_inodes: &mut HashSet<(u64, u64)>) -> Targ
             continue;
         }
 
-        let path = entry.path();
-        let Ok(metadata) = std::fs::symlink_metadata(&path) else {
+        // jwalk already stats entries on its worker threads; a second
+        // path-based `symlink_metadata` per file doubled the syscall count.
+        let Ok(metadata) = entry.metadata() else {
             unreadable += 1;
             continue;
         };

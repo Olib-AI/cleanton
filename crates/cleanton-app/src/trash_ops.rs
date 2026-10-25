@@ -34,3 +34,21 @@ pub fn empty_trash() -> Result<(), String> {
         Err(format!("emptying the Trash failed: {detail}"))
     }
 }
+
+/// Whether the user's Trash currently holds anything.
+///
+/// Cheap directory listing of the well-known per-user Trash locations
+/// (macOS `~/.Trash`, Linux XDG `~/.local/share/Trash/files`); used only to
+/// enable/disable the "Empty Trash now" affordance and its label. Any read
+/// error degrades to `false` ("looks empty") rather than enabling a
+/// destructive action on a guess.
+#[must_use]
+pub fn trash_has_items() -> bool {
+    let Some(home) = std::env::var_os("HOME") else {
+        return false;
+    };
+    let home = std::path::PathBuf::from(home);
+    [home.join(".Trash"), home.join(".local/share/Trash/files")]
+        .iter()
+        .any(|dir| std::fs::read_dir(dir).is_ok_and(|mut entries| entries.next().is_some()))
+}
