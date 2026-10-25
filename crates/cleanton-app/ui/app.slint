@@ -2,7 +2,7 @@
 
 import { Theme } from "theme.slint";
 import { Panel, Badge, ProgressBar, MetricTile, ActionButton, SidebarItem, FileRow, PlanListRow, ServiceListRow, SuggestionListRow, PackageListRow, FaIcon, SparkBar, Toggle, Checkbox, RowColumns, Spinner, ActivityBar } from "widgets.slint";
-import { LineEdit, SpinBox, ScrollView } from "std-widgets.slint";
+import { LineEdit, SpinBox, ScrollView, Palette } from "std-widgets.slint";
 
 export struct PlanActionRow {
     name: string,
@@ -311,6 +311,9 @@ export global AppState {
 
     // Empty Trash affordance (Trash is not freed until emptied).
     in-out property <bool> empty-trash-pending: false;
+    // True only when the Trash actually holds items. The "Empty Trash now"
+    // button must stay disabled (and the row must say so) when it is empty.
+    in-out property <bool> trash-has-items: false;
     in-out property <string> trash-status: "Trashed items are not freed until the Trash is emptied.";
 
     in-out property <int> service-count: 0;
@@ -531,7 +534,13 @@ component SectionHeader inherits Text {
 }
 
 export component AppWindow inherits Window {
+    // Std-widgets controls (LineEdit, SpinBox) take their text/selection
+    // colours from Palette, not from Theme: without this they render dark
+    // text on the dark surface and are unreadable in dark mode.
     title: "Cleanton";
+    // (A `Palette.color-scheme: ...` binding is not valid Slint; assign it
+    // in init and whenever the theme switch flips, below.)
+    init => { Palette.color-scheme = Theme.dark-mode ? ColorScheme.dark : ColorScheme.light; }
     min-width: 980px;
     min-height: 660px;
     preferred-width: 1120px;
@@ -632,7 +641,10 @@ export component AppWindow inherits Window {
                         primary: false;
                         min-width: 72px;
                         height: 32px;
-                        clicked => { Theme.dark-mode = !Theme.dark-mode; }
+                        clicked => {
+                            Theme.dark-mode = !Theme.dark-mode;
+                            Palette.color-scheme = Theme.dark-mode ? ColorScheme.dark : ColorScheme.light;
+                        }
                     }
                 }
             }
@@ -960,6 +972,14 @@ export component AppWindow inherits Window {
                             }
                         }
 
+                    }
+                }
+
+                // The Trash affordance lives in its own compact panel: folding it
+                // into the Review card buried it under plan + execution info.
+                Panel {
+                    VerticalLayout {
+                        padding: Theme.spacing-md;
                         HorizontalLayout {
                             spacing: Theme.spacing-md;
                             VerticalLayout {
@@ -970,10 +990,12 @@ export component AppWindow inherits Window {
                             }
 
                             ActionButton {
-                                label: AppState.empty-trash-pending ? "Confirm Empty Trash" : "Empty Trash now";
+                                label: !AppState.trash-has-items && !AppState.empty-trash-pending
+                                    ? "Trash is empty"
+                                    : (AppState.empty-trash-pending ? "Confirm Empty Trash" : "Empty Trash now");
                                 icon-glyph: AppState.empty-trash-pending ? "\u{f00c}" : "\u{f1f8}";
                                 button-color: AppState.empty-trash-pending ? Theme.palette.danger : Theme.palette.warning;
-                                enabled: !AppState.scanning && !AppState.cleaning;
+                                enabled: !AppState.scanning && !AppState.cleaning && (AppState.trash-has-items || AppState.empty-trash-pending);
                                 clicked => {
                                     if AppState.empty-trash-pending {
                                         AppCallbacks.empty-trash();
@@ -1246,6 +1268,8 @@ export component AppWindow inherits Window {
 
                                 Rectangle { height: 1px; background: Theme.palette.border-subtle; }
 
+                                if AppState.duplicate-count > 0: Rectangle { height: Theme.spacing-sm; }
+
                                 if AppState.duplicate-count > 0: Text {
                                     text: "Duplicate files: " + AppState.duplicate-reclaimable + " across " + AppState.duplicate-count + " sets";
                                     color: Theme.palette.text-secondary;
@@ -1267,6 +1291,7 @@ export component AppWindow inherits Window {
                                     }
                                 }
 
+                                if AppState.screenshot-count > 0: Rectangle { height: Theme.spacing-md; }
                                 if AppState.screenshot-count > 0: Text {
                                     text: "Screenshots & recordings: " + AppState.screenshot-reclaimable + " across " + AppState.screenshot-count + " files";
                                     color: Theme.palette.text-secondary;
@@ -1288,6 +1313,7 @@ export component AppWindow inherits Window {
                                     }
                                 }
 
+                                if AppState.installer-count > 0: Rectangle { height: Theme.spacing-md; }
                                 if AppState.installer-count > 0: Text {
                                     text: "Old installers in Downloads: " + AppState.installer-reclaimable + " across " + AppState.installer-count + " files (re-downloadable)";
                                     color: Theme.palette.text-secondary;
@@ -1309,6 +1335,7 @@ export component AppWindow inherits Window {
                                     }
                                 }
 
+                                if AppState.large-item-count > 0: Rectangle { height: Theme.spacing-md; }
                                 if AppState.large-item-count > 0: Text {
                                     text: "Largest files & folders";
                                     color: Theme.palette.text-secondary;
@@ -1385,11 +1412,6 @@ export component AppWindow inherits Window {
 
                 HorizontalLayout {
                     spacing: Theme.spacing-sm;
-                    Spinner {
-                        running: AppState.package-loading || AppState.package-acting || AppState.package-usage-scanning;
-                        spinner-size: 16px;
-                        y: (parent.height - self.height) / 2;
-                    }
                     VerticalLayout {
                         spacing: Theme.spacing-xs;
                         horizontal-stretch: 1;
@@ -1397,6 +1419,13 @@ export component AppWindow inherits Window {
                         Text { text: AppState.package-status; color: Theme.palette.text-secondary; font-size: Theme.font-size-sm; overflow: elide; }
                     }
                     ActionButton { label: AppState.package-loading ? "Loading..." : "Refresh"; icon-glyph: "\u{f021}"; enabled: !AppState.package-loading && !AppState.package-acting; clicked => { AppCallbacks.refresh-packages(); } }
+                    // Activity indicator on the right, next to the action that
+                    // started it; Spinner hides itself when nothing is running.
+                    Spinner {
+                        running: AppState.package-loading || AppState.package-acting || AppState.package-usage-scanning;
+                        spinner-size: 16px;
+                        y: (parent.height - self.height) / 2;
+                    }
                 }
 
                 // Indeterminate activity strip: always visible feedback that work
@@ -1469,7 +1498,7 @@ export component AppWindow inherits Window {
                             }
                         }
 
-                        Text { text: AppState.package-note; color: Theme.palette.warning; font-size: Theme.font-size-xs; wrap: word-wrap; visible: AppState.package-note != ""; }
+                        if AppState.package-note != "": Text { text: AppState.package-note; color: Theme.palette.warning; font-size: Theme.font-size-xs; wrap: word-wrap; }
 
                         ActivityBar {
                             running: AppState.package-acting || AppState.package-loading;

@@ -143,17 +143,18 @@ impl Walk<'_> {
                     {
                         return;
                     }
-                    self.inspect_file(&path);
+                    // DirEntry::metadata reuses the traversal's own stat
+                    // instead of a second path-based stat per file.
+                    if let Ok(metadata) = entry.metadata() {
+                        self.inspect_file(&path, metadata.len());
+                    }
                 }
             }
         }
     }
 
-    fn inspect_file(&mut self, path: &Path) {
-        let Ok(meta) = std::fs::metadata(path) else {
-            return;
-        };
-        if meta.len() > MAX_FILE_SIZE {
+    fn inspect_file(&mut self, path: &Path, len: u64) {
+        if len > MAX_FILE_SIZE {
             return;
         }
         let Ok(bytes) = std::fs::read(path) else {
@@ -165,8 +166,62 @@ impl Walk<'_> {
             .saturating_add(u64::try_from(bytes.len()).unwrap_or(0));
 
         let content = String::from_utf8_lossy(&bytes).to_ascii_lowercase();
+        // Tokenise the file ONCE instead of rescanning the whole content for
+        // every package name (previously O(files x packages x bytes) — with
+        // ~290 installed packages that dominated the Packages tab load).
+        // Tokens keep `-`, `.`, `/`, `@`, `+` so names like `ada-url`,
+        // `@scope/pkg` and `libstdc++` survive as single tokens; `/`-joined
+        // segments are indexed too (`openssl/ssl.h` still finds `openssl`).
+        let mut tokens = std::collections::HashSet::new();
+        let mut linker_names = std::collections::HashSet::new();
+        for token in content.split(|c: char| {
+            !(c.is_alphanumeric() || matches!(c, '_' | '-' | '.' | '/' | '@' | '+'))
+        }) {
+            if token.is_empty() {
+                continue;
+            }
+            tokens.insert(token);
+            for segment in token.split('/') {
+                if !segment.is_empty() {
+                    tokens.insert(segment);
+                }
+            }
+            if let Some(name) = token.strip_prefix("-l")
+                && !name.is_empty()
+            {
+                linker_names.insert(name);
+            }
+        }
+        // `pkg-config <name>` is the one multi-token form worth supporting;
+        // find it with a single scan, not one scan per package name.
+        let mut pkg_config_names = std::collections::HashSet::new();
+        for (start, _) in content.match_indices("pkg-config") {
+            let rest = content.get(start + "pkg-config".len()..).unwrap_or("");
+            let name = rest
+                .trim_start()
+                .split(|c: char| !(c.is_alphanumeric() || matches!(c, '_' | '-' | '.' | '+')))
+                .next()
+                .unwrap_or("");
+            if !name.is_empty() {
+                pkg_config_names.insert(name);
+            }
+        }
+
         for (original, lowered) in self.needles {
-            if file_matches(&content, lowered) {
+            let token_safe = !lowered.is_empty()
+                && lowered
+                    .chars()
+                    .all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '.' | '/' | '@' | '+'));
+            let matched = if token_safe {
+                tokens.contains(lowered.as_str())
+                    || linker_names.contains(lowered.as_str())
+                    || pkg_config_names.contains(lowered.as_str())
+            } else {
+                // Exotic names (spaces, quotes, ...) keep the exact old
+                // whole-word semantics; there are almost none of them.
+                file_matches(&content, lowered)
+            };
+            if matched {
                 let bucket = self.hits.entry(original.clone()).or_default();
                 if bucket.len() < MAX_REFS_PER_NAME {
                     bucket.push(path.to_path_buf());
