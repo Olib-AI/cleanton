@@ -719,6 +719,17 @@ impl PackageReport {
                     format!("{editor} --uninstall-extension {id}")
                 }
             }
+            SecurityTargetKind::RubyGems => {
+                let name = shell_single_quote(&self.name);
+                if reinstall {
+                    format!("gem pristine {name}")
+                } else {
+                    format!("gem uninstall {name}")
+                }
+            }
+            SecurityTargetKind::CargoRegistry | SecurityTargetKind::GoModuleCache => {
+                return None;
+            }
         };
         Some(cmd)
     }
@@ -1454,7 +1465,7 @@ pub fn discover_default_targets() -> Vec<SecurityTarget> {
         );
     }
     for prefix in ["/opt/homebrew/lib/ruby/gems", "/usr/local/lib/ruby/gems"] {
-        for version_dir in subdirs(&PathBuf::from(prefix)) {
+        for version_dir in subdirs(Path::new(prefix)) {
             push_if_dir(
                 &mut targets,
                 SecurityTargetKind::RubyGems,
@@ -1771,13 +1782,14 @@ pub(crate) fn cargo_identity(dir: &Path, fallback: &str) -> (String, Option<Stri
 /// Split a cache entry name into `(name, version)`, e.g. `rack-2.2.8` or
 /// `github.com/foo/bar@v1.2.3`.
 pub(crate) fn split_versioned_dir_name(name: &str) -> Option<(String, String)> {
-    if let Some((package, version)) = name.rsplit_once('@') {
-        if !package.is_empty() && !version.is_empty() {
-            return Some((package.to_owned(), version.to_owned()));
-        }
+    if let Some((package, version)) = name.rsplit_once('@')
+        && !package.is_empty()
+        && !version.is_empty()
+    {
+        return Some((package.to_owned(), version.to_owned()));
     }
     // `name-1.2.3`: split at the last `-` that is followed by a digit.
-    let indices = name
+    let mut indices = name
         .char_indices()
         .filter(|(index, character)| {
             *character == '-'
@@ -1787,7 +1799,7 @@ pub(crate) fn split_versioned_dir_name(name: &str) -> Option<(String, String)> {
                     .is_some_and(|next| next.is_ascii_digit())
         })
         .map(|(index, _)| index);
-    let split = indices.last()?;
+    let split = indices.next_back()?;
     let package = name.get(..split)?;
     let version = name.get(split.saturating_add(1)..)?;
     Some((package.to_owned(), version.to_owned()))
@@ -1836,8 +1848,7 @@ fn enumerate_cargo_packages(target: &SecurityTarget, out: &mut Vec<PackageCandid
 /// Version-only enumeration of the Go module cache (`module@version` dirs,
 /// sometimes nested one level inside a module path).
 fn enumerate_go_packages(target: &SecurityTarget, out: &mut Vec<PackageCandidate>) {
-    let mut candidates = subdirs(&target.root);
-    for dir in &mut candidates {
+    for dir in subdirs(&target.root) {
         if dir.file_name().is_some_and(|name| name == "cache") {
             continue;
         }
@@ -1846,11 +1857,11 @@ fn enumerate_go_packages(target: &SecurityTarget, out: &mut Vec<PackageCandidate
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_default();
         if name.contains('@') {
-            push_go_package(dir, out);
+            push_go_package(&dir, out);
             continue;
         }
         // One nesting level: `github.com/foo/bar@v1.2.3`.
-        for nested in subdirs(dir) {
+        for nested in subdirs(&dir) {
             push_go_package(&nested, out);
         }
     }
@@ -2121,14 +2132,24 @@ fn build_package_report(
                 }),
             }),
     );
+    let verdict = if advisories.is_empty() {
+        report.verdict
+    } else {
+        let from_advisories = advisory_verdict(advisories);
+        if verdict_rank(from_advisories) > verdict_rank(report.verdict) {
+            from_advisories
+        } else {
+            report.verdict
+        }
+    };
     PackageReport {
         name: candidate.name.clone(),
         version: candidate.version.clone(),
         path: candidate.display_path.clone(),
         source: candidate.source,
-        verdict: report.verdict,
+        verdict,
         change: ChangeKind::Uncompared,
-        assessment: assess(ChangeKind::Uncompared, report.verdict, corroborated),
+        assessment: assess(ChangeKind::Uncompared, verdict, corroborated),
         corroborated,
         fingerprint,
         score: advisory_score(advisories).max(report.score),
@@ -2178,6 +2199,7 @@ fn build_advisory_only_report(
 /// never establishes a baseline (a partial package set must not become the
 /// trusted reference).
 #[must_use]
+#[allow(clippy::too_many_lines)]
 pub fn scan_targets_with_options(
     targets: Vec<SecurityTarget>,
     options: &SecurityScanOptions,
@@ -3138,6 +3160,7 @@ module.exports = token;
             display_path: PathBuf::from("/tmp/pkg"),
             scan_path: PathBuf::from("/tmp/pkg"),
             source: SecurityTargetKind::NodeGlobal,
+            ecosystem: Some(Ecosystem::Npm),
         };
         let mut finding = strong_finding(ThreatCategory::SupplyChain, "package.json");
         finding.title = "Token harvest \u{2014} \u{201C}quoted\u{201D}".to_owned();
@@ -3155,7 +3178,7 @@ module.exports = token;
             engine_stats: Vec::new(),
             errors: Vec::new(),
         };
-        let report = build_package_report(&candidate, &av_report, "fp".to_owned());
+        let report = build_package_report(&candidate, &av_report, "fp".to_owned(), &[]);
         let top = report.top_findings.first().expect("one finding retained");
         assert_eq!(top.title, "Token harvest - \"quoted\"");
         assert_eq!(top.description, "reads ~/.npmrc -> exfiltrates... - badly");
@@ -3359,6 +3382,7 @@ module.exports = token;
             display_path: PathBuf::from("/tmp/ext"),
             scan_path: PathBuf::from("/tmp/ext"),
             source: SecurityTargetKind::EditorExtensions,
+            ecosystem: Some(Ecosystem::Npm),
         };
         let av_report = cleanton_antivirus::ScanReport {
             target: "/tmp/ext".to_owned(),
@@ -3375,7 +3399,7 @@ module.exports = token;
             engine_stats: Vec::new(),
             errors: Vec::new(),
         };
-        let report = build_package_report(&candidate, &av_report, "fp".to_owned());
+        let report = build_package_report(&candidate, &av_report, "fp".to_owned(), &[]);
         assert!(
             !report.corroborated,
             "runtime-bundle-only evidence must not corroborate"
@@ -3525,6 +3549,7 @@ module.exports = token;
             display_path: PathBuf::from("/tmp/pkg"),
             scan_path: PathBuf::from("/tmp/pkg"),
             source: SecurityTargetKind::NodeProject,
+            ecosystem: Some(Ecosystem::Npm),
         };
         let av_report = cleanton_antivirus::ScanReport {
             target: "/tmp/pkg".to_owned(),
@@ -3549,7 +3574,7 @@ module.exports = token;
             engine_stats: Vec::new(),
             errors: Vec::new(),
         };
-        let report = build_package_report(&candidate, &av_report, "fp".to_owned());
+        let report = build_package_report(&candidate, &av_report, "fp".to_owned(), &[]);
         // The medium own-code finding outranks both critical benign-context
         // ones for display…
         assert_eq!(report.top_findings[0].title, "own-code capability");

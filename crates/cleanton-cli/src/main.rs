@@ -149,11 +149,11 @@ enum Command {
         /// Base idle interval between checks, in seconds.
         #[arg(long, default_value_t = 30, value_name = "SECONDS")]
         interval: u64,
-        /// Take one pass and exit (for cron, or a launchd StartInterval job).
+        /// Take one pass and exit (for cron, or a launchd `StartInterval` job).
         #[arg(long)]
         once: bool,
         /// Print a launchd agent definition for this watcher and exit (macOS).
-        /// It is printed, never installed: writing to ~/Library/LaunchAgents
+        /// It is printed, never installed: writing to `~/Library/LaunchAgents`
         /// stays the user's decision.
         #[arg(long)]
         print_agent: bool,
@@ -296,7 +296,7 @@ async fn run_app(cli: Cli) -> Result<i32> {
             interval,
             once,
             print_agent,
-        } => run_watch(&cli, interval, once, print_agent),
+        } => Ok(run_watch(&cli, interval, once, print_agent)),
         Command::Interactive => run_interactive(&cli, &config).await,
     }
 }
@@ -702,7 +702,7 @@ async fn run_clean(cli: &Cli, config: &CleantonConfig, dry_run: bool, yes: bool)
 /// exits 0.
 /// The background watcher: a slow, cheap loop that checks packages the moment
 /// they appear.
-fn run_watch(cli: &Cli, interval: u64, once: bool, print_agent: bool) -> Result<i32> {
+fn run_watch(cli: &Cli, interval: u64, once: bool, print_agent: bool) -> i32 {
     use cleanton_engine::background::{PackageWatcher, WatchEvent, WatchOptions};
 
     let options = WatchOptions::with_idle_seconds(interval);
@@ -710,7 +710,7 @@ fn run_watch(cli: &Cli, interval: u64, once: bool, print_agent: bool) -> Result<
 
     if print_agent {
         println!("{}", launch_agent_plist(interval));
-        return Ok(0);
+        return 0;
     }
 
     if !cli.json {
@@ -720,7 +720,7 @@ fn run_watch(cli: &Cli, interval: u64, once: bool, print_agent: bool) -> Result<
                 "No package locations found to watch (no global node_modules, \
                  site-packages, gem tree, Cargo registry, or Go module cache exists)."
             );
-            return Ok(0);
+            return 0;
         }
         println!(
             "Watching {} package location(s); idle interval {}s, backing off to {}s while quiet.",
@@ -762,7 +762,7 @@ fn run_watch(cli: &Cli, interval: u64, once: bool, print_agent: bool) -> Result<
     } else {
         watcher.run(&cancel, &mut emit);
     }
-    Ok(if alerts > 0 { 3 } else { 0 })
+    if alerts > 0 { 3 } else { 0 }
 }
 
 /// One watch event as JSON (the `--json` stream shape).
@@ -847,9 +847,10 @@ fn print_watch_event(event: &cleanton_engine::background::WatchEvent) {
 /// A launchd agent that runs the watcher as a user background job. Printed, not
 /// installed: the plist path and the decision to load it are the user's.
 fn launch_agent_plist(interval: u64) -> String {
-    let binary = std::env::current_exe()
-        .map(|path| path.display().to_string())
-        .unwrap_or_else(|_| "/usr/local/bin/cleanton".to_owned());
+    let binary = std::env::current_exe().map_or_else(
+        |_| "/usr/local/bin/cleanton".to_owned(),
+        |path| path.display().to_string(),
+    );
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
