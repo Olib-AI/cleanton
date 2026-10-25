@@ -847,9 +847,10 @@ fn print_watch_event(event: &cleanton_engine::background::WatchEvent) {
 /// A launchd agent that runs the watcher as a user background job. Printed, not
 /// installed: the plist path and the decision to load it are the user's.
 fn launch_agent_plist(interval: u64) -> String {
-    let binary = std::env::current_exe()
-        .map(|path| path.display().to_string())
-        .unwrap_or_else(|_| "/usr/local/bin/cleanton".to_owned());
+    let binary = std::env::current_exe().map_or_else(
+        |_| "/usr/local/bin/cleanton".to_owned(),
+        |path| path.display().to_string(),
+    );
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
