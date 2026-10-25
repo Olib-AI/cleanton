@@ -984,28 +984,34 @@ export component ServiceListRow inherits Rectangle {
         // hugs its own text (a bare Badge would fill the cell and let a long
         // label like "System agent" spill past the pill). The type cell is wide
         // enough for the longest kind ("System agent").
+        // Each badge cell centres its pill on BOTH axes: a layout never centres
+        // along its main axis unless `alignment` asks for it, and stretching a
+        // 22px pill over a 56px row is exactly what made these badges sit high.
+        // The outer VerticalLayout (alignment: center) gives the inner row its
+        // natural height and centres it; `x`/`y` are ignored on layout children.
         Rectangle {
             width: 104px;
-            HorizontalLayout {
+            VerticalLayout {
                 alignment: center;
-                Badge {
-                    label: root.kind;
-                    badge-color: Theme.palette.info;
-                    // A layout positions a fixed-height child at its top edge, so
-                    // the pill is centred explicitly (this is what made the type
-                    // and status pills sit high against their row).
-                    y: (parent.height - self.height) / 2;
+                HorizontalLayout {
+                    alignment: center;
+                    Badge {
+                        label: root.kind;
+                        badge-color: Theme.palette.info;
+                    }
                 }
             }
         }
         Rectangle {
             width: 104px;
-            HorizontalLayout {
+            VerticalLayout {
                 alignment: center;
-                Badge {
-                    label: root.status;
-                    badge-color: root.running ? Theme.palette.success : Theme.palette.text-muted;
-                    y: (parent.height - self.height) / 2;
+                HorizontalLayout {
+                    alignment: center;
+                    Badge {
+                        label: root.status;
+                        badge-color: root.running ? Theme.palette.success : Theme.palette.text-muted;
+                    }
                 }
             }
         }

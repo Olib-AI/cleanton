@@ -1872,17 +1872,19 @@ export component AppWindow inherits Window {
                                                     spacing: Theme.spacing-xs;
                                                     alignment: start;
                                                     Text { text: a.name; color: Theme.palette.text-primary; font-size: Theme.font-size-sm; font-weight: 600; overflow: elide; vertical-alignment: center; }
+                                                    // Both pills share the row's
+                                                    // natural height, so they line
+                                                    // up with the app name without
+                                                    // any absolute positioning.
                                                     if a.app-store: Badge {
                                                         label: "App Store";
                                                         badge-color: Theme.palette.info;
                                                         min-width: 58px;
-                                                        y: (parent.height - self.height) / 2;
                                                     }
                                                     if a.brew: Badge {
                                                         label: "brew";
                                                         badge-color: Theme.palette.warning;
                                                         min-width: 42px;
-                                                        y: (parent.height - self.height) / 2;
                                                     }
                                                 }
                                                 Text { text: a.version == "" ? a.bundle-id : a.version + " · " + a.bundle-id; color: Theme.palette.text-muted; font-size: Theme.font-size-xs; overflow: elide; }
