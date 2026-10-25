@@ -701,9 +701,8 @@ pub(crate) fn trash_uninstall_paths(
                         ));
                     }
                     None => {
-                        let message = format!(
-                            "could not be moved ({err}); it may need administrator rights"
-                        );
+                        let message =
+                            format!("could not be moved ({err}); it may need administrator rights");
                         let _ = event_tx.try_send(EngineEvent::ActionFailed {
                             action: action.clone(),
                             error: message.clone(),

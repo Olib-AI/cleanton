@@ -604,7 +604,11 @@ fn aggregate_directory_sizes(result: &mut ScanResult) {
         // the parent is itself folded upward.
         let mut order: Vec<usize> = (0..dir_paths.len()).collect();
         order.sort_unstable_by_key(|slot| {
-            std::cmp::Reverse(dir_paths.get(*slot).map_or(0, |path| path.components().count()))
+            std::cmp::Reverse(
+                dir_paths
+                    .get(*slot)
+                    .map_or(0, |path| path.components().count()),
+            )
         });
         for slot in order {
             let Some(path) = dir_paths.get(slot) else {
