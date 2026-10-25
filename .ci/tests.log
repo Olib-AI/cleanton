@@ -40,13 +40,13 @@
    Compiling stable_deref_trait v1.2.1
    Compiling hashbrown v0.17.1
    Compiling fastrand v2.5.0
-   Compiling futures-core v0.3.34
    Compiling serde v1.0.229
+   Compiling futures-core v0.3.34
    Compiling bytes v1.12.1
    Compiling synstructure v0.14.0
    Compiling serde_json v1.0.154
-   Compiling slab v0.4.12
    Compiling adler2 v2.0.1
+   Compiling slab v0.4.12
    Compiling displaydoc v0.2.7
    Compiling crc32fast v1.5.3
    Compiling zerovec-derive v0.11.7
@@ -54,33 +54,33 @@
    Compiling yoke-derive v0.8.4
    Compiling writeable v0.6.4
    Compiling miniz_oxide v0.9.1
-   Compiling libloading v0.8.9
    Compiling zerofrom v0.1.8
+   Compiling libloading v0.8.9
    Compiling zerocopy-derive v0.8.63
    Compiling yoke v0.8.4
-   Compiling flate2 v1.1.10
-   Compiling zerovec v0.11.9
-   Compiling same-file v1.0.6
-   Compiling rand_core v0.10.1
    Compiling iana-time-zone v0.1.65
+   Compiling zerovec v0.11.9
+   Compiling flate2 v1.1.10
+   Compiling rand_core v0.10.1
+   Compiling same-file v1.0.6
    Compiling walkdir v2.5.0
    Compiling chrono v0.4.45
    Compiling unicode-normalization v0.1.26
    Compiling mio v1.2.4
    Compiling futures-io v0.3.34
    Compiling tinystr v0.8.5
-   Compiling getrandom v0.4.3
    Compiling zerocopy v0.8.63
+   Compiling getrandom v0.4.3
    Compiling litemap v0.8.3
    Compiling potential_utf v0.1.6
-   Compiling zerotrie v0.2.5
    Compiling icu_locale_core v2.4.0
+   Compiling zerotrie v0.2.5
    Compiling dlib v0.5.3
    Compiling base64 v0.22.1
    Compiling itertools v0.14.0
    Compiling memmap2 v0.9.12
-   Compiling anyhow v1.0.104
    Compiling icu_provider v2.4.0
+   Compiling anyhow v1.0.104
    Compiling crossbeam-epoch v0.9.21
    Compiling tokio-macros v2.7.2
    Compiling socket2 v0.6.5
@@ -97,13 +97,13 @@
    Compiling winnow v0.7.15
    Compiling humansize v2.1.3
    Compiling utf8_iter v1.0.4
-   Compiling icu_collections v2.4.0
    Compiling rayon v1.12.0
+   Compiling icu_collections v2.4.0
    Compiling hashbrown v0.16.1
-   Compiling scopeguard v1.2.0
    Compiling hex v0.4.3
-   Compiling futures-channel v0.3.34
    Compiling toml v0.9.12+spec-1.1.0
+   Compiling scopeguard v1.2.0
+   Compiling futures-channel v0.3.34
    Compiling half v2.7.1
    Compiling cleanton-common v0.3.0 (/home/runner/work/cleanton/cleanton/crates/cleanton-common)
    Compiling nom v8.0.0
@@ -111,8 +111,8 @@
    Compiling futures-macro v0.3.34
    Compiling futures-task v0.3.34
    Compiling fnv v1.0.7
-   Compiling icu_properties_data v2.4.0
    Compiling futures-util v0.3.34
+   Compiling icu_properties_data v2.4.0
    Compiling icu_normalizer_data v2.4.0
    Compiling proc-macro-crate v3.5.0
    Compiling bytemuck v1.25.2
@@ -121,14 +121,14 @@
    Compiling lazy_static v1.5.1
    Compiling regex-syntax v0.8.11
    Compiling icu_properties v2.4.0
-   Compiling unicode-segmentation v1.13.3
-   Compiling regex-automata v0.4.18
    Compiling unicode-width v0.2.2
+   Compiling regex-automata v0.4.18
+   Compiling unicode-segmentation v1.13.3
    Compiling tempfile v3.27.0
    Compiling core_maths v0.1.1
    Compiling float-cmp v0.9.0
-   Compiling ttf-parser v0.25.1
    Compiling strict-num v0.1.1
+   Compiling ttf-parser v0.25.1
    Compiling xattr v1.6.1
    Compiling async-trait v0.1.92
    Compiling filetime v0.2.29
@@ -155,14 +155,14 @@
    Compiling parking v2.2.1
    Compiling rawpointer v0.2.1
    Compiling minijinja v2.24.0
-   Compiling matrixmultiply v0.3.11
    Compiling derive_more-impl v2.1.1
    Compiling zvariant_derive v5.15.1
+   Compiling matrixmultiply v0.3.11
    Compiling wayland-sys v0.31.11
    Compiling miniz_oxide v0.8.9
    Compiling itertools v0.15.0
-   Compiling endi v1.1.1
    Compiling cpufeatures v0.2.17
+   Compiling endi v1.1.1
    Compiling ndarray v0.17.2
    Compiling http-body v1.1.0
    Compiling strum_macros v0.28.0
@@ -170,6 +170,8 @@
    Compiling tokio-util v0.7.20
    Compiling string-interner v0.20.0
    Compiling fdeflate v0.3.7
+   Compiling inventory v0.3.25
+   Compiling downcast-rs v1.2.1
    Compiling scoped-tls v1.0.1
    Compiling downcast-rs v2.0.2
    Compiling arrayvec v0.7.8
@@ -177,20 +179,18 @@
    Compiling dyn-hash v1.0.0
    Compiling strength_reduce v0.2.4
    Compiling dyn-clone v1.0.20
-   Compiling inventory v0.3.25
-   Compiling downcast-rs v1.2.1
    Compiling transpose v0.2.3
    Compiling wayland-backend v0.3.17
    Compiling httparse v1.10.1
-   Compiling tract-data v0.23.9
    Compiling typeid v1.0.3
    Compiling sha2 v0.10.9
    Compiling tract-linalg v0.23.9
+   Compiling tract-data v0.23.9
    Compiling primal-check v0.3.4
    Compiling icu_normalizer v2.4.0
    Compiling rapidhash v4.5.1
-   Compiling pin-project-internal v1.1.13
    Compiling derive-new v0.7.0
+   Compiling pin-project-internal v1.1.13
    Compiling quick-xml v0.41.0
    Compiling byteorder v1.5.0
    Compiling tower-service v0.3.3
@@ -203,20 +203,20 @@
    Compiling erased-serde v0.4.10
    Compiling getrandom v0.3.4
    Compiling prost-derive v0.14.4
-   Compiling bumpalo v3.20.3
+   Compiling unicode-properties v0.1.4
    Compiling zune-core v0.5.3
    Compiling glob v0.3.4
    Compiling unicode-script v0.5.8
    Compiling anymap3 v1.1.0
    Compiling unicode-ccc v0.4.0
    Compiling quick-error v2.0.1
+   Compiling bumpalo v3.20.3
    Compiling try-lock v0.2.5
    Compiling unicode-bidi-mirroring v0.4.0
-   Compiling unicode-properties v0.1.4
-   Compiling tract-core v0.23.9
    Compiling want v0.3.2
-   Compiling zune-jpeg v0.5.15
+   Compiling tract-core v0.23.9
    Compiling zopfli v0.8.4
+   Compiling zune-jpeg v0.5.15
    Compiling prost v0.14.4
    Compiling wayland-client v0.31.15
    Compiling icu_locale_fallback_data v2.4.0
@@ -238,8 +238,8 @@
    Compiling httpdate v1.0.3
    Compiling time v0.3.55
    Compiling rustls-pki-types v1.15.1
-   Compiling zvariant v5.15.1
    Compiling hyper v1.12.0
+   Compiling zvariant v5.15.1
    Compiling event-listener-strategy v0.5.4
    Compiling icu_locale_fallback v2.4.0
    Compiling zip v2.6.1
@@ -267,8 +267,8 @@
    Compiling gif v0.14.2
    Compiling globset v0.4.20
    Compiling crossbeam v0.8.5
-   Compiling hyper-util v0.1.21
    Compiling zbus_names v4.3.5
+   Compiling hyper-util v0.1.21
    Compiling image-webp v0.2.4
    Compiling http-body-util v0.1.5
    Compiling num-bigint v0.4.8
@@ -284,19 +284,19 @@
    Compiling ignore v0.4.33
    Compiling icu_decimal_data v2.4.0
    Compiling rand v0.10.3
-   Compiling tract-nnef v0.23.9
    Compiling cleanton-antivirus v0.3.0 (/home/runner/work/cleanton/cleanton/crates/cleanton-antivirus)
    Compiling idna_adapter v1.2.2
    Compiling form_urlencoded v1.2.2
+   Compiling tract-nnef v0.23.9
    Compiling getopts v0.2.24
+   Compiling mime v0.3.17
    Compiling pulldown-cmark-escape v0.11.0
    Compiling subtle v2.6.1
    Compiling async-task v4.7.1
    Compiling unicase v2.10.0
-   Compiling mime v0.3.17
+   Compiling rustls v0.23.46
    Compiling axum-core v0.5.6
    Compiling tract-extra v0.23.9
-   Compiling rustls v0.23.46
    Compiling idna v1.1.0
    Compiling rand_distr v0.6.0
    Compiling async-io v2.6.0
@@ -304,10 +304,10 @@
    Compiling async-channel v2.5.0
    Compiling strum v0.28.0
    Compiling uuid v1.29.0
-   Compiling matchit v0.8.4
    Compiling float-ord v0.3.2
-   Compiling axum v0.8.9
+   Compiling matchit v0.8.4
    Compiling tract-transformers v0.23.9
+   Compiling axum v0.8.9
    Compiling async-signal v0.2.14
    Compiling tract-onnx-opl v0.23.9
    Compiling url v2.5.8
@@ -365,15 +365,15 @@
    Compiling cleanton-recipes v0.3.0 (/home/runner/work/cleanton/cleanton/crates/cleanton-recipes)
    Compiling num-iter v0.1.46
    Compiling async-stream-impl v0.3.6
+   Compiling xcursor v0.3.11
    Compiling cursor-icon v1.2.0
    Compiling openssl-probe v0.2.1
    Compiling xkeysym v0.2.1
    Compiling unicode-linebreak v0.1.5
-   Compiling xcursor v0.3.11
-   Compiling wayland-cursor v0.31.14
    Compiling gl_generator v0.14.0
    Compiling rustls-native-certs v0.8.5
    Compiling wayland-csd-frame v0.3.0
+   Compiling wayland-cursor v0.31.14
    Compiling async-stream v0.3.6
    Compiling usvg v0.47.0
    Compiling num v0.4.3
@@ -402,9 +402,9 @@
    Compiling zbus-lockstep v0.5.2
    Compiling resvg v0.47.0
    Compiling fontique v0.10.0
-   Compiling bollard v0.20.2
    Compiling skrifa v0.42.1
    Compiling pulldown-cmark v0.13.5
+   Compiling bollard v0.20.2
    Compiling font-types v0.12.7
    Compiling gethostname v1.1.0
    Compiling arg_enum_proc_macro v0.3.4
@@ -425,10 +425,10 @@
    Compiling phf_shared v0.13.1
    Compiling maybe-rayon v0.1.1
    Compiling num-derive v0.4.2
-   Compiling simd_helpers v0.1.0
-   Compiling pulp v0.22.3
    Compiling x11rb v0.13.2
+   Compiling simd_helpers v0.1.0
    Compiling rav1e v0.8.1
+   Compiling pulp v0.22.3
    Compiling phf_generator v0.13.1
    Compiling darling_macro v0.24.1
    Compiling skrifa v0.44.0
@@ -437,8 +437,8 @@
    Compiling atspi-common v0.13.0
    Compiling calloop-wayland-source v0.3.0
    Compiling x11-dl v2.21.0
-   Compiling icu_segmenter_data v2.4.0
    Compiling cleanton-engine v0.3.0 (/home/runner/work/cleanton/cleanton/crates/cleanton-engine)
+   Compiling icu_segmenter_data v2.4.0
    Compiling loop9 v0.1.5
    Compiling owned_ttf_parser v0.25.1
    Compiling snafu-derive v0.8.9
@@ -448,9 +448,9 @@
    Compiling const-field-offset-macro v0.2.1
    Compiling raw-window-handle v0.6.2
    Compiling ab_glyph_rasterizer v0.1.10
-   Compiling const-field-offset v0.2.1
    Compiling tiff v0.11.3
    Compiling ab_glyph v0.2.32
+   Compiling const-field-offset v0.2.1
    Compiling exr v1.74.2
    Compiling snafu v0.8.9
    Compiling compact_str v0.9.1
@@ -462,10 +462,10 @@
    Compiling darling v0.24.1
    Compiling phf_macros v0.13.1
    Compiling harfrust v0.8.4
-   Compiling glutin_glx_sys v0.6.1
    Compiling glutin_egl_sys v0.7.1
-   Compiling darling_core v0.20.11
+   Compiling glutin_glx_sys v0.6.1
    Compiling accesskit v0.24.1
+   Compiling darling_core v0.20.11
    Compiling calloop v0.14.5
    Compiling qoi v0.4.1
    Compiling unicode-truncate v2.0.1
@@ -477,25 +477,12 @@
    Compiling vtable-macro v0.4.0
    Compiling derive_utils v0.16.0
    Compiling task-local v0.1.1
-   Compiling indoc v2.0.8
-   Compiling signal-hook v0.3.18
-   Compiling natord v1.0.9
-   Compiling i-slint-compiler v1.17.1
-   Compiling smithay-client-toolkit v0.20.0
-   Compiling linked-hash-map v0.5.6
-   Compiling countme v3.0.1
-   Compiling anstyle v1.0.14
-   Compiling rustc-hash v1.1.0
-   Compiling text-size v1.1.1
-   Compiling hashbrown v0.14.5
    Compiling annotate-snippets v0.12.17
-   Compiling linked_hash_set v0.1.6
+   Compiling auto_enums v0.8.10
    Compiling vtable v0.4.0
+   Compiling rspolib v0.1.2
    Compiling instability v0.3.14
    Compiling i-slint-core-macros v1.17.1
-   Compiling rowan v0.16.1
-   Compiling rspolib v0.1.2
-   Compiling auto_enums v0.8.10
    Compiling ksni v0.3.7
    Compiling ratatui-core v0.1.2
    Compiling num_enum v0.7.6
@@ -504,7 +491,6 @@
    Compiling phf v0.13.1
    Compiling darling_macro v0.20.11
    Compiling calloop-wayland-source v0.4.1
-   Compiling winit v0.30.13
    Compiling accesskit_consumer v0.38.0
    Compiling sctk-adwaita v0.10.1
    Compiling lyon_extra v1.1.0
@@ -517,51 +503,48 @@
    Compiling wayland-protocols-misc v0.3.12
    Compiling wayland-protocols-plasma v0.3.12
    Compiling cleanton-services v0.3.0 (/home/runner/work/cleanton/cleanton/crates/cleanton-services)
-   Compiling glutin v0.32.3
    Compiling clru v0.6.3
-   Compiling tiny-xlib v0.2.5
    Compiling dpi v0.1.2
-   Compiling by_address v1.2.1
    Compiling pin-weak v1.1.0
-   Compiling typed-index-collections v3.5.0
-   Compiling pin-utils v0.1.1
    Compiling sys-locale v0.3.2
-   Compiling smol_str v0.3.7
    Compiling smol_str v0.2.2
+   Compiling i-slint-compiler v1.17.1
    Compiling i-slint-core v1.17.1
-   Compiling spin_on v0.1.1
+   Compiling winit v0.30.13
+   Compiling smithay-client-toolkit v0.20.0
    Compiling atspi v0.29.0
    Compiling accesskit_atspi_common v0.19.1
    Compiling darling v0.20.11
-   Compiling glutin-winit v0.5.0
+   Compiling signal-hook v0.3.18
    Compiling cleanton-packages v0.3.0 (/home/runner/work/cleanton/cleanton/crates/cleanton-packages)
    Compiling line-clipping v0.3.8
    Compiling ctor v0.10.1
-   Compiling litrs v1.0.1
    Compiling glow v0.17.0
-   Compiling document-features v0.2.12
    Compiling femtovg v0.25.1
+   Compiling tiny-xlib v0.2.5
    Compiling ratatui-widgets v0.3.2
    Compiling signal-hook-mio v0.2.5
    Compiling derive_builder_core v0.20.2
+   Compiling glutin v0.32.3
    Compiling accesskit_unix v0.22.1
    Compiling smithay-clipboard v0.7.3
    Compiling x11-clipboard v0.9.3
-   Compiling i-slint-backend-winit v1.17.1
    Compiling futures-executor v0.3.34
    Compiling integer-sqrt v0.1.5
-   Compiling i-slint-renderer-software v1.17.1
    Compiling futures v0.3.34
+   Compiling i-slint-renderer-software v1.17.1
    Compiling accesskit_winit v0.33.2
    Compiling copypasta v0.10.2
+   Compiling glutin-winit v0.5.0
    Compiling derive_builder_macro v0.20.2
    Compiling crossterm v0.29.0
-   Compiling i-slint-renderer-femtovg v1.17.1
    Compiling softbuffer v0.4.8
+   Compiling i-slint-renderer-femtovg v1.17.1
    Compiling i-slint-backend-selector v1.17.1
    Compiling webbrowser v1.2.5
    Compiling option-ext v0.2.0
    Compiling scoped-tls-hkt v0.1.5
+   Compiling i-slint-backend-winit v1.17.1
    Compiling dirs-sys v0.5.0
    Compiling ratatui-crossterm v0.1.2
    Compiling derive_builder v0.20.2
@@ -574,47 +557,48 @@
    Compiling nu-ansi-term v0.50.3
    Compiling utf8parse v0.2.2
    Compiling font8x8 v0.3.1
-   Compiling tracing-subscriber v0.3.23
    Compiling tui-big-text v0.8.10
+   Compiling tracing-subscriber v0.3.23
    Compiling anstyle-parse v1.0.0
    Compiling ratatui v0.30.2
    Compiling directories v6.0.0
    Compiling colorchoice v1.0.5
+   Compiling anstyle v1.0.14
    Compiling anstyle-query v1.1.5
    Compiling is_terminal_polyfill v1.70.2
    Compiling anstream v1.0.0
    Compiling clap_lex v1.1.1
-   Compiling clap_builder v4.6.7
-   Compiling cleanton-app v0.3.0 (/home/runner/work/cleanton/cleanton/crates/cleanton-app)
    Compiling slint-macros v1.17.1
+   Compiling cleanton-app v0.3.0 (/home/runner/work/cleanton/cleanton/crates/cleanton-app)
+   Compiling clap_builder v4.6.7
    Compiling slint v1.17.1
    Compiling cleanton-ui v0.3.0 (/home/runner/work/cleanton/cleanton/crates/cleanton-ui)
    Compiling clap_derive v4.6.7
    Compiling clap v4.6.7
    Compiling cleanton-cli v0.3.0 (/home/runner/work/cleanton/cleanton/crates/cleanton-cli)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 4m 49s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3m 48s
      Running unittests src/lib.rs (target/debug/deps/cleanton_antivirus-54b49ce105e6564b)
 
 running 541 tests
 test engine::tests::empty_file_is_textual ... ok
-test engine::tests::is_binary_control_excludes_whitespace ... ok
 test engine::tests::dense_binary_is_non_textual ... ok
-test engine::tests::plain_text_is_textual ... ok
+test engine::tests::is_binary_control_excludes_whitespace ... ok
 test engine::tests::utf8_high_bytes_stay_textual ... ok
 test engine::tests::script_with_lone_nul_stays_textual ... ok
+test engine::tests::plain_text_is_textual ... ok
 test engines::binary_indicators::tests::benign_json_not_flagged ... ok
 test engines::binary_indicators::tests::benign_js_file_not_flagged ... ok
 test engines::binary_indicators::tests::embedded_elf_in_json_file_flagged ... ok
 test engines::binary_indicators::tests::embedded_mz_in_js_file_flagged ... ok
 test engines::binary_indicators::tests::empty_file_not_flagged ... ok
 test engines::binary_indicators::tests::elf_without_suspicious_strings_minimal_findings ... ok
-test engines::binary_indicators::tests::engine_name_consistent_in_findings ... ok
 test engines::binary_indicators::tests::elf_with_win_apis_flagged ... ok
+test engines::binary_indicators::tests::engine_name_consistent_in_findings ... ok
 test engines::binary_indicators::tests::elf_with_reverse_shell_triad_flagged ... ok
-test engines::binary_indicators::tests::native_binary_in_npm_package_flagged ... ok
-test engines::binary_indicators::tests::pe_with_loadlib_getproc_flagged ... ok
-test engines::binary_indicators::tests::plain_text_file_not_flagged ... ok
 test engines::binary_indicators::tests::finding_evidence_truncated_to_160 ... ok
+test engines::binary_indicators::tests::pe_with_loadlib_getproc_flagged ... ok
+test engines::binary_indicators::tests::native_binary_in_npm_package_flagged ... ok
+test engines::binary_indicators::tests::plain_text_file_not_flagged ... ok
 test engines::binary_indicators::tests::packer_upx_flagged ... ok
 test engines::binary_indicators::tests::shellcode_pattern_in_binary ... ok
 test engines::binary_indicators::tests::text_file_with_word_mz_not_flagged ... ok
@@ -628,11 +612,11 @@ test engines::entropy::tests::does_not_flag_normal_javascript ... ok
 test engines::entropy::tests::does_not_flag_tiny_file ... ok
 test engines::entropy::tests::engine_name_is_entropy ... ok
 test engines::entropy::tests::entropy_all_same_byte_is_zero ... ok
-test engines::entropy::tests::does_not_flag_wasm ... ok
 test engines::entropy::tests::entropy_ascii_text_is_moderate ... ok
+test engines::entropy::tests::does_not_flag_wasm ... ok
 test engines::entropy::tests::entropy_empty_is_zero ... ok
-test engines::entropy::tests::evidence_is_truncated ... ok
 test engines::entropy::tests::entropy_uniform_bytes_is_eight ... ok
+test engines::entropy::tests::evidence_is_truncated ... ok
 test engines::entropy::tests::peak_window_returns_highest_entropy_region ... ok
 test engines::hashdb::tests::benign_empty_file_not_flagged ... ok
 test engines::hashdb::tests::benign_binary_not_flagged ... ok
@@ -649,9 +633,9 @@ test engines::hashdb::tests::eicar_detected_by_sha256_hash ... ok
 test engines::hashdb::tests::eicar_detected_by_string ... ok
 test engines::hashdb::tests::eicar_detected_by_string_with_crlf_suffix ... ok
 test engines::hashdb::tests::eicar_not_double_reported_when_sha256_and_string_both_match ... ok
-test engines::hashdb::tests::extra_db_loaded_without_label ... ok
 test engines::hashdb::tests::extra_db_loaded_and_matched ... ok
 test engines::hashdb::tests::finding_fields_are_correct ... ok
+test engines::hashdb::tests::extra_db_loaded_without_label ... ok
 test engines::hashdb::tests::hdb_01_shai_hulud_v1_bundle_js_flagged_critical ... ok
 test engines::hashdb::tests::hdb_02_shai_hulud_20_setup_bun_js_flagged_critical ... ok
 test engines::hashdb::tests::hdb_03_bun_environment_v1_flagged_critical ... ok
@@ -679,44 +663,44 @@ test engines::ioc::tests::all_findings_have_engine_ioc ... ok
 test engines::ioc::tests::clipboard_hijack_pattern_is_critical ... ok
 test engines::ioc::tests::engine_name_is_ioc ... ok
 test engines::ioc::tests::dedup_same_ioc_emitted_once ... ok
-test engines::ioc::tests::env_enumeration_elevates_url_severity ... ok
 test engines::ioc::tests::eth_address_is_crypto_stealer ... ok
-test engines::ioc::tests::discordapp_webhook_variant_detected ... ok
-test engines::ioc::tests::eth_zero_address_not_flagged ... ok
 test engines::ioc::tests::discord_webhook_is_high_exfiltration ... ok
-test engines::ioc::tests::fp2_liberapay_url_not_flagged ... ok
+test engines::ioc::tests::env_enumeration_elevates_url_severity ... ok
+test engines::ioc::tests::eth_zero_address_not_flagged ... ok
 test engines::ioc::tests::exfil_to_confusion_host_produces_finding ... ok
+test engines::ioc::tests::fp2_liberapay_url_not_flagged ... ok
 test engines::ioc::tests::fp2_opencollective_url_not_flagged ... ok
-test engines::ioc::tests::fp2_patreon_url_not_flagged ... ok
+test engines::ioc::tests::discordapp_webhook_variant_detected ... ok
 test engines::ioc::tests::fp2_sponsors_github_url_not_flagged ... ok
+test engines::ioc::tests::fp2_patreon_url_not_flagged ... ok
+test engines::ioc::tests::fp6_env_enumeration_still_elevates ... ok
 test engines::ioc::tests::fp6_json_stringify_process_env_elevates ... ok
 test engines::ioc::tests::fp6_object_values_process_env_elevates ... ok
 test engines::ioc::tests::fp6_plain_env_read_does_not_elevate_suspicious_server_url ... ok
 test engines::ioc::tests::gap_c_pyperclip_copy_alone_no_wallet_no_finding ... ok
-test engines::ioc::tests::fp6_env_enumeration_still_elevates ... ok
-test engines::ioc::tests::github_url_not_high ... ok
 test engines::ioc::tests::fp6_plain_sdk_env_read_no_exfil_elevation ... ok
+test engines::ioc::tests::github_url_not_high ... ok
 test engines::ioc::tests::interactsh_oast_detected ... ok
 test engines::ioc::tests::ioc01_ic0_app_variant_detected ... ok
 test engines::ioc::tests::evidence_is_truncated ... ok
 test engines::ioc::tests::gap_c_pyperclip_paste_with_wallet_detected ... ok
 test engines::ioc::tests::ioc01_icp_canister_endpoint_detected ... ok
+test engines::ioc::tests::ioc02_worm_webhook_uuid_detected ... ok
 test engines::ioc::tests::ioc03_sandworm_domains_detected ... ok
 test engines::ioc::tests::ioc02_ectoplasm_webhook_uuid_detected ... ok
-test engines::ioc::tests::ioc05_mailtrap_smtp_detected ... ok
 test engines::ioc::tests::ioc04_canisterworm_domains_detected ... ok
-test engines::ioc::tests::ioc02_worm_webhook_uuid_detected ... ok
+test engines::ioc::tests::ioc05_mailtrap_smtp_detected ... ok
 test engines::ioc::tests::ioc06_bunnycdn_exfil_detected ... ok
+test engines::ioc::tests::ioc08_lazarus_fake_telemetry_detected ... ok
 test engines::ioc::tests::ioc08_lazarus_beavertail_ip_detected ... ok
 test engines::ioc::tests::ioc07_scavenger_rat_c2_detected ... ok
-test engines::ioc::tests::ioc08_lazarus_fake_telemetry_detected ... ok
 test engines::ioc::tests::ioc10_node_ipc_dns_domain_detected ... ok
 test engines::ioc::tests::ioc09_covert_pixel_exfil_detected ... ok
-test engines::ioc::tests::ioc05_hardcoded_telegram_token_detected ... ok
 test engines::ioc::tests::ioc10_node_ipc_hmac_key_detected ... ok
-test engines::ioc::tests::line_of_helper_correct ... ok
-test engines::ioc::tests::link_local_ip_not_flagged ... ok
 test engines::ioc::tests::ioc11_canistersprawl_secondary_exfil_detected ... ok
+test engines::ioc::tests::line_of_helper_correct ... ok
+test engines::ioc::tests::ioc05_hardcoded_telegram_token_detected ... ok
+test engines::ioc::tests::link_local_ip_not_flagged ... ok
 test engines::ioc::tests::ioc11_canistersprawl_canister_url_detected ... ok
 test engines::ioc::tests::ngrok_endpoint_detected ... ok
 test engines::ioc::tests::ioc12_eth_contract_c2_detected ... ok
@@ -724,9 +708,9 @@ test engines::ioc::tests::npm_registry_url_not_high ... ok
 test engines::ioc::tests::nul_byte_does_not_evade_ioc_scan ... ok
 test engines::ioc::tests::pastebin_raw_is_exfil ... ok
 test engines::ioc::tests::private_ip_not_flagged ... ok
-test engines::ioc::tests::max_findings_per_file_respected ... ok
-test engines::ioc::tests::public_ip_in_regular_file_is_medium ... ok
 test engines::ioc::tests::public_ip_in_install_script_is_high ... ok
+test engines::ioc::tests::public_ip_in_regular_file_is_medium ... ok
+test engines::ioc::tests::max_findings_per_file_respected ... ok
 test engines::ioc::tests::suspicious_tld_domain_flagged ... ok
 test engines::ioc::tests::tron_address_detected ... ok
 test engines::ioc::tests::trusted_domain_as_prefix_of_attacker_host_not_benign ... ok
@@ -741,23 +725,23 @@ test engines::mcp_descriptor::tests::config_patch_detected ... ok
 test engines::mcp_descriptor::tests::debug_mode_activation_detected ... ok
 test engines::mcp_descriptor::tests::do_not_tell_user_detected ... ok
 test engines::mcp_descriptor::tests::exec_approvals_false_detected ... ok
-test engines::mcp_descriptor::tests::delete_file_is_clean ... ok
 test engines::mcp_descriptor::tests::fake_system_delimiter_detected ... ok
+test engines::mcp_descriptor::tests::delete_file_is_clean ... ok
 test engines::mcp_descriptor::tests::find_mixed_script_homoglyph_unit ... ok
 test engines::mcp_descriptor::tests::fetch_url_is_clean ... ok
 test engines::mcp_descriptor::tests::fn10_css_display_none_detected ... ok
 test engines::mcp_descriptor::tests::fn10_visibility_hidden_detected ... ok
 test engines::mcp_descriptor::tests::fn1_act_as_unrestricted_detected ... ok
-test engines::mcp_descriptor::tests::fn1_disregard_following_instructions_detected ... ok
 test engines::mcp_descriptor::tests::fn1_from_now_on_directive_detected ... ok
+test engines::mcp_descriptor::tests::fn1_disregard_following_instructions_detected ... ok
 test engines::mcp_descriptor::tests::fn1_never_tell_user_detected ... ok
 test engines::mcp_descriptor::tests::fn2_forward_secrets_to_url_detected ... ok
 test engines::mcp_descriptor::tests::fn2_dump_env_vars_to_url_detected ... ok
 test engines::mcp_descriptor::tests::fn2_leak_session_token_detected ... ok
 test engines::mcp_descriptor::tests::fn2_relay_credentials_to_url_detected ... ok
 test engines::mcp_descriptor::tests::fn3_aws_credentials_path_detected ... ok
-test engines::mcp_descriptor::tests::fn3_etc_passwd_detected ... ok
 test engines::mcp_descriptor::tests::fn3_env_var_substitution_detected ... ok
+test engines::mcp_descriptor::tests::fn3_etc_passwd_detected ... ok
 test engines::mcp_descriptor::tests::fn3_ssh_key_path_detected ... ok
 test engines::mcp_descriptor::tests::fn4_bcc_attacker_detected ... ok
 test engines::mcp_descriptor::tests::fn4_this_tool_augments_detected ... ok
@@ -766,8 +750,8 @@ test engines::mcp_descriptor::tests::fn5_greek_o_in_ignore_detected ... ok
 test engines::mcp_descriptor::tests::fn5_pure_cyrillic_prose_not_flagged ... ok
 test engines::mcp_descriptor::tests::fn4_when_this_tool_is_invoked_detected ... ok
 test engines::mcp_descriptor::tests::fn6_base64_encoded_attack_payload_detected ... ok
-test engines::mcp_descriptor::tests::fn6_high_entropy_blob_emits_low_confidence_finding ... ok
 test engines::mcp_descriptor::tests::fn7_auto_approve_detected ... ok
+test engines::mcp_descriptor::tests::fn6_high_entropy_blob_emits_low_confidence_finding ... ok
 test engines::mcp_descriptor::tests::fn7_does_not_require_approval_detected ... ok
 test engines::mcp_descriptor::tests::fn7_exec_approvals_underscore_detected ... ok
 test engines::mcp_descriptor::tests::fn7_skip_approval_step_detected ... ok
@@ -785,19 +769,19 @@ test engines::mcp_descriptor::tests::fp3_enable_confirmation_prompts_is_clean ..
 test engines::mcp_descriptor::tests::fp2_pagination_cursor_as_query_param_is_clean ... ok
 test engines::mcp_descriptor::tests::fp4_dotenv_loader_is_clean ... ok
 test engines::mcp_descriptor::tests::fp3_set_confirmation_true_is_clean ... ok
-test engines::mcp_descriptor::tests::fp4_settings_json_reader_is_clean ... ok
 test engines::mcp_descriptor::tests::fp5_write_to_agents_md_alone_is_clean ... ok
+test engines::mcp_descriptor::tests::fp4_settings_json_reader_is_clean ... ok
 test engines::mcp_descriptor::tests::fp5_write_to_memory_md_alone_is_clean ... ok
 test engines::mcp_descriptor::tests::fp6_webpack_hook_enable_is_clean ... ok
 test engines::mcp_descriptor::tests::fp6_git_hook_enable_is_clean ... ok
-test engines::mcp_descriptor::tests::fp8_directive_in_ci_error_is_clean ... ok
 test engines::mcp_descriptor::tests::fp7_before_you_run_prerequisite_is_not_standalone_finding ... ok
+test engines::mcp_descriptor::tests::fp8_directive_in_ci_error_is_clean ... ok
 test engines::mcp_descriptor::tests::fp9_you_are_now_logged_in_is_clean ... ok
-test engines::mcp_descriptor::tests::fp9_your_new_role_editor_is_clean ... ok
 test engines::mcp_descriptor::tests::list_files_is_clean ... ok
+test engines::mcp_descriptor::tests::fp9_your_new_role_editor_is_clean ... ok
 test engines::mcp_descriptor::tests::new_instructions_for_agent_detected ... ok
-test engines::mcp_descriptor::tests::override_instructions_detected ... ok
 test engines::mcp_descriptor::tests::output_injection_in_text_file_detected ... ok
+test engines::mcp_descriptor::tests::override_instructions_detected ... ok
 test engines::mcp_descriptor::tests::override_plus_config_disable_triggers_combo ... ok
 test engines::mcp_descriptor::tests::override_plus_exfil_triggers_combo ... ok
 test engines::mcp_descriptor::tests::run_sql_is_clean ... ok
@@ -1134,11 +1118,11 @@ test scoring::tests::single_high_high_not_forced ... ok
 test scoring::tests::single_medium_high_confidence_is_suspicious ... ok
 test scoring::tests::single_medium_low_confidence_may_be_clean ... ok
 test scoring::tests::two_independent_critical_high_exceed_malicious_threshold ... ok
-test engines::ioc::tests::oversized_pad_before_payload_ioc_detected_in_tail ... ok
 test engines::ioc::tests::oversized_benign_file_no_findings ... ok
+test engines::ioc::tests::oversized_pad_before_payload_ioc_detected_in_tail ... ok
 test engines::script_behavior::tests::test_oversized_pad_before_payload_detected_in_tail ... ok
 
-test result: ok. 541 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.00s
+test result: ok. 541 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 12.73s
 
      Running tests/adversarial_supply_chain.rs (target/debug/deps/adversarial_supply_chain-338bdbbc04829251)
 
@@ -1150,8 +1134,8 @@ test scenario2_twostep_eval_buffer_b64_flagged ... ok
 test scenario3_typosquat_chalk2_flagged ... ok
 test scenario3_typosquat_lodash_cyrillic_homoglyph_flagged ... ok
 test scenario3_typosquat_lodahs_flagged ... ok
-test scenario3_typosquat_node_react_flagged ... ok
 test scenario4_dep_confusion_dep_internal_scope_in_dependencies ... ok
+test scenario3_typosquat_node_react_flagged ... ok
 test scenario4_dep_confusion_zero_version ... ok
 test scenario4_dep_confusion_internal_scope_public_pkg ... ok
 test scenario5_native_elf_in_npm_package_flagged ... ok
@@ -1166,7 +1150,7 @@ test scenario7_clipboardy_wallet_btc_address_ioc_flagged ... ok
 test scenario5_native_binary_npm_package_full_stack_malicious ... ok
 test scenario1_postinstall_lifecycle_hook_flagged ... ok
 
-test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.42s
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
 
      Running tests/fp_review.rs (target/debug/deps/fp_review-0e0b07712630d773)
 
@@ -1176,14 +1160,14 @@ test fp_s1_package_json_build_test_prepare ... ok
 test fp_s3_native_node_addon_documented ... ok
 test fp_s10_husky_and_node_gyp_build_hooks ... ok
 test fp_s11_my_the_name_prefixes ... ok
-test fp_s5_dotenv_process_env_legitimate ... ok
-test fp_s6_fetch_plus_process_env_api_client ... ok
 test fp_s7_prebuilt_native_addon_bcrypt_shape ... ok
-test fp_s9_funding_urls_only ... ok
+test fp_s6_fetch_plus_process_env_api_client ... ok
+test fp_s5_dotenv_process_env_legitimate ... ok
 test fp_s8_twelve_factor_app_process_env_own_api ... ok
 test fp_s4_config_heavy_many_urls ... ok
+test fp_s9_funding_urls_only ... ok
 
-test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.82s
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.65s
 
      Running tests/hardening_regression.rs (target/debug/deps/hardening_regression-b0a3a0d73cb80ac6)
 
@@ -1194,23 +1178,23 @@ test engines_handle_empty_file_no_panic ... ok
 test engines_handle_single_byte_file_no_panic ... ok
 test many_files_no_panic ... ok
 test huge_hook_body_no_timeout ... ok
-test redos_detached_spawn_nearmiss_no_timeout ... ok
+test redos_buf_b64_eval_nearmiss_no_timeout ... ok
 test redos_download_exec_js_bounded_gap_does_match ... ok
 test redos_download_exec_js_bounded_gap_no_match ... ok
-test redos_buf_b64_eval_nearmiss_no_timeout ... ok
-test redos_maintainer_enum_nearmiss_no_timeout ... ok
-test worm15_mcp_injection_detected ... ok
+test redos_detached_spawn_nearmiss_no_timeout ... ok
 test sb01_auth_token_in_comment_no_panic ... ok
+test worm15_mcp_injection_detected ... ok
 test worm15_mcp_near_miss_no_false_positive ... ok
+test redos_maintainer_enum_nearmiss_no_timeout ... ok
 test worm_combo_publish_harvest_detected_within_cap ... ok
-test ioc_engine_8mib_cap_no_panic_late_match ... ok
+test worm_combo_harvest_publish_across_cap_no_panic ... ok
 test ioc_engine_8mib_cap_finds_early_match ... ok
 test worm_engine_skips_file_over_max_file_size ... ok
-test worm_combo_harvest_publish_across_cap_no_panic ... ok
+test ioc_engine_8mib_cap_no_panic_late_match ... ok
 test worm_engine_8mib_cap_no_panic_on_oversized_file ... ok
 test worm_engine_8mib_cap_still_finds_early_match ... ok
 
-test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.89s
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.16s
 
      Running tests/integration.rs (target/debug/deps/integration-869a7e79fd603d36)
 
@@ -1220,45 +1204,45 @@ test gzip_bomb_rejected_during_streaming ... ok
 test eicar_string_is_malicious ... ok
 test benign_business_files_are_clean ... ok
 test benign_npm_package_is_clean ... ok
-test scan_bytes_tgz_obfuscated_install_is_at_least_suspicious ... ok
-test zip_falsified_zero_size_bomb_rejected ... ok
-test malicious_npm_package_is_malicious ... ok
 test typosquat_expres_is_suspicious ... ok
+test zip_falsified_zero_size_bomb_rejected ... ok
+test scan_bytes_tgz_obfuscated_install_is_at_least_suspicious ... ok
+test malicious_npm_package_is_malicious ... ok
 test large_text_file_scan_completes_without_oom ... ok
 
-test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 38.78s
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 37.74s
 
      Running tests/mcp_descriptor.rs (target/debug/deps/mcp_descriptor-921d5e8761c4e15d)
 
 running 6 tests
 test approval_disable_directive_is_high ... ok
-test poisoned_schema_override_plus_exfil_is_malicious ... ok
 test benign_schema_with_normal_tools_is_clean ... ok
+test poisoned_schema_override_plus_exfil_is_malicious ... ok
 test sig2_injection_in_output_text_is_flagged ... ok
 test single_marker_rug_pull_is_suspicious ... ok
 test zero_width_smuggling_is_flagged ... ok
 
-test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.46s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.36s
 
      Running tests/worm_campaigns.rs (target/debug/deps/worm_campaigns-9ee117df29d48e41)
 
 running 6 tests
 test wc4_shai_hulud_v2_preinstall_bun_env_is_malicious ... ok
-test wc3_sandworm_mode_mcp_injection_is_malicious ... ok
 test wc1_shai_hulud_harvest_republish_is_malicious ... ok
+test wc3_sandworm_mode_mcp_injection_is_malicious ... ok
 test wc2_canisterworm_mem_scrape_imds_is_malicious ... ok
 test wc6_sandworm_mode_git_template_persistence_is_malicious ... ok
 test wc5_canisterworm_findnpmtokens_icp_c2_is_malicious ... ok
 
-test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.80s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.63s
 
      Running unittests src/main.rs (target/debug/deps/cleanton_app-78c038ff3c26bfdc)
 
 running 4 tests
+test fda::tests::bundle_detection_matches_app_layout ... ok
+test fda::tests::status_and_context_tokens_are_stable ... ok
 test fda::tests::guidance_is_context_specific ... ok
 test fda::tests::probe_never_panics ... ok
-test fda::tests::status_and_context_tokens_are_stable ... ok
-test fda::tests::bundle_detection_matches_app_layout ... ok
 
 test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
@@ -1273,13 +1257,13 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 
 running 8 tests
 test fda::tests::bundle_detection_matches_app_layout ... ok
-test fda::tests::guidance_is_context_specific ... ok
 test fda::tests::probe_never_panics ... ok
+test fda::tests::guidance_is_context_specific ... ok
 test fda::tests::status_and_context_tokens_are_stable ... ok
 test tests::analyzed_json_surfaces_ml_annotations_and_held ... ok
-test tests::scan_options_apply_explicit_cli_overrides ... ok
-test tests::scan_options_preserve_config_defaults_without_flags ... ok
 test tests::config_path_subcommand_parses_with_global_json ... ok
+test tests::scan_options_preserve_config_defaults_without_flags ... ok
+test tests::scan_options_apply_explicit_cli_overrides ... ok
 
 test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
@@ -1289,19 +1273,19 @@ running 35 tests
 test config::tests::missing_config_loads_defaults ... ok
 test config::tests::partial_config_merges_with_defaults ... ok
 test config::tests::invalid_config_is_an_error ... ok
-test paths::tests::augmented_path_prepends_common_tool_dirs ... ok
 test paths::tests::augmented_path_has_no_duplicate_entries ... ok
+test paths::tests::augmented_path_prepends_common_tool_dirs ... ok
 test paths::tests::boundary_check_does_not_use_string_prefix ... ok
 test config::tests::save_then_load_round_trips ... ok
-test paths::tests::comparison_candidates_include_canonical_parent_for_missing_leaf ... ok
 test config::tests::save_overwrites_existing_atomically ... ok
 test paths::tests::comparison_falls_back_to_case_insensitive_for_unknown_volume_paths ... ok
+test paths::tests::comparison_candidates_include_canonical_parent_for_missing_leaf ... ok
+test paths::tests::case_folded_alias_canonicalizes_like_lowercase_alias ... ok
 test paths::tests::firmlink_aliases_compare_equal ... ok
 test paths::tests::firmlink_canonical_is_boundary_aware_and_idempotent ... ok
-test paths::tests::case_folded_alias_canonicalizes_like_lowercase_alias ... ok
+test paths::tests::firmlink_table_entries_are_distinct_and_canonical ... ok
 test paths::tests::comparison_uses_detected_case_behavior_for_existing_volume ... ok
 test paths::tests::firmlink_canonical_rewrites_each_alias ... ok
-test paths::tests::firmlink_table_entries_are_distinct_and_canonical ... ok
 test safety::tests::configured_only_keeps_the_users_paths_and_drops_the_defaults ... ok
 test safety::tests::case_and_unicode_are_normalized ... ok
 test safety::tests::boundary_checks_reject_lookalikes ... ok
@@ -1309,20 +1293,20 @@ test safety::tests::dot_and_trailing_slash_normalization_cannot_bypass ... ok
 test safety::tests::case_variations_of_system_roots_are_protected ... ok
 test safety::tests::firmlink_forms_are_protected_both_directions ... ok
 test safety::tests::hardcoded_paths_are_protected ... ok
-test safety::tests::lookalike_paths_are_not_falsely_protected ... ok
 test safety::tests::firmlink_equivalence_resolves_for_user_configured_roots ... ok
-test types::tests::grouped_aggregates_sorts_and_labels ... ok
 test safety::tests::symlink_alias_to_protected_path_is_protected ... ok
+test types::tests::grouped_aggregates_sorts_and_labels ... ok
+test safety::tests::lookalike_paths_are_not_falsely_protected ... ok
 test types::tests::grouped_falls_back_to_recipe_id_when_reason_empty ... ok
 test types::tests::strip_ml_badge_removes_trailing_badge ... ok
 test usage_history::tests::append_persists_and_round_trips ... ok
 test usage_history::tests::corrupt_file_is_treated_as_empty ... ok
-test safety::tests::user_configured_paths_are_protected ... ok
 test usage_history::tests::load_missing_file_is_empty ... ok
+test safety::tests::user_configured_paths_are_protected ... ok
 test safety::tests::unicode_nfc_and_nfd_forms_are_equivalent_both_directions ... ok
 test usage_history::tests::append_enforces_max_samples_window ... ok
 
-test result: ok. 35 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.34s
+test result: ok. 35 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.29s
 
      Running tests/protected_paths_corpus.rs (target/debug/deps/protected_paths_corpus-c3ffb6117081261f)
 
@@ -1331,16 +1315,16 @@ test case_variant_of_user_configured_root_is_protected ... ok
 test system_roots_and_equivalent_spellings_are_always_protected ... ok
 test lookalike_paths_are_not_falsely_protected ... ok
 test firmlink_var_target_is_caught_by_private_var_protection ... ok
-test user_scoped_protected_paths_resolve_through_home ... ok
 test unicode_nfc_and_nfd_forms_cannot_bypass_protection ... ok
+test user_scoped_protected_paths_resolve_through_home ... ok
 
 test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
      Running unittests src/lib.rs (target/debug/deps/cleanton_engine-7f8168af91f5db1a)
 
 running 152 tests
-test advisories::tests::malformed_json_is_ignored_rather_than_fatal ... ok
 test advisories::tests::open_ended_range_never_expires ... ok
+test advisories::tests::malformed_json_is_ignored_rather_than_fatal ... ok
 test advisories::tests::range_matching_is_half_open ... ok
 test advisories::tests::osv_array_shape_is_accepted ... ok
 test advisories::tests::remediation_names_the_first_fixed_version ... ok
@@ -1354,8 +1338,8 @@ test analyzer::tests::ml_is_advisory_and_never_removes_recipe_candidates ... ok
 test background::tests::backoff_reaches_the_ceiling_and_burst_resets_it ... ok
 test background::tests::identity_is_read_from_the_manifest_not_the_directory_name ... ok
 test background::tests::idle_tick_reports_quiet_and_does_no_work ... ok
-test analyzer::tests::suppression_does_not_block_an_unrelated_recipe ... ok
 test analyzer::tests::dir_glob_recipe_plans_the_folder_not_its_files ... ok
+test analyzer::tests::suppression_does_not_block_an_unrelated_recipe ... ok
 test docker::tests::analyze_returns_empty_when_no_runtime_candidates ... ok
 test docker::tests::discovered_socket_endpoints_keep_existing_candidates_in_order ... ok
 test docker::tests::docker_host_takes_precedence_over_socket_discovery ... ok
@@ -1402,21 +1386,21 @@ test orphans::tests::does_not_flag_protected_paths ... ok
 test orphans::tests::does_not_flag_too_recent_entries ... ok
 test orphans::tests::flags_orphan_application_support_for_uninstalled_bundle_id ... ok
 test orphans::tests::floor_recipe_rejects_sensitive_basenames ... ok
-test executor::tests::test_log_rotation_count ... ok
 test orphans::tests::plain_folder_names_are_never_flagged ... ok
 test planner::tests::planner_filters_unexecutable_targets ... ok
 test planner::tests::planner_keeps_parent_action_over_descendants ... ok
+test executor::tests::test_log_rotation_count ... ok
 test security::tests::antivirus_finding_text_is_sanitized_for_display ... ok
 test security::tests::assessment_policy_matrix ... ok
 test security::tests::benign_context_paths_are_recognized ... ok
 test security::tests::cancellation_marks_report_incomplete ... ok
 test security::tests::cancelled_run_does_not_establish_baseline ... ok
-test security::tests::advisory_hit_is_reported_for_a_known_vulnerable_version ... ok
-test security::tests::corroboration_needs_two_categories_or_known_malware ... ok
-test security::tests::clean_tree_reports_no_threats_and_exit_zero ... ok
 test background::tests::newly_installed_vulnerable_package_is_reported_immediately ... ok
-test background::tests::install_hooks_are_reported_for_new_packages ... ok
+test security::tests::corroboration_needs_two_categories_or_known_malware ... ok
+test security::tests::advisory_hit_is_reported_for_a_known_vulnerable_version ... ok
+test security::tests::clean_tree_reports_no_threats_and_exit_zero ... ok
 test security::tests::first_run_with_capability_packages_is_calm ... ok
+test background::tests::install_hooks_are_reported_for_new_packages ... ok
 test security::tests::first_run_with_worm_alerts_only_the_worm ... ok
 test security::tests::identical_resolved_paths_scan_once ... ok
 test security::tests::flagged_packages_sort_worst_first ... ok
@@ -1427,16 +1411,16 @@ test security::tests::progress_reports_reach_total ... ok
 test security::tests::project_discovery_finds_node_modules_and_site_packages ... ok
 test security::tests::python_site_packages_enumerates_dirs_and_modules_with_versions ... ok
 test security::tests::recommended_actions_are_manager_specific_and_safe ... ok
-test security::tests::new_packages_are_surfaced ... ok
 test security::tests::include_unchanged_lists_but_never_alerts ... ok
+test security::tests::new_packages_are_surfaced ... ok
 test security::tests::new_uncorroborated_package_is_notice ... ok
 test security::tests::runtime_bundle_multi_category_stays_notice ... ok
 test security::tests::red_presentation_requires_tamper_or_corroboration ... ok
 test security::tests::scoped_packages_enumerate_and_manifests_parse ... ok
 test security::tests::shared_copy_helpers_are_stable ... ok
 test security::tests::top_findings_prefer_non_benign_context_evidence ... ok
-test security::tests::reestablish_baseline_trusts_current_state ... ok
 test security::tests::same_version_content_change_is_elevated ... ok
+test security::tests::reestablish_baseline_trusts_current_state ... ok
 test security::tests::review_updates_baseline_and_silences_package ... ok
 test security::tests::updated_multi_category_worm_is_alert ... ok
 test security::tests::updated_benign_context_evidence_stays_notice ... ok
@@ -1444,6 +1428,7 @@ test security_baseline::tests::baseline_round_trips_and_tolerates_corruption ...
 test security_baseline::tests::fingerprint_changes_when_install_script_changes ... ok
 test security_baseline::tests::fingerprint_covers_single_file_packages ... ok
 test security_baseline::tests::fingerprint_ignores_nested_node_modules_and_pycache ... ok
+test security::tests::updated_single_capability_is_notice ... ok
 test security_baseline::tests::fingerprint_is_stable_for_identical_trees ... ok
 test security_baseline::tests::identity_keys_distinguish_sources ... ok
 test security_baseline::tests::newer_schema_is_treated_as_absent ... ok
@@ -1458,9 +1443,9 @@ test snapshots::tests::invalid_dates_are_refused_without_spawning_tmutil ... ok
 test snapshots::tests::rejects_identifiers_without_a_strict_date ... ok
 test snapshots::tests::snapshot_date_shape_is_strict ... ok
 test suggestions::tests::clean_repo_with_remote_is_redownloadable ... ok
-test suggestions::tests::dirty_repo_with_remote_is_annotated_for_review ... ok
 test suggestions::tests::du_failure_keeps_floor_and_marks_repo_note_approx ... ok
 test suggestions::tests::du_failure_marks_plain_folder_note_approx ... ok
+test suggestions::tests::dirty_repo_with_remote_is_annotated_for_review ... ok
 test suggestions::tests::du_size_overrides_scan_derived_floor ... ok
 test suggestions::tests::duplicates_are_found_outside_the_six_user_data_roots ... ok
 test suggestions::tests::files_in_skipped_components_are_not_candidates ... ok
@@ -1468,8 +1453,9 @@ test suggestions::tests::files_inside_a_photo_library_bundle_are_not_candidates 
 test suggestions::tests::identical_files_form_a_single_duplicate_set ... ok
 test suggestions::tests::installers_in_downloads_are_detected ... ok
 test suggestions::tests::large_file_and_large_folder_are_detected ... ok
-test suggestions::tests::outside_user_data_root_is_not_a_candidate ... ok
+test security::tests::version_bump_with_change_is_updated ... ok
 test suggestions::tests::parse_du_kib_reads_leading_integer_in_kib ... ok
+test suggestions::tests::outside_user_data_root_is_not_a_candidate ... ok
 test suggestions::tests::repo_below_large_repo_min_is_not_probed ... ok
 test suggestions::tests::repo_inside_build_cache_component_is_not_reported ... ok
 test suggestions::tests::repo_with_unverifiable_status_is_still_suggested ... ok
@@ -1480,71 +1466,69 @@ test suggestions::tests::summarize_remote_handles_https_scp_and_googlesource ...
 test suggestions::tests::version_manager_home_is_never_suggested ... ok
 test uninstall::tests::apple_bundles_are_marked_protected ... ok
 test uninstall::tests::cask_token_matches_app_by_slug ... ok
-test uninstall::tests::discovers_home_dotfolders_and_xdg_dirs ... ok
-test security::tests::version_bump_with_change_is_updated ... ok
 test uninstall::tests::installed_inventory_reads_bundle_metadata ... ok
-test uninstall::tests::leftovers_found_for_a_removed_bundle_without_the_app ... ok
+test uninstall::tests::discovers_home_dotfolders_and_xdg_dirs ... ok
 test uninstall::tests::protected_apps_yield_no_plan ... ok
-test uninstall::tests::discovers_leftovers_across_the_user_library ... ok
-test uninstall::tests::slug_keyed_home_folder_is_found_for_multiword_app ... ok
-test uninstall::tests::unrelated_entries_are_never_matched ... ok
-test uninstall::tests::watcher_reports_only_apps_removed_after_seeding ... ok
-test security::tests::updated_single_capability_is_notice ... ok
 test security::tests::trust_all_flagged_silences_every_surfaced_package ... ok
+test uninstall::tests::leftovers_found_for_a_removed_bundle_without_the_app ... ok
+test uninstall::tests::unrelated_entries_are_never_matched ... ok
+test uninstall::tests::slug_keyed_home_folder_is_found_for_multiword_app ... ok
+test uninstall::tests::watcher_reports_only_apps_removed_after_seeding ... ok
+test uninstall::tests::discovers_leftovers_across_the_user_library ... ok
 
-test result: ok. 152 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.96s
+test result: ok. 152 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.85s
 
      Running tests/executor_refusal.rs (target/debug/deps/executor_refusal-d695664a62fd2a89)
 
 running 6 tests
-test plan_older_than_staleness_window_is_refused_entirely ... ok
-test stale_logical_size_is_refused ... ok
 test stale_inode_is_refused ... ok
 test incomplete_scan_plan_is_refused_entirely ... ok
-test symlink_swapped_for_planned_target_is_refused ... ok
+test plan_older_than_staleness_window_is_refused_entirely ... ok
+test stale_logical_size_is_refused ... ok
 test stale_modified_time_is_refused ... ok
+test symlink_swapped_for_planned_target_is_refused ... ok
 
-test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.39s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.37s
 
      Running tests/ml_safety_e2e.rs (target/debug/deps/ml_safety_e2e-86d808b1e3e83143)
 
 running 1 test
 test ml_pipeline_never_plans_a_protected_or_sensitive_target ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.18s
 
      Running tests/orphan_invariants.rs (target/debug/deps/orphan_invariants-f0f402d7d0536362)
 
 running 1 test
 test every_surfaced_orphan_obeys_the_safety_contract ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
 
      Running unittests src/lib.rs (target/debug/deps/cleanton_ml-8c002586319dea60)
 
 running 23 tests
 test features::tests::all_digit_tokens_are_dropped_from_name_hash ... ok
 test features::tests::depth_is_absolute_not_scan_relative ... ok
-test features::tests::component_sets_match_sidecar ... ok
 test features::tests::dir_vocab_matches_sidecar ... ok
-test features::tests::feature_vector_deserializes_only_at_exact_length ... ok
+test features::tests::component_sets_match_sidecar ... ok
+test features::tests::extension_vocab_matches_sidecar ... ok
+test features::tests::extension_classes_match_sidecar ... ok
 test features::tests::fnv1a32_reference_values ... ok
+test features::tests::feature_vector_deserializes_only_at_exact_length ... ok
 test features::tests::macos_library_signals_fire_for_files_via_parent ... ok
 test features::tests::name_hash_buckets_depend_only_on_the_basename ... ok
-test features::tests::extension_classes_match_sidecar ... ok
-test features::tests::extension_vocab_matches_sidecar ... ok
 test features::tests::self_check_vector_matches_python_reference ... ok
 test features::tests::unknown_blob_extracts_conservative_zero_signals ... ok
-test features::tests::user_data_and_system_root_use_full_path_components ... ok
+test features::tests::feature_names_match_sidecar ... ok
 test tests::classification_does_not_use_path_or_extension_heuristics ... ok
 test tests::classification_types_remain_serializable ... ok
+test features::tests::user_data_and_system_root_use_full_path_components ... ok
 test tests::disabled_config_does_not_require_a_model_path ... ok
 test tests::disabled_engine_fails_closed_for_classification ... ok
-test tests::extracts_the_documented_v2_feature_vector_shape ... ok
 test tests::enabled_config_validates_model_path ... ok
 test tests::remote_model_paths_are_rejected ... ok
+test tests::extracts_the_documented_v2_feature_vector_shape ... ok
 test tests::local_model_file_constructs_but_inference_is_unavailable ... ok
-test features::tests::feature_names_match_sidecar ... ok
 test features::tests::schema_hash_matches_stored_and_recomputed ... ok
 
 test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
@@ -1553,14 +1537,14 @@ test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fin
 
 running 7 tests
 test embedded_engine_keeps_a_credential_file ... ok
-test embedded_engine_runs_real_inference ... ok
 test credential_document_and_source_vectors_are_never_classified_clean ... ok
 test feature_vector_roundtrips_through_classify_features ... ok
+test embedded_engine_runs_real_inference ... ok
 test classify_features_is_deterministic ... ok
-test rust_tract_matches_python_onnx_labels_and_confidence ... ok
 test rust_tract_matches_python_onnx_logits_and_argmax ... ok
+test rust_tract_matches_python_onnx_labels_and_confidence ... ok
 
-test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
 
      Running unittests src/lib.rs (target/debug/deps/cleanton_packages-b9453390200b3163)
 
@@ -1568,21 +1552,21 @@ running 19 tests
 test managers::homebrew::tests::cask_uninstall_includes_the_cask_flag ... ok
 test managers::homebrew::tests::formula_uninstall_omits_the_cask_flag ... ok
 test managers::macports::tests::parses_installed_lines ... ok
+test managers::macports::tests::parses_outdated_lines ... ok
 test managers::tests::parses_brew_cleanup_notice ... ok
 test managers::tests::parses_size_tokens ... ok
 test managers::tests::truncates_on_char_boundary ... ok
-test managers::macports::tests::parses_outdated_lines ... ok
 test plan::tests::chain_keep_root_keeps_all ... ok
 test plan::tests::cycle_is_handled ... ok
 test plan::tests::diamond_empty_keep_order_is_safe ... ok
 test plan::tests::diamond_keep_root_keeps_all ... ok
 test plan::tests::empty_keep_makes_leaves_removable ... ok
-test plan::tests::non_homebrew_degenerates_to_alpha ... ok
-test usage::tests::file_cap_short_circuits ... ok
 test usage::tests::linker_and_pkgconfig_forms ... ok
 test usage::tests::missing_root_is_silent ... ok
+test plan::tests::non_homebrew_degenerates_to_alpha ... ok
 test usage::tests::word_boundaries ... ok
 test usage::tests::scans_manifests_and_source ... ok
+test usage::tests::file_cap_short_circuits ... ok
 test usage::tests::zero_budget_short_circuits ... ok
 
 test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
@@ -1591,18 +1575,18 @@ test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fin
 
 running 40 tests
 test matcher::tests::file_extension_matchers_only_match_files ... ok
-test matcher::tests::file_name_matchers_only_match_files ... ok
 test matcher::tests::any_of_alternatives_still_respect_safety_floors ... ok
-test matcher::tests::min_age_days_accepts_old_entries ... ok
 test matcher::tests::any_of_alternatives_match_when_primary_does_not ... ok
+test matcher::tests::min_age_days_accepts_old_entries ... ok
 test matcher::tests::min_age_days_rejects_recent_entries ... ok
 test matcher::tests::parent_markers_are_checked_against_direct_parent ... ok
 test matcher::tests::parent_must_contain_any_accepts_any_single_marker ... ok
+test matcher::tests::file_name_matchers_only_match_files ... ok
 test matcher::tests::path_glob_semantics_match_absolute_paths_and_span_separators ... ok
 test matcher::tests::self_must_contain_never_matches_files ... ok
-test matcher::tests::self_must_contain_with_path_glob_never_matches_files ... ok
 test matcher::tests::min_age_days_directory_uses_newest_in_subtree ... ok
 test matcher::tests::self_must_contain_probes_inside_the_matched_directory ... ok
+test matcher::tests::self_must_contain_with_path_glob_never_matches_files ... ok
 test validator::tests::accepts_context_guard_negative_fixture ... ok
 test validator::tests::allows_aggressive_delete_action ... ok
 test validator::tests::any_of_alternatives_are_validated_like_the_primary_spec ... ok
@@ -1627,52 +1611,52 @@ test validator::tests::rejects_sensitive_basename_should_match_fixture ... ok
 test validator::tests::rejects_wildcard_file_name_without_context ... ok
 test validator::tests::self_markers_count_as_directory_context ... ok
 test validator::tests::self_must_contain_with_path_glob_is_valid ... ok
-test validator::tests::builtin_recipe_self_tests_are_valid ... ok
 test registry::tests::test_load_from_dir_merges_and_overrides ... ok
 test matcher::tests::builtin_recipes_reject_protected_secret_and_user_document_fixtures ... ok
+test validator::tests::builtin_recipe_self_tests_are_valid ... ok
 
-test result: ok. 40 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s
+test result: ok. 40 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.18s
 
      Running tests/recipe_safety_corpus.rs (target/debug/deps/recipe_safety_corpus-47c6858f3b3e9788)
 
 running 3 tests
-test no_builtin_recipe_matches_any_protected_or_credential_path ... ok
 test sensitive_basename_floor_refuses_credentials_inside_a_cleanable_dir ... ok
 test canonical_regenerable_caches_are_matched_with_context_proof ... ok
+test no_builtin_recipe_matches_any_protected_or_credential_path ... ok
 
-test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.22s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.19s
 
      Running unittests src/lib.rs (target/debug/deps/cleanton_scanner-2ec6fafb112747c8)
 
 running 30 tests
 test capacity_ffi::tests::from_statfs_fields_computes_derived_values ... ok
 test capacity_ffi::tests::from_statfs_fields_saturates_instead_of_overflowing ... ok
-test capacity_ffi::tests::volume_capacity_reports_plausible_total_for_root ... ok
-test project::tests::detects_project_roots_from_marker_paths ... ok
 test capacity_ffi::tests::is_case_sensitive_runs_without_panicking ... ok
 test capacity_ffi::tests::volume_capacity_errors_on_missing_path ... ok
+test capacity_ffi::tests::volume_capacity_reports_plausible_total_for_root ... ok
+test project::tests::detects_project_roots_from_marker_paths ... ok
 test sizing::tests::empty_target_set_is_zero ... ok
 test project::tests::detects_project_sizes_from_scan_entries ... ok
 test project::tests::project_sizes_fallback_to_scanned_descendant_files_without_root_entry ... ok
-test sizing::tests::sizes_a_single_target_subtree ... ok
 test snapshots::tests::listing_root_volume_does_not_panic_and_is_self_consistent ... ok
+test sizing::tests::sizes_a_single_target_subtree ... ok
 test snapshots::tests::missing_volume_is_handled_gracefully ... ok
+test sizing::tests::hardlinked_file_is_counted_once_across_targets ... ok
 test snapshots::tests::parse_tolerates_indentation_and_blank_lines ... ok
 test snapshots::tests::parses_empty_output_as_no_snapshots ... ok
 test snapshots::tests::parses_identifiers_and_ignores_header ... ok
-test sizing::tests::hardlinked_file_is_counted_once_across_targets ... ok
 test walker::tests::cloud_root_exclusion_can_be_disabled ... ok
 test walker::tests::configured_cloud_roots_allow_explicit_root_opt_in ... ok
 test walker::tests::configured_cloud_roots_are_excluded_by_default ... ok
-test walker::tests::directory_entries_report_subtree_size ... ok
 test walker::tests::external_volume_exclusion_can_be_disabled ... ok
 test walker::tests::exclude_patterns_prune_directory_subtrees ... ok
-test walker::tests::inaccessible_roots_are_reported_as_incomplete_scan_errors ... ok
-test walker::tests::permission_denied_errors_mark_scan_incomplete ... ok
 test walker::tests::external_volumes_are_excluded_unless_scan_root_opts_in ... ok
+test walker::tests::directory_entries_report_subtree_size ... ok
+test walker::tests::permission_denied_errors_mark_scan_incomplete ... ok
+test walker::tests::configured_protected_paths_are_pruned_from_scan ... ok
+test walker::tests::inaccessible_roots_are_reported_as_incomplete_scan_errors ... ok
 test walker::tests::hardlinked_files_are_counted_once ... ok
 test walker::tests::protected_roots_are_skipped_when_not_scan_root ... ok
-test walker::tests::configured_protected_paths_are_pruned_from_scan ... ok
 test walker::tests::respects_gitignore_as_signal ... ok
 test walker::tests::scan_result_includes_detected_project_roots ... ok
 
@@ -1696,11 +1680,11 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
      Running tests/hidden_entries.rs (target/debug/deps/hidden_entries-14a6b0d917b76f17)
 
 running 3 tests
-test include_hidden_false_prunes_dot_entries ... ok
 test desired_behavior_hidden_cache_dirs_must_be_discoverable ... ok
+test include_hidden_false_prunes_dot_entries ... ok
 test hidden_entries_are_scanned_by_default ... ok
 
-test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
      Running tests/targeted_sizing.rs (target/debug/deps/targeted_sizing-897ca3f436c8b05a)
 
@@ -1721,31 +1705,31 @@ running 13 tests
 test test_check_mutation_safety ... ok
 test test_check_service_mutation_safety_refuses_privileged_services ... ok
 test test_elevated_launchctl_command_construction_is_targeted_and_quoted ... ok
-test test_elevated_run_at_load_command_uses_plutil_without_sudo ... ok
-test test_is_protected ... ok
-test test_launchd_system_domain_mutation_refuses_without_real_service ... ok
 test test_elevated_policy_requires_explicit_elevation_and_keeps_protected_immutable ... ok
+test test_elevated_run_at_load_command_uses_plutil_without_sudo ... ok
+test test_launchd_system_domain_mutation_refuses_without_real_service ... ok
+test test_is_protected ... ok
 test test_privileged_mutation_reason ... ok
 test test_parse_plist_minimal ... ok
-test test_service_mutation_options_make_elevation_explicit ... ok
 test test_parse_plist_valid ... ok
 test test_get_launchd_pids ... ok
+test test_service_mutation_options_make_elevation_explicit ... ok
 test test_service_manager_list_and_non_root_mutations ... ok
 
-test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
 
      Running unittests src/lib.rs (target/debug/deps/cleanton_ui-bd2e0fff2d3d81de)
 
 running 7 tests
-test tests::finishing_stale_operation_does_not_cancel_current_operation ... ok
-test tests::beginning_new_operation_cancels_previous_token ... ok
 test tests::cancelled_scan_clears_pending_results_and_ignores_stale_operation ... ok
+test tests::beginning_new_operation_cancels_previous_token ... ok
+test tests::finishing_stale_operation_does_not_cancel_current_operation ... ok
 test tests::keep_toggle_is_ignored_for_non_homebrew_managers ... ok
-test tests::unkeeping_a_leaf_marks_it_removable_and_recomputes_reclaimable ... ok
 test tests::tab_navigation_matches_app_screen_order ... ok
+test tests::unkeeping_a_leaf_marks_it_removable_and_recomputes_reclaimable ... ok
 test tests::keeping_all_packages_makes_nothing_removable ... ok
 
-test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.44s
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.42s
 
    Doc-tests cleanton_antivirus
 
