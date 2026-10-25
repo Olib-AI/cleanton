@@ -506,7 +506,7 @@ fn parse_advisory(value: &serde_json::Value) -> Vec<Advisory> {
         let ranges = affected
             .ranges
             .iter()
-            .filter_map(|range| {
+            .map(|range| {
                 let mut introduced: Option<String> = None;
                 let mut fixed: Option<String> = None;
                 for event in &range.events {
@@ -517,10 +517,10 @@ fn parse_advisory(value: &serde_json::Value) -> Vec<Advisory> {
                         fixed = Some(value.clone());
                     }
                 }
-                Some(AffectedRange {
+                AffectedRange {
                     introduced: introduced.unwrap_or_else(zero_version),
                     fixed,
-                })
+                }
             })
             .collect::<Vec<_>>();
         if ranges.is_empty() {
@@ -622,7 +622,7 @@ pub fn compare_versions(left: &str, right: &str) -> Ordering {
         (None, None) => Ordering::Equal,
         (None, Some(_)) => Ordering::Greater,
         (Some(_), None) => Ordering::Less,
-        (Some(left_pre), Some(right_pre)) => left_pre.cmp(right_pre),
+        (Some(left_pre), Some(right_pre)) => left_pre.cmp(&right_pre),
     }
 }
 
