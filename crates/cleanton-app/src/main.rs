@@ -664,6 +664,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let _ = ui_weak.upgrade_in_event_loop(move |ui| {
                 let state = ui.global::<AppState>();
                 apply_capacity_state(&state, &capacity_view);
+                refresh_trash_state(&state);
                 match result {
                     Ok(()) => state.set_trash_status(
                         "Trash emptied. Disk capacity refreshed with reclaimed space.".into(),
@@ -864,6 +865,9 @@ fn main() -> Result<(), slint::PlatformError> {
                     if let Ok(services) = relisted {
                         ALL_SERVICES.with(|cell| *cell.borrow_mut() = services);
                     }
+                    if remove_result.is_ok() {
+                        drop_service_locally(&id);
+                    }
                     rebuild_services_model(&state);
                     match remove_result {
                         Ok(()) => state.set_services_status(format!("Removed {id}.").into()),
@@ -913,6 +917,9 @@ fn main() -> Result<(), slint::PlatformError> {
                     state.set_service_pending_delete_id(SharedString::new());
                     if let Ok(services) = relisted {
                         ALL_SERVICES.with(|cell| *cell.borrow_mut() = services);
+                    }
+                    if delete_result.is_ok() {
+                        drop_service_locally(&id);
                     }
                     rebuild_services_model(&state);
                     match delete_result {
@@ -1450,6 +1457,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                 remove_suggestion_row(&state, &path);
                                 state
                                     .set_trash_status(format!("Moved {path} to the Trash.").into());
+                                state.set_trash_has_items(true);
                             }
                             Err(err) => state
                                 .set_trash_status(format!("Could not trash {path}: {err}").into()),
@@ -2261,8 +2269,20 @@ fn request_snapshot_delete(state: &AppState) {
     );
 }
 
+/// Refresh `trash-has-items` from the real Trash folders. Called at startup
+/// and after anything that moves items into, or empties, the Trash so the
+/// "Empty Trash now" button is never active against an empty Trash.
+fn refresh_trash_state(state: &AppState) {
+    let has_items = trash_ops::trash_has_items();
+    state.set_trash_has_items(has_items);
+    if !has_items && !state.get_empty_trash_pending() {
+        state.set_trash_status("Trash is empty \u{2014} nothing to reclaim there.".into());
+    }
+}
+
 fn initialise_app_state(ui: &AppWindow, config: &CleantonConfig) {
     let state = ui.global::<AppState>();
+    refresh_trash_state(&state);
 
     // Version of the build actually running (Settings > About).
     state.set_app_version(SharedString::from(env!("CARGO_PKG_VERSION")));
@@ -2922,6 +2942,7 @@ fn apply_execution_result(state: &AppState, result: &ExecutionResult) {
     );
     state.set_result_mode("Cleanup complete".into());
 
+    refresh_trash_state(state);
     // Distinguish Moved-to-Trash (not yet freed) from Freed (reclaimed).
     if result.moved_to_trash_bytes > 0 {
         let moved_actions = result
@@ -3500,6 +3521,13 @@ fn clear_discovered_services(state: &AppState) {
     ))));
     state.set_service_count(0);
     state.set_service_running_count(0);
+}
+
+/// Drop a deleted/removed service from the retained set. A successful
+/// delete is ground truth; the follow-up re-list can be stale (or fail),
+/// and previously the row stayed on screen until a manual Refresh.
+fn drop_service_locally(id: &str) {
+    ALL_SERVICES.with(|cell| cell.borrow_mut().retain(|service| service.id != id));
 }
 
 /// Rebuild the displayed model from the retained full set and set the status

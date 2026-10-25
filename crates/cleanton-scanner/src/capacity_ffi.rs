@@ -224,3 +224,88 @@ mod tests {
         let _ = is_case_sensitive(Path::new("/definitely-missing-cleanton-volume-xyz"));
     }
 }
+
+/// System memory usage snapshot (total / available bytes + used fraction).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MemoryUsage {
+    /// Total physical memory in bytes.
+    pub total_bytes: u64,
+    /// Memory available to applications in bytes (best effort).
+    pub available_bytes: u64,
+    /// Used fraction in `0.0..=1.0`.
+    pub used_fraction: f64,
+}
+
+/// Read memory usage without spawning a subprocess: `sysconf(3)` page
+/// counts on Linux; on macOS the total comes from `sysconf` and the
+/// available figure (free + inactive pages) from `host_statistics64`.
+/// `None` when the values are unavailable.
+#[must_use]
+pub fn memory_usage() -> Option<MemoryUsage> {
+    // SAFETY: sysconf with a valid name returns -1 on error and has no
+    // memory-safety requirements; results are checked before use.
+    let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+    // SAFETY: same as above.
+    let phys_pages = unsafe { libc::sysconf(libc::_SC_PHYS_PAGES) };
+    if page_size <= 0 || phys_pages <= 0 {
+        return None;
+    }
+    let page = u64::try_from(page_size).ok()?;
+    let total_bytes = u64::try_from(phys_pages).ok()?.saturating_mul(page);
+    if total_bytes == 0 {
+        return None;
+    }
+    let available_bytes = available_bytes(page)?;
+    let used = total_bytes.saturating_sub(available_bytes);
+    #[allow(clippy::cast_precision_loss)]
+    let used_fraction = used as f64 / total_bytes as f64;
+    Some(MemoryUsage {
+        total_bytes,
+        available_bytes,
+        used_fraction,
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn available_bytes(page: u64) -> Option<u64> {
+    // SAFETY: sysconf with a valid name returns -1 on error and has no
+    // memory-safety requirements; the result is checked before use.
+    let avail_pages = unsafe { libc::sysconf(libc::_SC_AVPHYS_PAGES) };
+    if avail_pages < 0 {
+        return None;
+    }
+    Some(u64::try_from(avail_pages).ok()?.saturating_mul(page))
+}
+
+#[cfg(target_os = "macos")]
+#[allow(deprecated)] // libc::mach_host_self: the mach2 alternative is not a dependency.
+fn available_bytes(page: u64) -> Option<u64> {
+    let mut stats: libc::vm_statistics64 = unsafe { std::mem::zeroed() };
+    let mut count = u32::try_from(
+        std::mem::size_of::<libc::vm_statistics64>() / std::mem::size_of::<libc::integer_t>(),
+    )
+    .ok()?;
+    // SAFETY: mach_host_self returns a valid host port for this process;
+    // stats is a zeroed vm_statistics64 and count describes its size in
+    // integer_t units, as host_statistics64 requires. The return code is
+    // checked before any field is read.
+    let rc = unsafe {
+        libc::host_statistics64(
+            libc::mach_host_self(),
+            libc::HOST_VM_INFO64,
+            &raw mut stats as libc::host_info_t,
+            &raw mut count,
+        )
+    };
+    if rc != libc::KERN_SUCCESS {
+        return None;
+    }
+    let available_pages =
+        u64::from(stats.free_count).saturating_add(u64::from(stats.inactive_count));
+    Some(available_pages.saturating_mul(page))
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn available_bytes(_page: u64) -> Option<u64> {
+    None
+}

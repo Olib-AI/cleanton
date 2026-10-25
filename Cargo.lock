@@ -1148,7 +1148,7 @@ checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 
 [[package]]
 name = "cleanton-antivirus"
-version = "0.3.0"
+version = "0.3.4"
 dependencies = [
  "base64 0.22.1",
  "flate2",
@@ -1170,7 +1170,7 @@ dependencies = [
 
 [[package]]
 name = "cleanton-app"
-version = "0.3.0"
+version = "0.3.4"
 dependencies = [
  "cleanton-common",
  "cleanton-engine",
@@ -1188,7 +1188,7 @@ dependencies = [
 
 [[package]]
 name = "cleanton-cli"
-version = "0.3.0"
+version = "0.3.4"
 dependencies = [
  "clap",
  "cleanton-common",
@@ -1206,7 +1206,7 @@ dependencies = [
 
 [[package]]
 name = "cleanton-common"
-version = "0.3.0"
+version = "0.3.4"
 dependencies = [
  "chrono",
  "humansize",
@@ -1221,7 +1221,7 @@ dependencies = [
 
 [[package]]
 name = "cleanton-engine"
-version = "0.3.0"
+version = "0.3.4"
 dependencies = [
  "bollard",
  "chrono",
@@ -1244,7 +1244,7 @@ dependencies = [
 
 [[package]]
 name = "cleanton-ml"
-version = "0.3.0"
+version = "0.3.4"
 dependencies = [
  "cleanton-common",
  "serde",
@@ -1256,7 +1256,7 @@ dependencies = [
 
 [[package]]
 name = "cleanton-packages"
-version = "0.3.0"
+version = "0.3.4"
 dependencies = [
  "cleanton-common",
  "serde",
@@ -1268,7 +1268,7 @@ dependencies = [
 
 [[package]]
 name = "cleanton-recipes"
-version = "0.3.0"
+version = "0.3.4"
 dependencies = [
  "cleanton-common",
  "glob",
@@ -1280,7 +1280,7 @@ dependencies = [
 
 [[package]]
 name = "cleanton-scanner"
-version = "0.3.0"
+version = "0.3.4"
 dependencies = [
  "cleanton-common",
  "glob",
@@ -1294,7 +1294,7 @@ dependencies = [
 
 [[package]]
 name = "cleanton-services"
-version = "0.3.0"
+version = "0.3.4"
 dependencies = [
  "cleanton-common",
  "plist",
@@ -1307,7 +1307,7 @@ dependencies = [
 
 [[package]]
 name = "cleanton-ui"
-version = "0.3.0"
+version = "0.3.4"
 dependencies = [
  "cleanton-common",
  "cleanton-engine",

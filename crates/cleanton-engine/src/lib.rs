@@ -20,7 +20,7 @@ pub use advisories::{
     compare_versions,
 };
 pub use analyzer::AnalyzedPlan;
-pub use background::{PackageWatcher, WatchEvent, WatchOptions};
+pub use background::{PackageWatcher, ResourceKind, WatchEvent, WatchOptions};
 pub use docker::{
     BuildCacheInfo, ContainerInfo, DockerAnalysis, DockerCleaner, DockerCleanupPlan,
     DockerCleanupResult, ImageInfo, VolumeInfo,

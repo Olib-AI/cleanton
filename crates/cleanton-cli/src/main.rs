@@ -797,6 +797,18 @@ fn watch_event_json(event: &cleanton_engine::background::WatchEvent) -> serde_js
             "package": package,
             "hook": hook,
         }),
+        WatchEvent::ResourcePressure {
+            kind,
+            used_percent,
+            available_bytes,
+            suggestion,
+        } => serde_json::json!({
+            "event": "resource_pressure",
+            "kind": kind.label(),
+            "used_percent": used_percent,
+            "available_bytes": available_bytes,
+            "suggestion": suggestion,
+        }),
         WatchEvent::ContentFinding {
             package,
             verdict,
@@ -831,6 +843,15 @@ fn print_watch_event(event: &cleanton_engine::background::WatchEvent) {
         ),
         WatchEvent::InstallHook { package, hook } => println!(
             "[info] {package} runs a `{hook}` script at install time; review it if the package is unfamiliar"
+        ),
+        WatchEvent::ResourcePressure {
+            kind,
+            used_percent,
+            suggestion,
+            ..
+        } => println!(
+            "[pressure] {} at {used_percent}% used - {suggestion}",
+            kind.label()
         ),
         WatchEvent::ContentFinding {
             package,
