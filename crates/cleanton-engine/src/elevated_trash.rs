@@ -70,7 +70,10 @@ fn unique_trash_destination(path: &Path) -> Option<PathBuf> {
         return Some(direct);
     }
 
-    let stem = path.file_stem().and_then(|stem| stem.to_str()).unwrap_or("item");
+    let stem = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("item");
     let extension = path.extension().and_then(|extension| extension.to_str());
     for attempt in 1..1_000_u16 {
         let name = match extension {
@@ -118,6 +121,9 @@ mod tests {
             path.file_stem().and_then(|stem| stem.to_str()),
             Some("Some App")
         );
-        assert_eq!(path.extension().and_then(|extension| extension.to_str()), Some("app"));
+        assert_eq!(
+            path.extension().and_then(|extension| extension.to_str()),
+            Some("app")
+        );
     }
 }
