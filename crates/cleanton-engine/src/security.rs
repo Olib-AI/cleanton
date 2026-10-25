@@ -822,14 +822,14 @@ impl PackageReport {
                     format!("gem uninstall {name}")
                 }
             }
-            SecurityTargetKind::CargoRegistry | SecurityTargetKind::GoModuleCache => {
-                return None;
-            }
-            // A persistence file is the user's own file, not an installed
-            // package: there is no manager to uninstall it with, and trashing a
-            // `.zshrc` to fix one line would be the wrong remedy. Cleanton
-            // surfaces it and leaves the edit to the user.
-            SecurityTargetKind::HostPersistence => {
+            // Neither of these has a manager Cleanton can hand the removal to:
+            // a registry cache entry is not installed software, and a
+            // persistence file is the user's own file, where trashing a
+            // `.zshrc` to fix one line would be the wrong remedy. Both are
+            // surfaced and left to the user.
+            SecurityTargetKind::CargoRegistry
+            | SecurityTargetKind::GoModuleCache
+            | SecurityTargetKind::HostPersistence => {
                 return None;
             }
         };
@@ -1591,29 +1591,32 @@ pub fn discover_default_targets() -> Vec<SecurityTarget> {
         home.join("go/pkg/mod"),
     );
 
-    // Host persistence. Unlike the entries above these are FILE targets: the
-    // roots are scanned for persistence-shaped files by
-    // `enumerate_host_persistence`, never walked as package trees. The home
-    // directory is one of the roots because that is where the shell startup
-    // files live; only the handful of names in `PERSISTENCE_FILE_NAMES` is
-    // picked out of it.
+    push_host_persistence_targets(&mut targets, &home);
+
+    targets
+}
+
+/// The machine's own persistence surface. Unlike the entries above these are
+/// FILE targets: the roots are scanned for persistence-shaped files by
+/// `enumerate_host_persistence`, never walked as package trees. `$HOME` is one
+/// of the roots because that is where the shell startup files live; only the
+/// handful of names in [`PERSISTENCE_FILE_NAMES`] is picked out of it.
+fn push_host_persistence_targets(targets: &mut Vec<SecurityTarget>, home: &Path) {
     push_if_dir(
-        &mut targets,
+        targets,
         SecurityTargetKind::HostPersistence,
         home.join("Library/LaunchAgents"),
     );
     push_if_dir(
-        &mut targets,
+        targets,
         SecurityTargetKind::HostPersistence,
         home.join(".config/systemd/user"),
     );
     push_if_dir(
-        &mut targets,
+        targets,
         SecurityTargetKind::HostPersistence,
-        home.clone(),
+        home.to_path_buf(),
     );
-
-    targets
 }
 
 /// Locate `node_modules` and virtualenv `site-packages` trees under a
@@ -2081,9 +2084,12 @@ fn enumerate_host_persistence(target: &SecurityTarget, out: &mut Vec<PackageCand
             continue;
         };
         let lower = name.to_ascii_lowercase();
+        let extension = path
+            .extension()
+            .map(|extension| extension.to_string_lossy().to_ascii_lowercase());
         let wanted = match kind {
-            PersistenceRoot::LaunchAgents => lower.ends_with(".plist"),
-            PersistenceRoot::SystemdUser => lower.ends_with(".service"),
+            PersistenceRoot::LaunchAgents => extension.as_deref() == Some("plist"),
+            PersistenceRoot::SystemdUser => extension.as_deref() == Some("service"),
             PersistenceRoot::ShellStartup => PERSISTENCE_FILE_NAMES.contains(&lower.as_str()),
         };
         if !wanted || !path.is_file() {
