@@ -16,13 +16,22 @@ priority = 50
 path_glob = "~/Library/Caches/com.tinyspeck.slackmacgap/**"
 min_age_days = 14
 
+# Linux: Slack keeps the Chromium cache in its config dir.
+[[match.any_of]]
+min_age_days = 14
+path_glob = "~/.config/Slack/Cache/**"
+
 [action]
 type = "trash"
 prompt = "Move {size} of Slack cache to Trash? Slack re-fetches it on demand."
 
 [test]
-should_match = ["~/Library/Caches/com.tinyspeck.slackmacgap/Cache/CacheData/abc"]
+should_match = [
+    "~/Library/Caches/com.tinyspeck.slackmacgap/Cache/CacheData/abc",
+    "~/.config/Slack/Cache/foo",
+]
 should_not_match = [
     "~/Library/Caches/com.tinyspeck.slackmacgapx/Cache/CacheData/abc",
     "~/projects/Slack/Cache/CacheData/abc",
+    "~/.config/Slack/storage/slack-teams",
 ]

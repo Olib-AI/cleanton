@@ -14,10 +14,24 @@ path_glob = "~/Library/Caches/lima/**"
 min_age_days = 30
 min_size_mb = 100
 
+# Linux (XDG): Lima's download cache.
+[[match.any_of]]
+min_age_days = 30
+min_size_mb = 100
+path_glob = "~/.cache/lima/**"
+
 [action]
 type = "trash"
 prompt = "Move {size} of Lima image cache to Trash?"
 
 [test]
-should_match = ["~/Library/Caches/lima/download/by-url-sha256/abc123/data"]
-should_not_match = ["~/.lima/default/lima.yaml", "~/.colima/default/colima.yaml", "~/.lima/default/diffdisk"]
+should_match = [
+    "~/Library/Caches/lima/download/by-url-sha256/abc123/data",
+    "~/.cache/lima/download/foo",
+]
+should_not_match = [
+    "~/.lima/default/lima.yaml",
+    "~/.colima/default/colima.yaml",
+    "~/.lima/default/diffdisk",
+    "~/.cache/other/foo",
+]

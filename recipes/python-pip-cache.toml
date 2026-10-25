@@ -12,10 +12,21 @@ priority = 50
 path_glob = "~/Library/Caches/pip/**"
 min_age_days = 30
 
+# Linux (XDG): pip's cache lives in ~/.cache/pip.
+[[match.any_of]]
+min_age_days = 30
+path_glob = "~/.cache/pip/**"
+
 [action]
 type = "trash"
 prompt = "Move {size} of pip wheel/http cache to Trash?"
 
 [test]
-should_match = ["~/Library/Caches/pip/wheels/foo"]
-should_not_match = ["~/Library/Caches/Homebrew"]
+should_match = [
+    "~/Library/Caches/pip/wheels/foo",
+    "~/.cache/pip/wheels/foo",
+]
+should_not_match = [
+    "~/Library/Caches/Homebrew",
+    "~/.cache/other/foo",
+]

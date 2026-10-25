@@ -11,10 +11,21 @@ priority = 50
 path_glob = "~/Library/Caches/tuist/**"
 min_age_days = 30
 
+# Linux (XDG): Tuist's cache directory.
+[[match.any_of]]
+min_age_days = 30
+path_glob = "~/.cache/tuist/**"
+
 [action]
 type = "trash"
 prompt = "Move {size} of Tuist cache to Trash?"
 
 [test]
-should_match = ["~/Library/Caches/tuist/BinaryCache/MyFramework.xcframework-payload"]
-should_not_match = ["~/Library/Caches/Yarn"]
+should_match = [
+    "~/Library/Caches/tuist/BinaryCache/MyFramework.xcframework-payload",
+    "~/.cache/tuist/PROJECT/foo",
+]
+should_not_match = [
+    "~/Library/Caches/Yarn",
+    "~/.cache/other/foo",
+]

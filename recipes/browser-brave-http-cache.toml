@@ -1,0 +1,34 @@
+[recipe]
+id = "browser-brave-http-cache"
+name = "Brave HTTP Cache"
+# Matches only the per-profile Cache/Cache_Data subtree that Brave rebuilds
+# while browsing. Profile databases (History, Bookmarks, Login Data,
+# Cookies) are sibling files and never match.
+description = "Brave per-profile HTTP disk cache (rebuilt while browsing)"
+category = "apps"
+safety_level = "cautious"
+enabled = true
+priority = 55
+
+[match]
+path_glob = "~/Library/Application Support/BraveSoftware/Brave-Browser/*/Cache/Cache_Data/**"
+min_age_days = 7
+
+# Linux (XDG): Brave keeps its profile in ~/.config.
+[[match.any_of]]
+path_glob = "~/.config/BraveSoftware/Brave-Browser/*/Cache/Cache_Data/**"
+min_age_days = 7
+
+[action]
+type = "trash"
+prompt = "Move {size} of Brave HTTP cache to Trash?"
+
+[test]
+should_match = [
+    "~/Library/Application Support/BraveSoftware/Brave-Browser/Default/Cache/Cache_Data/f_000001",
+    "~/.config/BraveSoftware/Brave-Browser/Default/Cache/Cache_Data/f_000002",
+]
+should_not_match = [
+    "~/Library/Application Support/BraveSoftware/Brave-Browser/Default/History",
+    "~/.config/BraveSoftware/Brave-Browser/Default/Bookmarks",
+]

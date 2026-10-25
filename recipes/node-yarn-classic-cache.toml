@@ -11,10 +11,21 @@ priority = 50
 path_glob = "~/Library/Caches/Yarn/**"
 min_age_days = 30
 
+# Linux (XDG): Yarn 1's cache directory.
+[[match.any_of]]
+min_age_days = 30
+path_glob = "~/.cache/yarn/**"
+
 [action]
 type = "trash"
 prompt = "Move {size} of Yarn classic cache to Trash?"
 
 [test]
-should_match = ["~/Library/Caches/Yarn/v6/npm-foo"]
-should_not_match = ["~/Library/Caches/Homebrew"]
+should_match = [
+    "~/Library/Caches/Yarn/v6/npm-foo",
+    "~/.cache/yarn/v6/npm-lodash-4.17.21-abc/node_modules/lodash/index.js",
+]
+should_not_match = [
+    "~/Library/Caches/Homebrew",
+    "~/.cache/other/foo",
+]

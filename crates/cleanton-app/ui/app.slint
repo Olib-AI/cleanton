@@ -61,11 +61,19 @@ export struct SnapshotRow {
 
 // A review-only suggestion row (duplicate set, large file/folder, or screenshot).
 export struct SuggestionRow {
+    // Row flavour: 0 = an individual item, 1 = a duplicate-set header,
+    // 2 = a muted note (for example "+3 more copies not listed").
+    kind: int,
+    // Duplicate-set index this row belongs to, or -1 for anything that is not
+    // part of a duplicate set. Lets a trashed copy collapse its own set.
+    group: int,
     title: string,
     detail: string,
     size: string,
     icon: string,
-    // First/representative path, used for "Reveal in Finder" and the Trash action.
+    // The path this row acts on: the copy for a duplicate row, the item for a
+    // large-file/screenshot row, and empty for a set header or a note (both of
+    // which are labels, not actionable targets).
     path: string,
     // Whether the two-step Trash affordance is offered for this row.
     deletable: bool,
@@ -122,12 +130,12 @@ export struct LeftoverRow {
 
 // One surfaced package from the read-only security scan (Security tab):
 // new, updated, or changed since the trusted baseline. The only per-row
-// action is "Trust" which updates the baseline METADATA file — the package
+// action is "Trust" which updates the baseline METADATA file; the package
 // itself is never touched.
 export struct SecurityRow {
     name: string,
     version: string,
-    // RAW AV verdict "clean" | "suspicious" | "malicious" — kept for
+    // RAW AV verdict "clean" | "suspicious" | "malicious", kept for
     // transparency; the BADGE is driven by assessment-label instead.
     verdict: string,
     // Assessment badge label (shared engine copy): the verdict for alerts,
@@ -149,7 +157,7 @@ export struct SecurityRow {
     // Pre-rendered top findings (shared engine copy), newline-separated.
     findings: string,
     // Baseline change kind label (shared engine copy), e.g. "new",
-    // "updated", "changed — no version bump", "unchanged".
+    // "updated", "changed, no version bump", "unchanged".
     change: string,
     // Shared one-sentence explanation of the change kind.
     notice: string,
@@ -157,13 +165,19 @@ export struct SecurityRow {
     // "Investigate now" / "Verify then trust".
     action-label: string,
     // Concrete review-only next steps (shared engine copy), newline-separated.
-    // Advisory — the user runs these; Cleanton never removes anything.
+    // Advisory: the user runs these; Cleanton never removes anything.
     actions: string,
     // True for the same-version tamper case (the red alarm).
     tamper: bool,
     // True for critical alerts (tamper, or a corroborated malicious
     // assessment).
     critical: bool,
+    // Whether this package can be acted on from here: uninstalled through its
+    // own package manager, or moved to the Trash when no manager owns it.
+    removable: bool,
+    // Verb for that action: "Uninstall" when a package manager can remove the
+    // package cleanly, "Remove" when the package directory is trashed instead.
+    remove-label: string,
 }
 
 export struct ServiceRow {
@@ -342,7 +356,7 @@ export global AppState {
     in-out property <bool> security-has-report: false;
     in-out property <string> security-progress: "";
     in-out property <float> security-progress-ratio: 0.0;
-    // Shared summary copy (SecurityReport::summary_message) — same string in
+    // Shared summary copy (SecurityReport::summary_message): same string in
     // the TUI and the CLI.
     in-out property <string> security-summary: "";
     // Shared banner headline + tone ("danger" | "warning" | "success").
@@ -361,6 +375,13 @@ export global AppState {
     in-out property <int> security-updated-count: 0;
     in-out property <int> security-tamper-count: 0;
     in-out property <int> security-critical-count: 0;
+    // Removal (the one destructive affordance on the Security screen) is
+    // two-step: `security-request-remove` arms a row, `security-confirm-remove`
+    // runs it, `security-cancel-remove` disarms. -1 means nothing is armed.
+    in-out property <int> security-pending-remove-index: -1;
+    in-out property <bool> security-acting: false;
+    // What the armed removal will do, spelled out before it runs.
+    in-out property <string> security-remove-status: "";
 
     // Applications tab state.
     in-out property <[AppListRow]> app-rows;
@@ -466,9 +487,16 @@ export global AppCallbacks {
     // ends by writing the baseline metadata file; packages untouched).
     callback security-establish-baseline();
     // Mark the flagged package at this row index as reviewed/trusted, or all
-    // of them. Baseline metadata only — never modifies a package.
+    // of them. Baseline metadata only, never modifies a package.
     callback security-trust-package(int);
     callback security-trust-all();
+    // Remove a flagged package: uninstall it through its own package manager
+    // (npm, pip) when one owns it, otherwise move its package directory to the
+    // Trash. Two-step: request arms the row, confirm runs it, cancel disarms.
+    // Nothing here runs without the second, explicit click.
+    callback security-request-remove(int);
+    callback security-confirm-remove(int);
+    callback security-cancel-remove();
 
     // Applications tab: inventory, leftover review, and two-step uninstall.
     callback refresh-apps();
@@ -502,6 +530,11 @@ component SettingsField inherits HorizontalLayout {
 
     spacing: Theme.spacing-lg;
     min-height: 48px;
+    // Centre the control on the cross (vertical) axis. The default is
+    // `stretch`, and a control with a pinned height (the 26px toggle track)
+    // cannot be stretched, so it was pinned to the TOP of the 48px row while
+    // the label beside it stayed centred: the row read as broken.
+    cross-axis-alignment: center;
 
     VerticalLayout {
         horizontal-stretch: 1;
@@ -662,7 +695,7 @@ export component AppWindow inherits Window {
 
                 // First-run / permission banner: only shown when Full Disk
                 // Access is positively detected as missing. Purely informational
-                // — it guides the user and offers a button that opens the
+                // it guides the user and offers a button that opens the
                 // correct System Settings pane on explicit click.
                 HorizontalLayout {
                     spacing: Theme.spacing-md;
@@ -830,7 +863,7 @@ export component AppWindow inherits Window {
                                     // Height matches the fixed tile height, and
                                     // viewport-height is pinned to it so the
                                     // carousel only ever scrolls horizontally
-                                    // (tiles are 116px tall — see MetricTile).
+                                    // (tiles are 116px tall, see MetricTile).
                                     height: 116px;
                                     viewport-height: self.height;
 
@@ -957,7 +990,7 @@ export component AppWindow inherits Window {
                         }
 
                         // Execution metrics only appear once a cleanup is running
-                        // or has run — before that they're an empty block of zeros.
+                        // or has run. Before that they're an empty block of zeros.
                         if AppState.cleaning || AppState.execution-attempted-count > 0: VerticalLayout {
                             spacing: Theme.spacing-sm;
 
@@ -1245,7 +1278,7 @@ export component AppWindow inherits Window {
                             }
                         }
 
-                        // ── Suggestions (review only — never auto-cleaned) ───
+                        // ── Suggestions (review only, never auto-cleaned) ───
                         if AppState.duplicate-count > 0 || AppState.large-item-count > 0 || AppState.screenshot-count > 0 || AppState.installer-count > 0: Panel {
                             VerticalLayout {
                                 padding: Theme.spacing-sm;
@@ -1271,12 +1304,14 @@ export component AppWindow inherits Window {
                                 if AppState.duplicate-count > 0: Rectangle { height: Theme.spacing-sm; }
 
                                 if AppState.duplicate-count > 0: Text {
-                                    text: "Duplicate files: " + AppState.duplicate-reclaimable + " across " + AppState.duplicate-count + " sets";
+                                    text: "Duplicate files: " + AppState.duplicate-reclaimable + " across " + AppState.duplicate-count + " sets. Every copy is listed under its set, so you choose which one goes.";
                                     color: Theme.palette.text-secondary;
                                     font-size: Theme.font-size-xs;
                                     font-weight: 700;
+                                    wrap: word-wrap;
                                 }
                                 for s in AppState.duplicate-rows: SuggestionListRow {
+                                    kind: s.kind;
                                     title: s.title;
                                     detail: s.detail;
                                     size: s.size;
@@ -1299,6 +1334,7 @@ export component AppWindow inherits Window {
                                     font-weight: 700;
                                 }
                                 for s in AppState.screenshot-rows: SuggestionListRow {
+                                    kind: s.kind;
                                     title: s.title;
                                     detail: s.detail;
                                     size: s.size;
@@ -1321,6 +1357,7 @@ export component AppWindow inherits Window {
                                     font-weight: 700;
                                 }
                                 for s in AppState.installer-rows: SuggestionListRow {
+                                    kind: s.kind;
                                     title: s.title;
                                     detail: s.detail;
                                     size: s.size;
@@ -1343,6 +1380,7 @@ export component AppWindow inherits Window {
                                     font-weight: 700;
                                 }
                                 for s in AppState.large-item-rows: SuggestionListRow {
+                                    kind: s.kind;
                                     title: s.title;
                                     detail: s.detail;
                                     size: s.size;
@@ -1420,18 +1458,24 @@ export component AppWindow inherits Window {
                     }
                     ActionButton { label: AppState.package-loading ? "Loading..." : "Refresh"; icon-glyph: "\u{f021}"; enabled: !AppState.package-loading && !AppState.package-acting; clicked => { AppCallbacks.refresh-packages(); } }
                     // Activity indicator on the right, next to the action that
-                    // started it; Spinner hides itself when nothing is running.
-                    Spinner {
-                        running: AppState.package-loading || AppState.package-acting || AppState.package-usage-scanning;
-                        spinner-size: 16px;
-                        y: (parent.height - self.height) / 2;
+                    // started it. Conditional rather than `visible: false`: a
+                    // hidden element still occupies its slot in a layout, so an
+                    // always-present spinner left a permanent gap after Refresh.
+                    if AppState.package-loading || AppState.package-acting || AppState.package-usage-scanning: HorizontalLayout {
+                        alignment: center;
+                        Spinner {
+                            running: true;
+                            spinner-size: 16px;
+                        }
                     }
                 }
 
-                // Indeterminate activity strip: always visible feedback that work
-                // is in flight, even when the status line has not changed yet.
-                ActivityBar {
-                    running: AppState.package-loading || AppState.package-acting || AppState.package-usage-scanning;
+                // Indeterminate activity strip: feedback that work is in flight,
+                // even when the status line has not changed yet. Conditional for
+                // the same reason as the spinner: a hidden strip keeps its 4px
+                // height and its share of the layout spacing, both dead space.
+                if AppState.package-loading || AppState.package-acting || AppState.package-usage-scanning: ActivityBar {
+                    running: true;
                 }
 
                 // Manager selector.
@@ -1483,10 +1527,12 @@ export component AppWindow inherits Window {
 
                         if AppState.package-action-status != "": HorizontalLayout {
                             spacing: Theme.spacing-xs;
-                            Spinner {
-                                running: AppState.package-usage-scanning || AppState.package-acting || AppState.package-loading;
-                                spinner-size: 12px;
-                                y: (parent.height - self.height) / 2;
+                            if AppState.package-usage-scanning || AppState.package-acting || AppState.package-loading: HorizontalLayout {
+                                alignment: center;
+                                Spinner {
+                                    running: true;
+                                    spinner-size: 12px;
+                                }
                             }
                             Text {
                                 text: AppState.package-action-status;
@@ -1500,8 +1546,8 @@ export component AppWindow inherits Window {
 
                         if AppState.package-note != "": Text { text: AppState.package-note; color: Theme.palette.warning; font-size: Theme.font-size-xs; wrap: word-wrap; }
 
-                        ActivityBar {
-                            running: AppState.package-acting || AppState.package-loading;
+                        if AppState.package-acting || AppState.package-loading: ActivityBar {
+                            running: true;
                         }
 
                         HorizontalLayout {
@@ -1578,17 +1624,22 @@ export component AppWindow inherits Window {
                             vertical-stretch: 1;
                             alignment: center;
                             spacing: Theme.spacing-sm;
-                            Spinner {
-                                running: AppState.package-loading;
-                                spinner-size: 26px;
-                                spinner-color: Theme.palette.text-muted;
-                                visible: AppState.package-loading;
+                            // A fixed-width Spinner is placed at the START of a
+                            // VerticalLayout's cross (horizontal) axis, which is
+                            // exactly why the loading spinner sat hard left. The
+                            // wrapper centres it on its own main axis.
+                            if AppState.package-loading: HorizontalLayout {
+                                alignment: center;
+                                Spinner {
+                                    running: true;
+                                    spinner-size: 26px;
+                                    spinner-color: Theme.palette.text-muted;
+                                }
                             }
-                            FaIcon {
+                            if !AppState.package-loading: FaIcon {
                                 glyph: "\u{f1b3}";
                                 icon-color: Theme.palette.text-muted;
                                 icon-size: Theme.font-size-xl;
-                                visible: !AppState.package-loading;
                             }
                             Text { text: AppState.package-loading ? AppState.package-status : (AppState.package-note != "" ? AppState.package-note : "No packages found"); color: Theme.palette.text-secondary; font-size: Theme.font-size-md; font-weight: 600; horizontal-alignment: center; }
                         }
@@ -1972,10 +2023,12 @@ export component AppWindow inherits Window {
                                 HorizontalLayout {
                                     spacing: Theme.spacing-sm;
                                     Text { text: "Uninstall " + AppState.selected-app-name; color: Theme.palette.text-primary; font-size: Theme.font-size-lg; font-weight: 700; horizontal-stretch: 1; overflow: elide; }
-                                    Spinner {
-                                        running: AppState.leftover-loading || AppState.uninstalling;
-                                        spinner-size: 14px;
-                                        y: (parent.height - self.height) / 2;
+                                    if AppState.leftover-loading || AppState.uninstalling: HorizontalLayout {
+                                        alignment: center;
+                                        Spinner {
+                                            running: true;
+                                            spinner-size: 14px;
+                                        }
                                     }
                                     Text {
                                         text: AppState.uninstalling
@@ -1989,8 +2042,8 @@ export component AppWindow inherits Window {
                                     }
                                 }
 
-                                ActivityBar {
-                                    running: AppState.leftover-loading || AppState.uninstalling;
+                                if AppState.leftover-loading || AppState.uninstalling: ActivityBar {
+                                    running: true;
                                 }
 
                                 Text {
@@ -2117,7 +2170,7 @@ export component AppWindow inherits Window {
 
             // ── Security: read-only supply-chain scan of installed packages,
             // diffed against the trusted baseline. Detection + notification
-            // only — this screen has NO destructive affordance; "Trust"
+            // only. This screen has NO destructive affordance; "Trust"
             // updates the baseline METADATA file, never a package.
             if AppState.active-screen == 6: VerticalLayout {
                 padding: Theme.spacing-xl;
@@ -2411,7 +2464,7 @@ export component AppWindow inherits Window {
                             spacing: Theme.spacing-sm;
 
                             Text {
-                                text: "Surfaced packages (" + AppState.security-flagged-count + "): corroborated alerts first, neutral notices below. Review each package at its path; if you did not expect it, remove or reinstall it with its package manager. Trusting a package only updates the baseline file.";
+                                text: "Surfaced packages (" + AppState.security-flagged-count + "): corroborated alerts first, neutral notices below. Review each package at its path; if you did not expect it, use Remove to uninstall it with its package manager or move it to the Trash (two-step, confirmed). Trusting a package only updates the baseline file.";
                                 color: Theme.palette.text-secondary;
                                 font-size: Theme.font-size-xs;
                                 wrap: word-wrap;
@@ -2449,7 +2502,7 @@ export component AppWindow inherits Window {
                                                             : (row.change == "updated" ? Theme.palette.info : Theme.palette.accent);
                                                     }
                                                     // Assessment chip: the verdict for ALERT rows only; notice rows get
-                                                    // the neutral info badge — a raw heuristic verdict never goes red.
+                                                    // the neutral info badge, so a raw heuristic verdict never goes red.
                                                     Badge {
                                                         label: row.assessment-label;
                                                         badge-color: !row.alert
@@ -2537,15 +2590,78 @@ export component AppWindow inherits Window {
 
                                             VerticalLayout {
                                                 alignment: center;
+                                                spacing: Theme.spacing-xs;
 
                                                 ActionButton {
                                                     label: "Trust";
                                                     icon-glyph: "\u{f058}";
                                                     primary: false;
+                                                    enabled: !AppState.security-acting;
                                                     clicked => { AppCallbacks.security-trust-package(row-index); }
+                                                }
+
+                                                // Two-step removal. Only the
+                                                // armed row shows "Confirm",
+                                                // and the panel below spells
+                                                // out what the removal does.
+                                                if row.removable: ActionButton {
+                                                    label: AppState.security-pending-remove-index == row-index
+                                                        ? "Confirm"
+                                                        : row.remove-label;
+                                                    icon-glyph: AppState.security-pending-remove-index == row-index
+                                                        ? "\u{f00c}"
+                                                        : "\u{f2ed}";
+                                                    primary: false;
+                                                    danger: true;
+                                                    enabled: !AppState.security-acting;
+                                                    clicked => {
+                                                        if AppState.security-pending-remove-index == row-index {
+                                                            AppCallbacks.security-confirm-remove(row-index);
+                                                        } else {
+                                                            AppCallbacks.security-request-remove(row-index);
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
+                                    }
+                                }
+                            }
+
+                            // Armed removal: say exactly what will happen and
+                            // offer a way out before anything runs.
+                            if AppState.security-pending-remove-index >= 0: Rectangle {
+                                border-radius: Theme.radius-sm;
+                                background: Theme.palette.danger.with-alpha(0.10);
+                                border-width: 1px;
+                                border-color: Theme.palette.danger.with-alpha(0.45);
+                                height: sec-remove-layout.preferred-height;
+
+                                sec-remove-layout := HorizontalLayout {
+                                    padding: Theme.spacing-sm;
+                                    spacing: Theme.spacing-sm;
+
+                                    FaIcon {
+                                        glyph: "\u{f071}";
+                                        icon-color: Theme.palette.danger;
+                                        icon-size: Theme.font-size-sm;
+                                        width: 18px;
+                                    }
+
+                                    Text {
+                                        text: AppState.security-remove-status;
+                                        color: Theme.palette.text-primary;
+                                        font-size: Theme.font-size-xs;
+                                        horizontal-stretch: 1;
+                                        vertical-alignment: center;
+                                        wrap: word-wrap;
+                                    }
+
+                                    ActionButton {
+                                        label: "Cancel";
+                                        icon-glyph: "\u{f00d}";
+                                        primary: false;
+                                        clicked => { AppCallbacks.security-cancel-remove(); }
                                     }
                                 }
                             }

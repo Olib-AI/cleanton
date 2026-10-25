@@ -14,10 +14,22 @@ priority = 50
 path_glob = "~/Library/Caches/Firefox/**"
 min_age_days = 7
 
+# Linux (XDG): Firefox's per-profile cache2 subtree.
+[[match.any_of]]
+min_age_days = 7
+path_glob = "~/.cache/mozilla/firefox/**/cache2/**"
+
 [action]
 type = "trash"
 prompt = "Move {size} of Firefox cache to Trash?"
 
 [test]
-should_match = ["~/Library/Caches/Firefox/Profiles/abcd1234.default-release/cache2/entries/0123456789ABCDEF"]
-should_not_match = ["~/Library/Application Support/Firefox/Profiles/abcd1234.default-release/places.sqlite", "~/Library/Caches/Mozilla/updates/update.log"]
+should_match = [
+    "~/Library/Caches/Firefox/Profiles/abcd1234.default-release/cache2/entries/0123456789ABCDEF",
+    "~/.cache/mozilla/firefox/abc.default-release/cache2/entries/foo",
+]
+should_not_match = [
+    "~/Library/Application Support/Firefox/Profiles/abcd1234.default-release/places.sqlite",
+    "~/Library/Caches/Mozilla/updates/update.log",
+    "~/.cache/mozilla/firefox/abc.default-release/places.sqlite",
+]

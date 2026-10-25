@@ -751,7 +751,7 @@ impl ScriptBehaviorEngine {
                                 Severity::High,
                                 Confidence::Medium,
                                 "new Function() code execution",
-                                "new Function() constructs executable code at runtime — equivalent to eval().",
+                                "new Function() constructs executable code at runtime: equivalent to eval().",
                             )
                             .with_rule_id("SB_JS_FUNCTION_CTOR")
                             .with_location(FileLocation::at_line(path, *lineno))
@@ -1051,7 +1051,7 @@ impl ScriptBehaviorEngine {
                             Severity::High,
                             Confidence::High,
                             "Cryptocurrency wallet store / seed-phrase file access",
-                            "The script references a local crypto wallet store (Exodus wallet, wallet.dat, Solana id.json, MetaMask extension store, Ethereum keystore) or a seed-phrase file — the harvest target of BeaverTail/W4SP-class stealers.",
+                            "The script references a local crypto wallet store (Exodus wallet, wallet.dat, Solana id.json, MetaMask extension store, Ethereum keystore) or a seed-phrase file: the harvest target of BeaverTail/W4SP-class stealers.",
                         )
                         .with_rule_id("SB_CRED_CRYPTO_WALLET")
                         .with_location(FileLocation::at_line(path, *lineno))
@@ -1075,7 +1075,7 @@ impl ScriptBehaviorEngine {
                             Severity::High,
                             Confidence::High,
                             "RubyGems publish credential access",
-                            "The script references ~/.gem/credentials or RubyGems API-key material — the RubyGems analogue of .npmrc token theft, used by cross-ecosystem worms to republish trojanized gems.",
+                            "The script references ~/.gem/credentials or RubyGems API-key material: the RubyGems analogue of .npmrc token theft, used by cross-ecosystem worms to republish trojanized gems.",
                         )
                         .with_rule_id("SB_CRED_RUBYGEMS")
                         .with_location(FileLocation::at_line(path, *lineno))
@@ -1099,7 +1099,7 @@ impl ScriptBehaviorEngine {
                             Severity::Medium,
                             Confidence::Medium,
                             "Hardcoded secret/token literal",
-                            "Variable name suggests a secret (key/token/password/secret) assigned a literal string value — potential credential leak.",
+                            "Variable name suggests a secret (key/token/password/secret) assigned a literal string value: potential credential leak.",
                         )
                         .with_rule_id("SB_HARDCODED_SECRET")
                         .with_location(FileLocation::at_line(path, *lineno))
@@ -1292,7 +1292,7 @@ impl ScriptBehaviorEngine {
                             Severity::Critical,
                             Confidence::High,
                             "Cron persistence write detected",
-                            "The script writes to crontab or /etc/cron.d to install a persistent scheduled task — a classic malware persistence mechanism.",
+                            "The script writes to crontab or /etc/cron.d to install a persistent scheduled task: a classic malware persistence mechanism.",
                         )
                         .with_rule_id("SB_PERSIST_CRON")
                         .with_location(FileLocation::at_line(path, *lineno))
@@ -1313,7 +1313,7 @@ impl ScriptBehaviorEngine {
                             Severity::High,
                             Confidence::Medium,
                             "Shell startup file modification",
-                            "The script references ~/.bashrc, ~/.zshrc, or /etc/profile — common targets for persistence via shell startup hooks.",
+                            "The script references ~/.bashrc, ~/.zshrc, or /etc/profile: common targets for persistence via shell startup hooks.",
                         )
                         .with_rule_id("SB_PERSIST_BASHRC")
                         .with_location(FileLocation::at_line(path, *lineno))
@@ -1334,7 +1334,7 @@ impl ScriptBehaviorEngine {
                             Severity::Critical,
                             Confidence::High,
                             "systemd unit path write detected",
-                            "Writing to /etc/systemd/system or ~/.config/systemd/user installs a persistent service — a high-confidence malware persistence technique.",
+                            "Writing to /etc/systemd/system or ~/.config/systemd/user installs a persistent service: a high-confidence malware persistence technique.",
                         )
                         .with_rule_id("SB_PERSIST_SYSTEMD")
                         .with_location(FileLocation::at_line(path, *lineno))
@@ -1492,7 +1492,7 @@ impl ScriptBehaviorEngine {
                                 Severity::Critical,
                                 Confidence::High,
                                 "curl | bash download-and-execute",
-                                "Piping curl output directly into bash executes remote code without verification — one of the most dangerous patterns in scripts.",
+                                "Piping curl output directly into bash executes remote code without verification: one of the most dangerous patterns in scripts.",
                             )
                             .with_rule_id("SB_DL_EXEC_CURL_BASH")
                             .with_location(FileLocation::at_line(path, *lineno))
@@ -1540,7 +1540,7 @@ impl ScriptBehaviorEngine {
                             Severity::Critical,
                             Confidence::High,
                             "Download-and-eval pattern in JavaScript",
-                            "fetch/http.get followed by eval() or exec() executes remotely-fetched content — a stager pattern.",
+                            "fetch/http.get followed by eval() or exec() executes remotely-fetched content: a stager pattern.",
                         )
                         .with_rule_id("SB_JS_DL_EXEC")
                         .with_location(FileLocation::file(path))
@@ -1603,7 +1603,7 @@ impl ScriptBehaviorEngine {
                                 Severity::High,
                                 Confidence::High,
                                 "PowerShell execution policy bypass",
-                                "-ExecutionPolicy Bypass disables script restrictions — almost always malicious in non-administrative scripts.",
+                                "-ExecutionPolicy Bypass disables script restrictions: almost always malicious in non-administrative scripts.",
                             )
                             .with_rule_id("SB_PS_EXEC_BYPASS")
                             .with_location(FileLocation::at_line(path, *lineno))
@@ -2044,7 +2044,7 @@ impl ScriptBehaviorEngine {
                                 Severity::High,
                                 Confidence::High,
                                 "IP geolocation API call in install script",
-                                "Calling a geolocation API during package install is a supply-chain malware evasion technique — used to skip execution in CIS/analyst countries (ua-parser-js, node-ipc).",
+                                "Calling a geolocation API during package install is a supply-chain malware evasion technique: used to skip execution in CIS/analyst countries (ua-parser-js, node-ipc).",
                             )
                             .with_rule_id("SB_GEOFENCE_CIS_EXCLUSION")
                             .with_location(FileLocation::at_line(path, *lineno))
@@ -2260,7 +2260,7 @@ impl ScriptBehaviorEngine {
                     Severity::Critical,
                     Confidence::High,
                     "Obfuscated download-and-execute",
-                    "Remote code download combined with obfuscation. Two-stage dropper pattern — a near-certain malware indicator.",
+                    "Remote code download combined with obfuscation. Two-stage dropper pattern: a near-certain malware indicator.",
                 )
                 .with_rule_id("SB_CHAIN_DL_OBFUS")
                 .with_location(FileLocation::file(path)),

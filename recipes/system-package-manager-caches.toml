@@ -1,0 +1,39 @@
+[recipe]
+id = "system-package-manager-caches"
+name = "System Package Manager Caches"
+# The Linux equivalents of the Homebrew download cache: archives the package
+# manager already unpacked and re-fetches on demand. /var/cache/apt is
+# deliberately not matched, because only root may clear it.
+description = "apt, snap and flatpak download caches"
+category = "system"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/.cache/snapcraft/**"
+min_age_days = 30
+
+# flatpak: leftover system-helper download cache.
+[[match.any_of]]
+path_glob = "~/.cache/flatpak/**"
+min_age_days = 30
+
+# PackageKit: cached download metadata.
+[[match.any_of]]
+path_glob = "~/.cache/packagekit/**"
+min_age_days = 30
+
+[action]
+type = "trash"
+prompt = "Move {size} of system package manager caches to Trash?"
+
+[test]
+should_match = [
+    "~/.cache/snapcraft/download/foo.snap",
+    "~/.cache/flatpak/system-cache/foo",
+    "~/.cache/packagekit/metadata/foo",
+]
+should_not_match = [
+    "~/.cache/other/foo",
+]

@@ -11,10 +11,20 @@ priority = 50
 [match]
 path_glob = "~/Library/Caches/deno/**"
 
+# Linux (XDG): DENO_DIR defaults to ~/.cache/deno.
+[[match.any_of]]
+path_glob = "~/.cache/deno/**"
+
 [action]
 type = "trash"
 prompt = "Move {size} of Deno cache to Trash?"
 
 [test]
-should_match = ["~/Library/Caches/deno/deps/http/foo"]
-should_not_match = ["~/Library/Caches/Homebrew"]
+should_match = [
+    "~/Library/Caches/deno/deps/http/foo",
+    "~/.cache/deno/deps/https/example.com/foo",
+]
+should_not_match = [
+    "~/Library/Caches/Homebrew",
+    "~/.cache/other/foo",
+]
