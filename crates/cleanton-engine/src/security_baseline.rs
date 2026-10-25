@@ -96,6 +96,9 @@ pub fn identity_key(source: SecurityTargetKind, name: &str) -> String {
         SecurityTargetKind::NodeProject => "node_project",
         SecurityTargetKind::PythonSitePackages => "python_site_packages",
         SecurityTargetKind::EditorExtensions => "editor_extensions",
+        SecurityTargetKind::RubyGems => "ruby_gems",
+        SecurityTargetKind::CargoRegistry => "cargo_registry",
+        SecurityTargetKind::GoModuleCache => "go_module_cache",
     };
     format!("{source_key}:{name}")
 }
