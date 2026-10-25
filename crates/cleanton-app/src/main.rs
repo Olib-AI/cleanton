@@ -4027,7 +4027,8 @@ fn run_security_removal(ui: &AppWindow, index: i32, config: &SharedConfig) {
         let outcome: Result<String, String> = worker_runtime().block_on(async move {
             match manager {
                 Some(kind) => {
-                    let outcome = PackageManagers::uninstall(kind, &[name.clone()]).await;
+                    let outcome =
+                        PackageManagers::uninstall(kind, std::slice::from_ref(&name)).await;
                     if outcome.ok {
                         Ok(match kind {
                             ManagerKind::Npm => format!("`npm uninstall -g {name}` finished."),
