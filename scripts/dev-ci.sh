@@ -80,23 +80,20 @@ cmd_report() {
         | python3 -c '
 import json, sys
 data = json.load(sys.stdin)
-print(f"run {data.get(\"status\")} / conclusion: {data.get(\"conclusion\")}")
+print("run %s / conclusion: %s" % (data.get("status"), data.get("conclusion")))
 for job in data.get("jobs", []):
-    print(f"  {job[\"status\"]:10s} {job.get(\"conclusion\") or \"-\":10s} {job[\"name\"]}")
+    print("  %-10s %-10s %s" % (job["status"], job.get("conclusion") or "-", job["name"]))
 '
 }
 
 cmd_logs() {
     require_gh
-    local run_id job
+    local run_id
     run_id="${1:-}"
-    job="${2:-}"
-    [[ -n "$run_id" ]] || die "usage: scripts/dev-ci.sh logs <run-id> [job-name]"
-    if [[ -n "$job" ]]; then
-        gh run log "$run_id" --job "$job"
-    else
-        gh run log "$run_id"
-    fi
+    [[ -n "$run_id" ]] || die "usage: scripts/dev-ci.sh logs <run-id>"
+    # `gh run log` is unavailable on older gh; `--log-failed` fetches the
+    # failed steps' log tails, which is what the driver needs after a red run.
+    gh run view "$run_id" --log-failed
 }
 
 cmd_all() {
