@@ -81,72 +81,32 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          cargo clippy --workspace --all-targets --all-features --message-format=json -- -D warnings 2>&1 \
-            | tee clippy.jsonl >/dev/null
+          cargo clippy --workspace --all-targets --all-features -- -D warnings > clippy.log 2>&1
           status=$?
-          python3 - <<'PY'
-          import json, sys
-          shown = 0
-          for line in open('clippy.jsonl', errors='replace'):
-              try:
-                  msg = json.loads(line)
-              except Exception:
-                  continue
-              if msg.get('reason') != 'compiler-message':
-                  continue
-              d = msg.get('message') or {}
-              level = d.get('level')
-              if level not in ('error', 'warning'):
-                  continue
-              text = (d.get('message') or '').replace('\n', ' ')
-              spans = [s for s in (d.get('spans') or []) if s.get('is_primary')]
-              if spans:
-                  s = spans[0]
-                  print(f"::error file={s.get('file_name')},line={s.get('line_start')},col={s.get('column_start')},title={d.get('code',{}).get('code') or 'clippy'}::{text}")
-              else:
-                  print(f"::error title={level}::{text}")
-              shown += 1
-              if shown >= 40:
-                  print("::error::more diagnostics truncated")
-                  break
-          PY
+          if [ $status -ne 0 ]; then
+            echo "clippy exited $status"
+            grep -n -E "^(error|warning)(\[|:)" clippy.log | head -40 | while IFS= read -r line; do
+              echo "::error title=clippy::$line"
+            done
+            tail -40 clippy.log | while IFS= read -r line; do
+              echo "::error title=clippy-tail::$line"
+            done
+          fi
           exit $status
 
       - name: Tests
         shell: bash
         run: |
           set -o pipefail
-          cargo test --workspace --all-features --no-fail-fast --message-format=json 2>&1 \
-            | tee tests.jsonl >/dev/null
+          cargo test --workspace --all-features --no-fail-fast > tests.log 2>&1
           status=$?
-          python3 - <<'PY'
-          import json
-          failures = []
-          compile_errors = 0
-          for line in open('tests.jsonl', errors='replace'):
-              try:
-                  msg = json.loads(line)
-              except Exception:
-                  continue
-              if msg.get('reason') == 'compiler-message':
-                  d = msg.get('message') or {}
-                  if d.get('level') != 'error':
-                      continue
-                  text = (d.get('message') or '').replace('\n', ' ')
-                  spans = [s for s in (d.get('spans') or []) if s.get('is_primary')]
-                  if spans:
-                      s = spans[0]
-                      print(f"::error file={s.get('file_name')},line={s.get('line_start')}::test build: {text}")
-                  else:
-                      print(f"::error::test build: {text}")
-                  compile_errors += 1
-                  if compile_errors >= 30:
-                      break
-              elif msg.get('reason') == 'test' and msg.get('event') == 'failed':
-                  name = msg.get('name') or '?'
-                  stdout = (msg.get('stdout') or '').replace('\n', ' | ')[:400]
-                  failures.append((name, stdout))
-          for name, stdout in failures[:20]:
-              print(f"::error title=test failed::{name}: {stdout}")
-          PY
+          if [ $status -ne 0 ]; then
+            echo "tests exited $status"
+            grep -E "^(error|warning)(\[|:)|^test .* FAILED|^---- .* stdout ----|panicked at" tests.log | head -40 | while IFS= read -r line; do
+              echo "::error title=test::$line"
+            done
+            tail -60 tests.log | while IFS= read -r line; do
+              echo "::error title=test-tail::$line"
+            done
+          fi
           exit $status
