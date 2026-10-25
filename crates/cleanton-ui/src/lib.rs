@@ -52,8 +52,8 @@ use std::sync::{
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
-use cleanton_common::{ActionType, CleantonConfig, CleanupPlan, ExecutionResult, ScanResult};
-use cleanton_engine::{AnalyzedFull, EngineEvent};
+use cleanton_common::{ActionType, CleantonConfig, CleanupPlan, ExecutionResult};
+use cleanton_engine::{AnalyzedFull, EngineEvent, ScanSummary};
 use cleanton_packages::{
     ActionOutcome, Inventory, ManagerKind, PackageManagers, plan_removal, scan_usage,
 };
@@ -1247,8 +1247,8 @@ fn handle_engine_event(event: EngineEvent, app: &mut App) {
         } => {
             app.scan_progress = Some((files_scanned, dirs_entered, bytes_seen));
         }
-        EngineEvent::ScanCompleted { result } => {
-            app.scan_result = Some(result);
+        EngineEvent::ScanCompleted { summary } => {
+            app.scan_result = Some(summary);
         }
         EngineEvent::AnalysisStarted => {
             app.set_status("Analyzing scan results against cleanup recipes...");
@@ -1365,7 +1365,7 @@ fn apply_analyzed_full(app: &mut App, full: AnalyzedFull) {
     app.set_status(&status);
 }
 
-fn scan_status(scan: &ScanResult) -> String {
+fn scan_status(scan: &ScanSummary) -> String {
     match (scan.incomplete, scan.errors.len()) {
         (true, 0) => "Analysis complete, but scan coverage is incomplete.".to_owned(),
         (true, 1) => {
@@ -1462,7 +1462,7 @@ fn trigger_scan(app: &mut App, tx: &mpsc::Sender<TuiEvent>) {
                     .send(TuiEvent::Engine {
                         operation_id,
                         event: EngineEvent::ScanCompleted {
-                            result: scan_res.clone(),
+                            summary: ScanSummary::from_scan(&scan_res),
                         },
                     })
                     .await;

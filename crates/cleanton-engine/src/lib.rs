@@ -17,7 +17,7 @@ pub use docker::{
     BuildCacheInfo, ContainerInfo, DockerAnalysis, DockerCleaner, DockerCleanupPlan,
     DockerCleanupResult, ImageInfo, VolumeInfo,
 };
-pub use events::EngineEvent;
+pub use events::{EngineEvent, ScanSummary};
 pub use ml::{
     ActionAnnotation, AnnotatedAction, DEFAULT_ML_CONFIDENCE_THRESHOLD, FileClassifier,
     MlAdjustment,

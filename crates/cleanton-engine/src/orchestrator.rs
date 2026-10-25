@@ -106,8 +106,10 @@ impl Orchestrator {
         };
         progress_task.abort();
 
+        // Hand the UIs an aggregate summary, never the full inventory: cloning
+        // millions of entries through the event channel doubled peak memory.
         let _ = event_tx.try_send(EngineEvent::ScanCompleted {
-            result: scan.clone(),
+            summary: crate::events::ScanSummary::from_scan(&scan),
         });
         Ok(scan)
     }

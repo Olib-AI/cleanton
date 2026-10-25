@@ -287,14 +287,22 @@ fn scan_root(
     }
 }
 
+/// Worker-pool sizing.
+///
+/// `parallel_threads == 0` means "automatic". Automatic is deliberately NOT
+/// "one worker per core": a scanning tool that saturates every core makes the
+/// machine unpleasant to use while it runs, and every in-flight worker also
+/// holds its own read-dir batch, so the memory high-water mark grows with the
+/// pool size. Half the cores, clamped to 2..=8, keeps a full home scan fast
+/// while leaving headroom for the rest of the machine. An explicit
+/// `parallel_threads` value from the config is honoured exactly.
 fn scan_parallelism(options: &ScanOptions) -> jwalk::Parallelism {
     if options.parallel_threads == 0 {
-        jwalk::Parallelism::RayonDefaultPool {
-            busy_timeout: Duration::from_secs(1),
-        }
-    } else {
-        jwalk::Parallelism::RayonNewPool(options.parallel_threads)
+        let cores = std::thread::available_parallelism().map_or(4, std::num::NonZeroUsize::get);
+        let workers = (cores / 2).clamp(2, 8).min(cores.max(1));
+        return jwalk::Parallelism::RayonNewPool(workers);
     }
+    jwalk::Parallelism::RayonNewPool(options.parallel_threads)
 }
 
 fn process_scan_dir(
@@ -531,19 +539,17 @@ fn excluded_roots(options: &ScanOptions) -> Vec<PathBuf> {
     .collect()
 }
 
+/// Roll per-file sizes up into their ancestor directories.
+///
+/// Both phases are O(entries): every file is folded into its DIRECT parent once,
+/// then the per-directory totals are propagated bottom-up (deepest directory
+/// first) in a single ordered pass. The previous implementation folded every
+/// file into *every* one of its ancestors, which is O(entries x depth) full-path
+/// hash lookups per scan — tens of millions of them on a full home directory,
+/// where depth is up to `max_depth` — and it also cloned every directory path
+/// twice (once as a `HashSet` key, once as a `HashMap` key) purely to index them,
+/// which is a large, avoidable allocation spike on multi-million-entry scans.
 fn aggregate_directory_sizes(result: &mut ScanResult) {
-    let dir_paths = result
-        .entries
-        .iter()
-        .filter(|entry| entry.kind == FileKind::Directory)
-        .map(|entry| entry.path.clone())
-        .collect::<HashSet<_>>();
-
-    let mut totals = dir_paths
-        .iter()
-        .map(|path| (path.clone(), (0_u64, 0_u64)))
-        .collect::<HashMap<_, _>>();
-
     let mut inode_seen = HashSet::<(u64, u64)>::new();
 
     // 1. De-duplicate entry sizes for hardlinked inodes first
@@ -559,23 +565,78 @@ fn aggregate_directory_sizes(result: &mut ScanResult) {
         }
     }
 
-    // 2. Accumulate sizes into parent directories
-    for entry in &result.entries {
-        if entry.kind != FileKind::File {
-            continue;
+    // 2. Per-directory subtree totals. Borrowed path keys keep this allocation
+    //    free beyond the accumulator vectors themselves.
+    let (dir_entry_indices, totals) = {
+        let entries = &result.entries;
+        let mut slot_of: HashMap<&Path, usize> = HashMap::new();
+        let mut dir_paths: Vec<&Path> = Vec::new();
+        let mut dir_entry_indices: Vec<usize> = Vec::new();
+        for (index, entry) in entries.iter().enumerate() {
+            if entry.kind != FileKind::Directory || slot_of.contains_key(entry.path.as_path()) {
+                continue;
+            }
+            slot_of.insert(entry.path.as_path(), dir_paths.len());
+            dir_paths.push(entry.path.as_path());
+            dir_entry_indices.push(index);
         }
 
-        for ancestor in ancestors(&entry.path) {
-            if let Some((logical, allocated)) = totals.get_mut(ancestor) {
-                *logical = logical.saturating_add(entry.logical_bytes);
-                *allocated = allocated.saturating_add(entry.allocated_bytes);
+        let mut totals = vec![(0_u64, 0_u64); dir_paths.len()];
+
+        // Direct children only: one lookup per file instead of one per ancestor.
+        for entry in entries {
+            if entry.kind != FileKind::File {
+                continue;
+            }
+            let Some(parent) = entry.path.parent() else {
+                continue;
+            };
+            let Some(slot) = slot_of.get(parent).copied() else {
+                continue;
+            };
+            if let Some(total) = totals.get_mut(slot) {
+                total.0 = total.0.saturating_add(entry.logical_bytes);
+                total.1 = total.1.saturating_add(entry.allocated_bytes);
             }
         }
-    }
+
+        // Bottom-up: a directory's own subtree total lands in its parent before
+        // the parent is itself folded upward.
+        let mut order: Vec<usize> = (0..dir_paths.len()).collect();
+        order.sort_unstable_by_key(|slot| {
+            std::cmp::Reverse(dir_paths.get(*slot).map_or(0, |path| path.components().count()))
+        });
+        for slot in order {
+            let Some(path) = dir_paths.get(slot) else {
+                continue;
+            };
+            let Some(parent) = path.parent() else {
+                continue;
+            };
+            let Some(parent_slot) = slot_of.get(parent).copied() else {
+                continue;
+            };
+            if parent_slot == slot {
+                continue;
+            }
+            let Some((logical, allocated)) = totals.get(slot).copied() else {
+                continue;
+            };
+            if let Some(total) = totals.get_mut(parent_slot) {
+                total.0 = total.0.saturating_add(logical);
+                total.1 = total.1.saturating_add(allocated);
+            }
+        }
+
+        (dir_entry_indices, totals)
+    };
 
     // 3. Update directory entries with their subtree sizes
-    for entry in &mut result.entries {
-        if let Some((logical, allocated)) = totals.get(&entry.path).copied() {
+    for (slot, index) in dir_entry_indices.iter().enumerate() {
+        let Some(entry) = result.entries.get_mut(*index) else {
+            continue;
+        };
+        if let Some((logical, allocated)) = totals.get(slot).copied() {
             entry.logical_bytes = logical;
             entry.allocated_bytes = allocated;
         }
@@ -594,10 +655,6 @@ fn aggregate_directory_sizes(result: &mut ScanResult) {
         .filter(|entry| entry.kind == FileKind::File)
         .map(|entry| entry.allocated_bytes)
         .sum();
-}
-
-fn ancestors(path: &Path) -> impl Iterator<Item = &Path> {
-    path.ancestors().skip(1)
 }
 
 #[cfg(test)]
