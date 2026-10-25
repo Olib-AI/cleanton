@@ -153,7 +153,7 @@ fn match_recipes(scan: &ScanResult, recipes: &RecipeSet) -> Vec<CleanupAction> {
     let suppressed = suppressed_roots(scan, &compiled, &newest, &markers);
 
     let mut candidates_buf = Vec::with_capacity(16);
-    let mut matched: Vec<(PlannedAction, bool)> = scan
+    let mut matched: Vec<(CleanupAction, bool)> = scan
         .entries
         .iter()
         .filter_map(|entry| {
@@ -169,13 +169,17 @@ fn match_recipes(scan: &ScanResult, recipes: &RecipeSet) -> Vec<CleanupAction> {
                     |dir, marker| markers.contains(dir, marker),
                     |dir| newest.get(dir).copied(),
                 )
-                .map(|action| (action, entry.is_dir && entry.size == 0))
+                .map(|action| {
+                    let needs_size =
+                        entry.kind == FileKind::Directory && entry.allocated_bytes == 0;
+                    (action, needs_size)
+                })
         })
         .collect();
 
     // When a matched directory sat right at the walker's `max_depth` ceiling,
-    // its children were not walked so `entry.size` is 0. Backfill those via
-    // targeted sizing so reclaimable-byte totals remain accurate.
+    // its children were not walked so `entry.allocated_bytes` is 0. Backfill
+    // those via targeted sizing so reclaimable-byte totals remain accurate.
     let unmeasured: Vec<PathBuf> = matched
         .iter()
         .filter(|(_, needs_size)| *needs_size)
@@ -183,15 +187,20 @@ fn match_recipes(scan: &ScanResult, recipes: &RecipeSet) -> Vec<CleanupAction> {
         .map(|(action, _)| action.target.clone())
         .collect();
     if !unmeasured.is_empty() {
-        let sized: HashMap<PathBuf, u64> = cleanton_scanner::size_targets(&unmeasured)
+        let sized: HashMap<PathBuf, (u64, u64)> = cleanton_scanner::size_targets(&unmeasured)
+            .targets
             .into_iter()
+            .map(|ts| (ts.path, (ts.logical_bytes, ts.allocated_bytes)))
             .collect();
         for (action, needs_size) in &mut matched {
             if *needs_size
-                && let Some(&bytes) = sized.get(&action.target)
-                && bytes > 0
+                && let Some(&(logical, allocated)) = sized.get(&action.target)
+                && (logical > 0 || allocated > 0)
             {
-                action.size = bytes;
+                action.logical_bytes = logical;
+                action.reclaimable_bytes = allocated;
+                action.fingerprint.logical_bytes = logical;
+                action.fingerprint.allocated_bytes = allocated;
             }
         }
     }

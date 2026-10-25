@@ -1813,7 +1813,8 @@ fn enumerate_python_packages(target: &SecurityTarget, out: &mut Vec<PackageCandi
 
     // Index `<name>-<version>.dist-info` directories once per `site-packages`
     // root instead of re-reading the directory for every package.
-    let mut dist_versions: HashMap<String, String> = HashMap::new();
+    let mut dist_versions: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
     for path in &paths {
         if !path.is_dir() {
             continue;
