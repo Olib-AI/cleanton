@@ -32,6 +32,18 @@ pub(crate) const BUILTIN_RECIPES: &[(&str, &str)] = &[
         include_str!("../../../recipes/rust-sccache.toml"),
     ),
     (
+        "recipes/python-ruff-cache.toml",
+        include_str!("../../../recipes/python-ruff-cache.toml"),
+    ),
+    (
+        "recipes/python-precommit-cache.toml",
+        include_str!("../../../recipes/python-precommit-cache.toml"),
+    ),
+    (
+        "recipes/node-corepack-cache.toml",
+        include_str!("../../../recipes/node-corepack-cache.toml"),
+    ),
+    (
         "recipes/rust-rustup-toolchains.toml",
         include_str!("../../../recipes/rust-rustup-toolchains.toml"),
     ),

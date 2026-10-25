@@ -331,6 +331,17 @@ fn process_scan_dir(
             && child_ignored(read_dir_state, parent_ignored, &child_path, is_dir);
     }
 
+    // Never descend into `.git` internals: object stores are huge, no recipe
+    // may ever target them (deleting inside a repository would corrupt it),
+    // and project detection only needs the `.git` entry itself — which the
+    // parent directory's pass has already yielded by the time we get here.
+    // Clearing this directory's children cuts the single biggest wasted
+    // subtree of most home scans.
+    if path.file_name().and_then(|name| name.to_str()) == Some(".git") {
+        children.clear();
+        return;
+    }
+
     children.retain(|child_result| match child_result {
         Ok(child) => {
             let child_path = child.path();
@@ -1041,6 +1052,54 @@ mod tests {
         assert_eq!(result.errors.len(), 1);
         assert_eq!(result.errors[0].path, unreadable);
         assert_eq!(result.errors[0].message, "permission denied");
+    }
+
+    #[tokio::test]
+    async fn git_internals_are_not_walked_but_project_is_detected() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let git = temp.path().join(".git");
+        fs::create_dir_all(git.join("objects/pack")).expect("create .git");
+        fs::write(git.join("objects/pack/blob.bin"), [1_u8; 8192]).expect("write blob");
+        fs::write(temp.path().join("Cargo.toml"), "[package]\nname=\"test\"")
+            .expect("write cargo.toml");
+
+        let (progress_tx, _progress_rx) = mpsc::channel(1);
+        let result = scan(
+            ScanOptions {
+                roots: vec![temp.path().to_path_buf()],
+                max_depth: 10,
+                ..ScanOptions::default()
+            },
+            progress_tx,
+        )
+        .await
+        .expect("scan");
+
+        // The `.git` directory entry itself may be yielded, but nothing
+        // beneath it is ever inventoried.
+        assert!(
+            result
+                .entries
+                .iter()
+                .all(|entry| entry.path == git || !entry.path.starts_with(&git)),
+            ".git internals must not be walked: {:?}",
+            result
+                .entries
+                .iter()
+                .filter(|entry| entry.path != git && entry.path.starts_with(&git))
+                .map(|entry| &entry.path)
+                .collect::<Vec<_>>()
+        );
+        // Marker-file detection still works: the Rust project at the root
+        // is found (the `.git` entry adds a second, Git-ecosystem root for
+        // the same path, as before this change).
+        assert!(
+            result.project_roots.iter().any(|project| {
+                project.path == temp.path() && project.ecosystem == cleanton_common::Ecosystem::Rust
+            }),
+            "expected the Rust project root, got {:?}",
+            result.project_roots
+        );
     }
 
     #[tokio::test]

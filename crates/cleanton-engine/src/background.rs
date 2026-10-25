@@ -51,6 +51,13 @@ pub struct WatchOptions {
     pub burst: Duration,
     /// Quiet ticks before the idle interval doubles towards `max_idle`.
     pub quiet_ticks_before_backoff: u32,
+    /// Disk-used percentage (of the home volume) at/above which a
+    /// `ResourcePressure` event suggests a disk cleanup. `0` disables.
+    pub disk_pressure_percent: u8,
+    /// Memory-used percentage at/above which a `ResourcePressure` event
+    /// suggests memory relief. `0` disables. Cleanton never kills processes
+    /// or purges memory itself — the event is advice, acted on by the user.
+    pub memory_pressure_percent: u8,
 }
 
 impl Default for WatchOptions {
@@ -60,6 +67,8 @@ impl Default for WatchOptions {
             max_idle: Duration::from_mins(15),
             burst: Duration::from_secs(5),
             quiet_ticks_before_backoff: 4,
+            disk_pressure_percent: 90,
+            memory_pressure_percent: 90,
         }
     }
 }
@@ -76,6 +85,8 @@ impl WatchOptions {
             max_idle: defaults.max_idle.max(idle),
             burst: defaults.burst.min(idle),
             quiet_ticks_before_backoff: defaults.quiet_ticks_before_backoff,
+            disk_pressure_percent: defaults.disk_pressure_percent,
+            memory_pressure_percent: defaults.memory_pressure_percent,
         }
     }
 }
@@ -100,6 +111,16 @@ pub enum WatchEvent {
     /// A newly installed package runs a script at install time. Not a verdict,
     /// just the fact that makes install-time compromise possible.
     InstallHook { package: String, hook: String },
+    /// Disk or memory usage crossed its pressure threshold. Edge-triggered:
+    /// emitted once when pressure starts, and again only after usage has
+    /// dropped back below the threshold. `suggestion` is the user-facing
+    /// cleanup advice (the watcher itself never deletes or purges anything).
+    ResourcePressure {
+        kind: ResourceKind,
+        used_percent: u8,
+        available_bytes: u64,
+        suggestion: String,
+    },
     /// A newly installed package did not come back clean from the content scan.
     ContentFinding {
         package: String,
@@ -117,6 +138,24 @@ impl WatchEvent {
     }
 }
 
+/// Which resource a [`WatchEvent::ResourcePressure`] event is about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResourceKind {
+    Disk,
+    Memory,
+}
+
+impl ResourceKind {
+    /// Short label for logs / JSON (`"disk"` / `"memory"`).
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Disk => "disk",
+            Self::Memory => "memory",
+        }
+    }
+}
+
 /// Per-root snapshot: the directory mtime plus the entry mtimes it was taken
 /// at. Kept as `BTreeMap` so diffing is deterministic and cheap to print.
 #[derive(Debug, Clone, Default)]
@@ -131,6 +170,8 @@ pub struct PackageWatcher {
     roots: Vec<(SecurityTarget, RootState)>,
     advisories: AdvisoryDatabase,
     options: WatchOptions,
+    disk_pressure_active: bool,
+    memory_pressure_active: bool,
 }
 
 impl PackageWatcher {
@@ -150,6 +191,8 @@ impl PackageWatcher {
                 .collect(),
             advisories: AdvisoryDatabase::load(),
             options,
+            disk_pressure_active: false,
+            memory_pressure_active: false,
         }
     }
 
@@ -220,8 +263,63 @@ impl PackageWatcher {
                 new_packages: examined,
             });
         }
+        events.extend(self.resource_pressure_events());
         if events.is_empty() {
             events.push(WatchEvent::Quiet);
+        }
+        events
+    }
+
+    /// Edge-triggered disk/memory pressure check: two syscalls-scale reads
+    /// (`statfs` on the home volume, `sysconf` for memory), so it is cheap
+    /// enough to run every tick alongside the package-root stats.
+    fn resource_pressure_events(&mut self) -> Vec<WatchEvent> {
+        let mut events = Vec::new();
+        if self.options.disk_pressure_percent > 0
+            && let Some(home) = std::env::var_os("HOME").map(PathBuf::from)
+            && let Ok(capacity) = cleanton_scanner::volume_capacity(&home)
+            && capacity.total_bytes > 0
+        {
+            #[allow(
+                clippy::cast_precision_loss,
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss
+            )]
+            let used_percent = ((capacity.used_bytes as f64 / capacity.total_bytes as f64) * 100.0)
+                .round()
+                .clamp(0.0, 100.0) as u8;
+            let active = used_percent >= self.options.disk_pressure_percent;
+            if active && !self.disk_pressure_active {
+                events.push(WatchEvent::ResourcePressure {
+                    kind: ResourceKind::Disk,
+                    used_percent,
+                    available_bytes: capacity.available_bytes,
+                    suggestion: "Disk is nearly full: run a Cleanton scan and clean                                  caches, or empty the Trash to reclaim trashed space."
+                        .to_owned(),
+                });
+            }
+            self.disk_pressure_active = active;
+        }
+        if self.options.memory_pressure_percent > 0
+            && let Some(memory) = cleanton_scanner::memory_usage()
+        {
+            #[allow(
+                clippy::cast_precision_loss,
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss
+            )]
+            let used_percent = (memory.used_fraction * 100.0).round().clamp(0.0, 100.0) as u8;
+            let active = used_percent >= self.options.memory_pressure_percent;
+            if active && !self.memory_pressure_active {
+                events.push(WatchEvent::ResourcePressure {
+                    kind: ResourceKind::Memory,
+                    used_percent,
+                    available_bytes: memory.available_bytes,
+                    suggestion: "Memory is nearly full: quit memory-heavy apps, or                                  restart the heaviest one. Cleanton does not kill                                  processes or purge memory for you."
+                        .to_owned(),
+                });
+            }
+            self.memory_pressure_active = active;
         }
         events
     }
@@ -510,6 +608,47 @@ mod tests {
             )),
             "expected the lifecycle hook, got {events:?}"
         );
+    }
+
+    #[test]
+    fn pressure_events_are_edge_triggered_and_thresholds_can_disable() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("node_modules");
+        std::fs::create_dir_all(&root).unwrap();
+        let target = SecurityTarget {
+            kind: SecurityTargetKind::NodeGlobal,
+            root,
+        };
+        // Threshold of 1% is crossed on any real machine, 0 disables.
+        let options = WatchOptions {
+            disk_pressure_percent: 1,
+            memory_pressure_percent: 0,
+            ..WatchOptions::default()
+        };
+        let mut watcher = PackageWatcher::new(vec![target.clone()], options);
+        let first = watcher.resource_pressure_events();
+        assert_eq!(
+            first.len(),
+            1,
+            "expected one disk pressure event: {first:?}"
+        );
+        assert!(matches!(
+            first.first(),
+            Some(WatchEvent::ResourcePressure {
+                kind: ResourceKind::Disk,
+                ..
+            })
+        ));
+        // Still under pressure: no repeat event.
+        assert!(watcher.resource_pressure_events().is_empty());
+
+        let off = WatchOptions {
+            disk_pressure_percent: 0,
+            memory_pressure_percent: 0,
+            ..WatchOptions::default()
+        };
+        let mut watcher = PackageWatcher::new(vec![target], off);
+        assert!(watcher.resource_pressure_events().is_empty());
     }
 
     #[test]

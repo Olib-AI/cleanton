@@ -713,3 +713,33 @@ Every built-in recipe must satisfy these checks before it can ship:
 6. It documents what command regenerates the data when claiming `safe`.
 7. It has a minimum age unless the target is provably pure build output.
 8. It treats cloud-provider, File Provider, and external-volume paths as opt-in.
+
+### `python-ruff-cache`
+| Field | Value |
+|---|---|
+| **Name** | Ruff Cache |
+| **Safety** | `safe` |
+| **Match** | `~/.cache/ruff/**` or a project `.ruff_cache` beside a Python project marker |
+| **Min Age** | 14 days |
+| **Action** | Trash |
+| **Notes** | Rebuilt automatically on the next ruff run. |
+
+### `python-precommit-cache`
+| Field | Value |
+|---|---|
+| **Name** | pre-commit Cache |
+| **Safety** | `safe` |
+| **Match** | `~/.cache/pre-commit/**` |
+| **Min Age** | 30 days |
+| **Action** | Trash |
+| **Notes** | Hook environments are re-cloned and rebuilt on the next run. |
+
+### `node-corepack-cache`
+| Field | Value |
+|---|---|
+| **Name** | Corepack Cache |
+| **Safety** | `safe` |
+| **Match** | `~/.cache/node/corepack/**` or `~/Library/Caches/node/corepack/**` |
+| **Min Age** | 30 days |
+| **Action** | Trash |
+| **Notes** | Downloaded pnpm/yarn shims are re-downloaded on demand. |
