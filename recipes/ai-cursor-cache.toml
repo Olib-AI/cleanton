@@ -16,10 +16,24 @@ priority = 50
 path_glob = "~/Library/Application Support/Cursor/*Cache*/**"
 min_age_days = 7
 
+[[match.any_of]]
+path_glob = "~/.config/Cursor/*Cache*/**"
+min_age_days = 7
+
 [action]
 type = "trash"
 prompt = "Move {size} of Cursor cache to Trash?"
 
 [test]
-should_match = ["~/Library/Application Support/Cursor/Cache/foo", "~/Library/Application Support/Cursor/Code Cache/js/index_0", "~/Library/Application Support/Cursor/GPUCache/data_1"]
-should_not_match = ["~/Library/Application Support/Cursor/User", "~/Library/Application Support/Cursor/User/globalStorage/storage.json", "~/Library/Application Support/Cursor/Session Storage/000003.log"]
+should_match = [
+    "~/Library/Application Support/Cursor/Cache/foo",
+    "~/Library/Application Support/Cursor/Code Cache/js/index_0",
+    "~/Library/Application Support/Cursor/GPUCache/data_1",
+    "~/.config/Cursor/CachedData/abc/module.js",
+]
+should_not_match = [
+    "~/Library/Application Support/Cursor/User",
+    "~/Library/Application Support/Cursor/User/globalStorage/storage.json",
+    "~/Library/Application Support/Cursor/Session Storage/000003.log",
+    "~/.config/Cursor/User/globalStorage/storage.json",
+]

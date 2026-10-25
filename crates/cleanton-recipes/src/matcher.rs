@@ -511,12 +511,567 @@ const SENSITIVE_BASENAMES: &[&str] = &[
 ];
 
 fn is_sensitive_basename(path: &Path) -> bool {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| {
-            let lower = name.to_ascii_lowercase();
-            SENSITIVE_BASENAMES.iter().any(|item| *item == lower)
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    // Every basename in SENSITIVE_BASENAMES is <= 20 ASCII bytes; stack-lowercasing
+    // avoids allocating a heap String for every scanned file on the hot path.
+    if name.is_empty() || name.len() > 32 || !name.is_ascii() {
+        return false;
+    }
+    let mut buf = [0_u8; 32];
+    let bytes = name.as_bytes();
+    for (dst, src) in buf.iter_mut().zip(bytes.iter()) {
+        *dst = src.to_ascii_lowercase();
+    }
+    let Ok(lower) = std::str::from_utf8(buf.get(..bytes.len()).unwrap_or(&[])) else {
+        return false;
+    };
+    SENSITIVE_BASENAMES.contains(&lower)
+}
+
+#[derive(Debug)]
+enum CompiledNameMatcher {
+    Exact(String),
+    Glob(Pattern),
+}
+
+impl CompiledNameMatcher {
+    fn compile(raw: &str) -> Option<Self> {
+        if !contains_glob_meta(raw) {
+            Some(Self::Exact(raw.to_owned()))
+        } else {
+            Pattern::new(raw).ok().map(Self::Glob)
+        }
+    }
+
+    fn matches(&self, name: &str) -> bool {
+        match self {
+            Self::Exact(expected) => name == expected,
+            Self::Glob(pattern) => pattern.matches(name),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct CompiledPathGlob {
+    full: Option<Pattern>,
+    stripped_dir_base: Option<Pattern>,
+    literal_prefix: Option<PathBuf>,
+    required_substring: Option<String>,
+}
+
+impl CompiledPathGlob {
+    fn compile(raw: &str, min_age_days: Option<u64>) -> Self {
+        let expanded = if raw.starts_with('~') {
+            expand_tilde(&PathBuf::from(raw))
+                .to_string_lossy()
+                .into_owned()
+        } else {
+            raw.to_owned()
+        };
+        let full = Pattern::new(&expanded).ok();
+        let stripped_dir_base = if min_age_days.is_none() {
+            expanded
+                .strip_suffix("/**")
+                .and_then(|base| Pattern::new(base).ok())
+        } else {
+            None
+        };
+        let effective_for_prefix = expanded.strip_suffix("/**").unwrap_or(&expanded);
+        let literal_prefix = extract_literal_prefix(effective_for_prefix);
+        let required_substring = if literal_prefix.is_none() {
+            extract_longest_literal_segment(effective_for_prefix)
+        } else {
+            None
+        };
+        Self {
+            full,
+            stripped_dir_base,
+            literal_prefix,
+            required_substring,
+        }
+    }
+
+    #[inline]
+    fn matches_entry(&self, entry: &FileEntry) -> bool {
+        if let Some(prefix) = &self.literal_prefix
+            && !entry.path.starts_with(prefix)
+        {
+            return false;
+        }
+        if let Some(required) = &self.required_substring {
+            let path_lossy = entry.path.to_string_lossy();
+            if !path_lossy.contains(required.as_str()) {
+                return false;
+            }
+        }
+        if self
+            .full
+            .as_ref()
+            .is_some_and(|pattern| pattern.matches_path(&entry.path))
+        {
+            return true;
+        }
+        entry.kind == FileKind::Directory
+            && self
+                .stripped_dir_base
+                .as_ref()
+                .is_some_and(|base| base.matches_path(&entry.path))
+    }
+}
+
+fn contains_glob_meta(text: &str) -> bool {
+    text.bytes().any(|b| matches!(b, b'*' | b'?' | b'[' | b']'))
+}
+
+fn extract_literal_prefix(pattern: &str) -> Option<PathBuf> {
+    if pattern.is_empty() || pattern.starts_with("./") || pattern.contains('\\') {
+        return None;
+    }
+    let leading_slash = pattern.starts_with('/');
+    let mut prefix = if leading_slash {
+        PathBuf::from("/")
+    } else {
+        PathBuf::new()
+    };
+    let mut count = 0_usize;
+    for part in pattern.split('/') {
+        if part.is_empty() {
+            continue;
+        }
+        if part == "." || part == ".." || contains_glob_meta(part) {
+            break;
+        }
+        prefix.push(part);
+        count = count.saturating_add(1);
+    }
+    (count > 0).then_some(prefix)
+}
+
+fn extract_longest_literal_segment(pattern: &str) -> Option<String> {
+    pattern
+        .split('/')
+        .filter(|part| {
+            !part.is_empty() && *part != "." && *part != ".." && !contains_glob_meta(part)
         })
+        .max_by_key(|part| part.len())
+        .filter(|part| part.len() >= 2)
+        .map(str::to_owned)
+}
+
+#[derive(Debug)]
+struct CompiledSpec {
+    exclude_names: Vec<String>,
+    exclude_paths: Vec<Option<Pattern>>,
+    directory_name: Option<String>,
+    file_name: Option<Option<CompiledNameMatcher>>,
+    file_extensions: Option<Vec<String>>,
+    path_glob: Option<CompiledPathGlob>,
+    parent_must_contain: Option<Vec<String>>,
+    parent_must_contain_any: Option<Vec<String>>,
+    self_must_contain: Option<Vec<String>>,
+    min_size_bytes: Option<u64>,
+    min_age_days: Option<u64>,
+}
+
+impl CompiledSpec {
+    fn compile(spec: &crate::MatchSpec) -> Self {
+        let exclude_paths = spec
+            .exclude
+            .paths
+            .iter()
+            .map(|raw| {
+                let expanded = if raw.starts_with('~') {
+                    expand_tilde(&PathBuf::from(raw))
+                        .to_string_lossy()
+                        .into_owned()
+                } else {
+                    raw.clone()
+                };
+                Pattern::new(&expanded).ok()
+            })
+            .collect();
+        let file_name = spec
+            .file_name
+            .as_deref()
+            .map(CompiledNameMatcher::compile);
+        let file_extensions = spec.file_extension.as_ref().map(|exts| {
+            exts.iter()
+                .map(|ext| ext.strip_prefix('.').unwrap_or(ext).to_owned())
+                .collect()
+        });
+        let path_glob = spec
+            .path_glob
+            .as_deref()
+            .map(|raw| CompiledPathGlob::compile(raw, spec.min_age_days));
+
+        Self {
+            exclude_names: spec.exclude.names.clone(),
+            exclude_paths,
+            directory_name: spec.directory_name.clone(),
+            file_name,
+            file_extensions,
+            path_glob,
+            parent_must_contain: spec.parent_must_contain.clone(),
+            parent_must_contain_any: spec.parent_must_contain_any.clone(),
+            self_must_contain: spec.self_must_contain.clone(),
+            min_size_bytes: spec.min_size_mb.map(|mb| mb.saturating_mul(1_048_576)),
+            min_age_days: spec.min_age_days,
+        }
+    }
+
+    fn selects_entry(
+        &self,
+        entry: &FileEntry,
+        entry_name: Option<&str>,
+        entry_ext: Option<&str>,
+        dir_contains: &impl Fn(&Path, &str) -> bool,
+    ) -> bool {
+        if let Some( expected ) = &self.directory_name {
+            if entry.kind != FileKind::Directory || entry_name != Some(expected.as_str()) {
+                return false;
+            }
+        }
+        if let Some(compiled_name) = &self.file_name {
+            if entry.kind != FileKind::File {
+                return false;
+            }
+            let Some(matcher) = compiled_name.as_ref() else {
+                return false;
+            };
+            let Some(actual) = entry_name else {
+                return false;
+            };
+            if !matcher.matches(actual) {
+                return false;
+            }
+        }
+        if let Some(extensions) = &self.file_extensions {
+            if entry.kind != FileKind::File {
+                return false;
+            }
+            let Some(ext) = entry_ext else {
+                return false;
+            };
+            if !extensions.iter().any(|item| item == ext) {
+                return false;
+            }
+        }
+        if !self.exclude_names.is_empty()
+            && entry
+                .path
+                .file_name()
+                .is_some_and(|candidate| self.exclude_names.iter().any(|n| candidate == n.as_str()))
+        {
+            return false;
+        }
+        if self.exclude_paths.iter().any(|pat| {
+            pat.as_ref()
+                .is_some_and(|compiled| compiled.matches_path(&entry.path))
+        }) {
+            return false;
+        }
+        if let Some(glob) = &self.path_glob
+            && !glob.matches_entry(entry)
+        {
+            return false;
+        }
+        if let Some(markers) = &self.parent_must_contain {
+            let Some(parent) = entry.path.parent() else {
+                return false;
+            };
+            if !markers.iter().all(|marker| dir_contains(parent, marker)) {
+                return false;
+            }
+        }
+        if let Some(markers) = &self.parent_must_contain_any {
+            let Some(parent) = entry.path.parent() else {
+                return false;
+            };
+            if !markers.iter().any(|marker| dir_contains(parent, marker)) {
+                return false;
+            }
+        }
+        if let Some(markers) = &self.self_must_contain {
+            if entry.kind != FileKind::Directory {
+                return false;
+            }
+            if !markers
+                .iter()
+                .all(|marker| dir_contains(&entry.path, marker))
+            {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn gates_pass(
+        &self,
+        entry: &FileEntry,
+        newest_in_subtree: &impl Fn(&Path) -> Option<SystemTime>,
+    ) -> bool {
+        if let Some(min_bytes) = self.min_size_bytes
+            && entry.allocated_bytes < min_bytes
+        {
+            return false;
+        }
+        if let Some(min_age_days) = self.min_age_days {
+            let modified = if entry.kind == FileKind::Directory {
+                newest_in_subtree(&entry.path).or(entry.modified)
+            } else {
+                entry.modified
+            };
+            if !is_old_enough(modified, min_age_days) {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+#[derive(Debug)]
+struct CompiledRecipe<'a> {
+    doc: &'a RecipeDocument,
+    has_gates: bool,
+    specs: Vec<CompiledSpec>,
+}
+
+/// Lock-free, precompiled, indexed matcher over an ordered slice of recipes.
+///
+/// Built once per analysis pass so bulk matching avoids all `RwLock` contention,
+/// redundant `ProtectedPaths` / sensitive-basename checks, and irrelevant glob
+/// evaluations.
+#[derive(Debug)]
+pub struct CompiledRecipeMatcher<'a> {
+    recipes: Vec<CompiledRecipe<'a>>,
+    home_dir: Option<PathBuf>,
+    by_dir_name: HashMap<String, Vec<usize>>,
+    by_file_ext: HashMap<String, Vec<usize>>,
+    by_home_top_dir: HashMap<String, Vec<usize>>,
+    fallback_dirs: Vec<usize>,
+    fallback_files: Vec<usize>,
+}
+
+impl<'a> CompiledRecipeMatcher<'a> {
+    #[must_use]
+    pub fn new(ordered: &[&'a RecipeDocument]) -> Self {
+        let home_dir = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .filter(|p| p.is_absolute());
+        let mut recipes = Vec::with_capacity(ordered.len());
+        let mut by_dir_name: HashMap<String, Vec<usize>> = HashMap::new();
+        let mut by_file_ext: HashMap<String, Vec<usize>> = HashMap::new();
+        let mut by_home_top_dir: HashMap<String, Vec<usize>> = HashMap::new();
+        let mut fallback_dirs: Vec<usize> = Vec::new();
+        let mut fallback_files: Vec<usize> = Vec::new();
+
+        for (recipe_idx, &doc) in ordered.iter().enumerate() {
+            let specs = std::iter::once(&doc.matcher)
+                .chain(doc.matcher.any_of.iter())
+                .map(CompiledSpec::compile)
+                .collect::<Vec<_>>();
+            let has_gates = recipe_has_gates(doc);
+
+            for spec in &specs {
+                if let Some(dir_name) = &spec.directory_name {
+                    push_unique(by_dir_name.entry(dir_name.clone()).or_default(), recipe_idx);
+                    continue;
+                }
+                if let Some(exts) = &spec.file_extensions {
+                    for ext in exts {
+                        push_unique(by_file_ext.entry(ext.clone()).or_default(), recipe_idx);
+                    }
+                    continue;
+                }
+                if let Some(top) = home_dir
+                    .as_deref()
+                    .and_then(|home| spec_home_top_component(spec, home))
+                {
+                    push_unique(by_home_top_dir.entry(top).or_default(), recipe_idx);
+                    continue;
+                }
+                if spec.file_name.is_none() {
+                    push_unique(&mut fallback_dirs, recipe_idx);
+                }
+                push_unique(&mut fallback_files, recipe_idx);
+            }
+
+            recipes.push(CompiledRecipe {
+                doc,
+                has_gates,
+                specs,
+            });
+        }
+
+        Self {
+            recipes,
+            home_dir,
+            by_dir_name,
+            by_file_ext,
+            by_home_top_dir,
+            fallback_dirs,
+            fallback_files,
+        }
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.recipes.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.recipes.is_empty()
+    }
+
+    /// Return the indices of gated recipes whose directory selector matched `entry`
+    /// (`FileKind::Directory`) while every matching spec failed its size/age gate.
+    pub fn gate_failed_recipe_indices(
+        &self,
+        entry: &FileEntry,
+        candidates_buf: &mut Vec<usize>,
+        dir_contains: impl Fn(&Path, &str) -> bool,
+        newest_in_subtree: impl Fn(&Path) -> Option<SystemTime>,
+    ) -> Vec<usize> {
+        if entry.kind != FileKind::Directory
+            || DEFAULT_PROTECTED.is_protected_fast(&entry.path)
+            || is_sensitive_basename(&entry.path)
+        {
+            return Vec::new();
+        }
+        let entry_name = entry.path.file_name().map(|n| n.to_string_lossy());
+        self.collect_candidates(entry, entry_name.as_deref(), None, candidates_buf);
+
+        let mut failed = Vec::new();
+        for &recipe_idx in candidates_buf.iter() {
+            let Some(compiled) = self.recipes.get(recipe_idx) else {
+                continue;
+            };
+            if !compiled.has_gates {
+                continue;
+            }
+            let mut gate_failed = false;
+            let mut matched = false;
+            for spec in &compiled.specs {
+                if !spec.selects_entry(entry, entry_name.as_deref(), None, &dir_contains) {
+                    continue;
+                }
+                if spec.gates_pass(entry, &newest_in_subtree) {
+                    matched = true;
+                    break;
+                }
+                gate_failed = true;
+            }
+            if !matched && gate_failed {
+                failed.push(recipe_idx);
+            }
+        }
+        failed
+    }
+
+    /// Evaluate candidate recipes in priority order and return the first matching
+    /// [`CleanupAction`], skipping any recipe for which `is_suppressed(recipe_idx)` is true.
+    pub fn first_matching_action(
+        &self,
+        entry: &FileEntry,
+        candidates_buf: &mut Vec<usize>,
+        is_suppressed: impl Fn(usize) -> bool,
+        dir_contains: impl Fn(&Path, &str) -> bool,
+        newest_in_subtree: impl Fn(&Path) -> Option<SystemTime>,
+    ) -> Option<CleanupAction> {
+        if DEFAULT_PROTECTED.is_protected_fast(&entry.path) || is_sensitive_basename(&entry.path) {
+            return None;
+        }
+        let entry_name = entry.path.file_name().map(|n| n.to_string_lossy());
+        let entry_ext = if entry.kind == FileKind::File {
+            entry.path.extension().map(|e| e.to_string_lossy())
+        } else {
+            None
+        };
+        self.collect_candidates(
+            entry,
+            entry_name.as_deref(),
+            entry_ext.as_deref(),
+            candidates_buf,
+        );
+
+        for &recipe_idx in candidates_buf.iter() {
+            if is_suppressed(recipe_idx) {
+                continue;
+            }
+            let Some(compiled) = self.recipes.get(recipe_idx) else {
+                continue;
+            };
+            let hit = compiled.specs.iter().any(|spec| {
+                spec.selects_entry(
+                    entry,
+                    entry_name.as_deref(),
+                    entry_ext.as_deref(),
+                    &dir_contains,
+                ) && spec.gates_pass(entry, &newest_in_subtree)
+            });
+            if hit {
+                return Some(build_action(compiled.doc, entry));
+            }
+        }
+        None
+    }
+
+    fn collect_candidates(
+        &self,
+        entry: &FileEntry,
+        entry_name: Option<&str>,
+        entry_ext: Option<&str>,
+        out: &mut Vec<usize>,
+    ) {
+        out.clear();
+        match entry.kind {
+            FileKind::Directory => {
+                if let Some(name) = entry_name
+                    && let Some(indices) = self.by_dir_name.get(name)
+                {
+                    out.extend_from_slice(indices);
+                }
+                out.extend_from_slice(&self.fallback_dirs);
+            }
+            FileKind::File => {
+                if let Some(ext) = entry_ext
+                    && let Some(indices) = self.by_file_ext.get(ext)
+                {
+                    out.extend_from_slice(indices);
+                }
+                out.extend_from_slice(&self.fallback_files);
+            }
+            FileKind::Symlink | FileKind::Other => {
+                out.extend_from_slice(&self.fallback_files);
+            }
+        }
+        if let Some(home) = &self.home_dir
+            && let Ok(rel) = entry.path.strip_prefix(home)
+            && let Some(first) = rel.components().next()
+            && let Some(top) = first.as_os_str().to_str()
+            && let Some(indices) = self.by_home_top_dir.get(top)
+        {
+            out.extend_from_slice(indices);
+        }
+        out.sort_unstable();
+        out.dedup();
+    }
+}
+
+fn push_unique(vec: &mut Vec<usize>, idx: usize) {
+    if vec.last().copied() != Some(idx) && !vec.contains(&idx) {
+        vec.push(idx);
+    }
+}
+
+fn spec_home_top_component(spec: &CompiledSpec, home: &Path) -> Option<String> {
+    let prefix = spec.path_glob.as_ref()?.literal_prefix.as_ref()?;
+    let rel = prefix.strip_prefix(home).ok()?;
+    let first = rel.components().next()?;
+    first.as_os_str().to_str().map(str::to_owned)
 }
 
 fn is_old_enough(modified: Option<SystemTime>, min_age_days: u64) -> bool {
@@ -912,5 +1467,59 @@ mod tests {
 
         // Now it should match, because all files in the subtree are old
         assert!(recipe_matches_entry(&recipe, &entry));
+    }
+
+    #[test]
+    fn compiled_matcher_matches_sequential_builtin_behavior() {
+        let set = RecipeSet::load_builtin().expect("builtin recipes");
+        let mut ordered = set
+            .iter()
+            .filter(|doc| doc.recipe.enabled)
+            .collect::<Vec<_>>();
+        ordered.sort_by_key(|doc| std::cmp::Reverse(doc.recipe.priority));
+        let compiled = CompiledRecipeMatcher::new(&ordered);
+
+        let sample_paths = [
+            ("~/Library/Caches/pip", FileKind::Directory),
+            ("~/Library/Caches/pip/http/wheel.whl", FileKind::File),
+            ("~/.cache/pip/http/wheel.whl", FileKind::File),
+            ("~/Projects/app/__pycache__", FileKind::Directory),
+            ("~/Projects/app/__pycache__/mod.cpython-312.pyc", FileKind::File),
+            ("~/Projects/app/target", FileKind::Directory),
+            ("~/Projects/app/node_modules", FileKind::Directory),
+            ("~/Projects/app/src/main.rs", FileKind::File),
+            ("~/Projects/app/.env", FileKind::File),
+            ("~/Documents/secret/target", FileKind::Directory),
+            ("~/Models/llama-3.gguf", FileKind::File),
+        ];
+
+        let mut buf = Vec::new();
+        for (raw, kind) in sample_paths {
+            let mut candidate = test_entry(expand_tilde(Path::new(raw)), kind);
+            candidate.allocated_bytes = 256 * 1_048_576;
+            candidate.logical_bytes = candidate.allocated_bytes;
+            candidate.modified = Some(SystemTime::now() - Duration::from_hours(24 * 120));
+
+            let marker_fn = |_: &Path, marker: &str| {
+                matches!(marker, "Cargo.toml" | "package.json" | "pyproject.toml")
+            };
+            let mtime_fn = |_: &Path| candidate.modified;
+
+            let expected = ordered.iter().copied().find_map(|recipe| {
+                action_for_entry_with_context(recipe, &candidate, marker_fn, mtime_fn)
+            });
+            let actual = compiled.first_matching_action(
+                &candidate,
+                &mut buf,
+                |_| false,
+                marker_fn,
+                mtime_fn,
+            );
+            assert_eq!(
+                actual.as_ref().map(|a| &a.recipe_id),
+                expected.as_ref().map(|a| &a.recipe_id),
+                "mismatch for {raw}"
+            );
+        }
     }
 }

@@ -518,7 +518,7 @@ mod tests {
         // pinned deliberately: adding a recipe without registering it (or the
         // reverse) is exactly the mistake this assertion catches, so it must be
         // bumped by hand.
-        assert_eq!(recipes.len(), 153);
+        assert_eq!(recipes.len(), 171);
     }
 
     #[test]

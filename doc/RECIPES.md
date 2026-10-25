@@ -862,3 +862,31 @@ Every built-in recipe must satisfy these checks before it can ship:
 | **Min Age** | 30 days |
 | **Action** | Trash |
 | **Notes** | Downloaded pnpm/yarn shims are re-downloaded on demand. |
+
+### `dotnet-obj-dirs`, `dotnet-http-cache`
+| Field | Value |
+|---|---|
+| **Safety** | `safe` |
+| **Match** | `obj/` containing `project.assets.json`; NuGet HTTP/v3 feed caches |
+| **Action** | Trash |
+
+### `jvm-maven-target-dirs`, `jvm-project-gradle-dirs`, `jvm-scala-build-dirs`, `clojure-build-caches`
+| Field | Value |
+|---|---|
+| **Safety** | `safe` |
+| **Match** | Maven `target/`, Gradle `.gradle/`, Scala `target`/`.bloop`/`.scala-build`, Clojure `.cpcache`/Leiningen `target` |
+| **Action** | Trash |
+
+### `node-modern-framework-dirs`, `node-nx-cache-dirs`
+| Field | Value |
+|---|---|
+| **Safety** | `safe` |
+| **Match** | `.svelte-kit`, `.nuxt`, `.output`, `.astro`, `.angular`, `.docusaurus`, `.expo`, `.wrangler`, `.nx/cache`, `.nx/workspace-data` |
+| **Action** | Trash |
+
+### `c-cpp-build-variants`, `c-cpp-vcpkg-cache`, `dart-tool-build-dirs`, `haskell-cabal-build-dirs`, `ocaml-dune-build-dirs`, `android-build-caches`, `godot-import-cache`, `php-tool-caches`, `ide-vscode-extension-vsixs`, `ide-editor-caches`
+| Field | Value |
+|---|---|
+| **Safety** | `safe` / `cautious` |
+| **Match** | CLion `cmake-build-*` & Meson build dirs, vcpkg archives, `.dart_tool`, Cabal `dist-newstyle`, Dune `_build`, Android `.cxx`, Godot `.godot`, PHPUnit/PHPStan/Psalm caches, VSIX installers, Neovim/JetBrains/Fleet/Eclipse/Sublime caches |
+| **Action** | Trash |

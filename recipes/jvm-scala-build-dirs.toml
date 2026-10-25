@@ -1,0 +1,35 @@
+[recipe]
+id = "jvm-scala-build-dirs"
+name = "Scala sbt, Bloop & Scala CLI Caches"
+description = "Scala sbt target, .bloop and .scala-build compile caches"
+category = "jvm"
+safety_level = "safe"
+enabled = true
+priority = 52
+
+[match]
+directory_name = "target"
+parent_must_contain = ["build.sbt"]
+min_age_days = 7
+
+[[match.any_of]]
+directory_name = ".bloop"
+parent_must_contain_any = ["build.sbt", "build.sc", "project.scala"]
+min_age_days = 7
+
+[[match.any_of]]
+directory_name = ".scala-build"
+parent_must_contain_any = ["build.sbt", "project.scala"]
+min_age_days = 7
+
+[action]
+type = "trash"
+prompt = "Move {size} of Scala build caches to Trash?"
+
+[test]
+should_match = [
+    "projects/akka-service/target",
+    "projects/akka-service/.bloop",
+    "projects/script/.scala-build",
+]
+should_not_match = ["projects/akka-service/src", "loose/.bloop"]

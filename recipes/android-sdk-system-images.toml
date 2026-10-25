@@ -14,10 +14,18 @@ path_glob = "~/Library/Android/sdk/system-images/**"
 min_age_days = 30
 min_size_mb = 200
 
+[[match.any_of]]
+path_glob = "~/Android/Sdk/system-images/**"
+min_age_days = 30
+min_size_mb = 200
+
 [action]
 type = "trash"
 prompt = "Move {size} of Android system images to Trash?"
 
 [test]
-should_match = ["~/Library/Android/sdk/system-images/android-34/google_apis/arm64-v8a/system.img"]
+should_match = [
+    "~/Library/Android/sdk/system-images/android-34/google_apis/arm64-v8a/system.img",
+    "~/Android/Sdk/system-images/android-34/google_apis/x86_64/system.img",
+]
 should_not_match = ["~/.android/avd/Pixel_8_API_34.avd/userdata-qemu.img", "~/Library/Android/sdk/platform-tools/adb"]

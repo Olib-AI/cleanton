@@ -117,6 +117,8 @@ struct Patterns {
     cron_schedule: Regex,
     /// `ExecStart` / `ExecStartPre` / `ExecStartPost` in a systemd unit.
     systemd_exec: Regex,
+    /// `Exec=` in an XDG `~/.config/autostart/*.desktop` entry.
+    desktop_exec: Regex,
     /// A whitespace/comment-only line, or a leading `#` comment.
     skippable_line: Regex,
 }
@@ -173,6 +175,9 @@ impl Patterns {
             systemd_exec: Regex::new(r"(?im)^\s*ExecStart(?:Pre|Post)?\s*=\s*(.+)$")
                 .expect("invariant: systemd exec regex"),
 
+            desktop_exec: Regex::new(r"(?im)^\s*Exec\s*=\s*(.+)$")
+                .expect("invariant: desktop autostart exec regex"),
+
             skippable_line: Regex::new(r"^\s*(?:#.*)?$").expect("invariant: blank/comment regex"),
         }
     }
@@ -198,12 +203,14 @@ fn patterns() -> &'static Patterns {
 enum TargetKind {
     /// A launchd job definition (`~/Library/Launch{Agents,Daemons}/*.plist`).
     LaunchAgent,
-    /// A shell startup file (`.zshrc`, `.bashrc`, `.profile`, …).
+    /// A shell startup file (`.zshrc`, `.bashrc`, `.profile`, `config.fish`, …).
     ShellStartup,
     /// A crontab or a `cron.d` style drop-in.
     Crontab,
     /// A systemd user unit (`~/.config/systemd/user/*.service`).
     SystemdUnit,
+    /// An XDG desktop autostart entry (`~/.config/autostart/*.desktop`).
+    DesktopAutostart,
 }
 
 /// Shell startup files whose basename marks them as per-login/per-shell hooks.
@@ -244,7 +251,10 @@ fn classify(path: &str) -> Option<TargetKind> {
     // NOTE: the containment checks deliberately omit a leading `/`. `rel_path`
     // is relative to whatever root the loader scanned (a home directory, a
     // package), so it may or may not start with one.
-    if SHELL_STARTUP_NAMES.contains(&basename) || lower.contains("etc/profile.d/") {
+    if SHELL_STARTUP_NAMES.contains(&basename)
+        || lower.contains("etc/profile.d/")
+        || lower.ends_with("fish/config.fish")
+    {
         return Some(TargetKind::ShellStartup);
     }
 
@@ -259,6 +269,10 @@ fn classify(path: &str) -> Option<TargetKind> {
 
     if lower.contains("systemd/user/") && basename.ends_with(".service") {
         return Some(TargetKind::SystemdUnit);
+    }
+
+    if lower.contains("autostart/") && basename.ends_with(".desktop") {
+        return Some(TargetKind::DesktopAutostart);
     }
 
     None
@@ -413,6 +427,9 @@ impl DetectionEngine for PersistenceEngine {
                 }
                 TargetKind::SystemdUnit => {
                     scan_systemd_unit(file, &text, patterns, &mut budget, &mut findings)
+                }
+                TargetKind::DesktopAutostart => {
+                    scan_desktop_autostart(file, &text, patterns, &mut budget, &mut findings)
                 }
             }
         }
@@ -813,6 +830,20 @@ fn scan_systemd_unit(
                 Some(line_number),
                 cleaned,
             ));
+        } else if patterns.decode_exec.is_match(cleaned)
+            && budget.allow("PERSIST_SYSTEMD_DECODE_EXEC")
+        {
+            findings.push(finding(
+                "PERSIST_SYSTEMD_DECODE_EXEC",
+                ThreatCategory::Obfuscation,
+                Severity::Critical,
+                Confidence::High,
+                "systemd user unit decodes and executes an embedded payload",
+                "This unit's ExecStart decodes an encoded blob and executes it via a shell.",
+                file,
+                Some(line_number),
+                cleaned,
+            ));
         } else if first_path_token(cleaned).is_some_and(is_suspicious_exec_path)
             && budget.allow("PERSIST_SYSTEMD_HIDDEN_EXEC")
         {
@@ -826,6 +857,77 @@ fn scan_systemd_unit(
                 file,
                 Some(line_number),
                 cleaned,
+            ));
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// XDG desktop autostart entries (`~/.config/autostart/*.desktop`)
+// ---------------------------------------------------------------------------
+
+fn scan_desktop_autostart(
+    file: &FileUnit,
+    text: &str,
+    patterns: &Patterns,
+    budget: &mut RuleBudget,
+    findings: &mut Vec<Finding>,
+) {
+    for (index, line) in text.lines().enumerate() {
+        let line_number = index + 1;
+        if patterns.skippable_line.is_match(line) {
+            continue;
+        }
+        let Some(command) = patterns
+            .desktop_exec
+            .captures(line)
+            .and_then(|caps| caps.get(1))
+            .map(|m| m.as_str().trim())
+        else {
+            continue;
+        };
+
+        if patterns.download_exec.is_match(command)
+            && budget.allow("PERSIST_AUTOSTART_DOWNLOAD_EXEC")
+        {
+            findings.push(finding(
+                "PERSIST_AUTOSTART_DOWNLOAD_EXEC",
+                ThreatCategory::CommandExecution,
+                Severity::Critical,
+                Confidence::High,
+                "Desktop autostart entry downloads and executes remote code",
+                "This XDG autostart `.desktop` file pipes a remote download into a shell at every desktop login.",
+                file,
+                Some(line_number),
+                command,
+            ));
+        } else if patterns.decode_exec.is_match(command)
+            && budget.allow("PERSIST_AUTOSTART_DECODE_EXEC")
+        {
+            findings.push(finding(
+                "PERSIST_AUTOSTART_DECODE_EXEC",
+                ThreatCategory::Obfuscation,
+                Severity::Critical,
+                Confidence::High,
+                "Desktop autostart entry decodes and executes an embedded payload",
+                "This XDG autostart `.desktop` file decodes an encoded blob and executes it at login.",
+                file,
+                Some(line_number),
+                command,
+            ));
+        } else if first_path_token(command).is_some_and(is_suspicious_exec_path)
+            && budget.allow("PERSIST_AUTOSTART_HIDDEN_EXEC")
+        {
+            findings.push(finding(
+                "PERSIST_AUTOSTART_HIDDEN_EXEC",
+                ThreatCategory::FilesystemAbuse,
+                Severity::High,
+                Confidence::Medium,
+                "Desktop autostart entry runs a payload from a hidden or temporary directory",
+                "This XDG autostart `.desktop` file executes a binary parked in `/tmp` or a hidden dot-directory on login.",
+                file,
+                Some(line_number),
+                command,
             ));
         }
     }
@@ -1141,6 +1243,14 @@ mod tests {
         assert_eq!(
             classify(".config/systemd/user/a.service"),
             Some(TargetKind::SystemdUnit)
+        );
+        assert_eq!(
+            classify(".config/fish/config.fish"),
+            Some(TargetKind::ShellStartup)
+        );
+        assert_eq!(
+            classify(".config/autostart/updater.desktop"),
+            Some(TargetKind::DesktopAutostart)
         );
         assert_eq!(classify("src/main.rs"), None);
     }

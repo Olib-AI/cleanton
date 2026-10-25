@@ -1,0 +1,27 @@
+[recipe]
+id = "c-cpp-vcpkg-cache"
+name = "vcpkg Binary & Download Archives"
+description = "vcpkg prebuilt binary and source archive caches on Linux and macOS"
+category = "c-cpp"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/.cache/vcpkg/archives/**"
+min_age_days = 30
+
+[[match.any_of]]
+path_glob = "~/Library/Caches/vcpkg/**"
+min_age_days = 30
+
+[action]
+type = "trash"
+prompt = "Move {size} of vcpkg archive caches to Trash?"
+
+[test]
+should_match = [
+    "~/.cache/vcpkg/archives/ab/ab12cd34.zip",
+    "~/Library/Caches/vcpkg/archives/ab/ab12cd34.zip",
+]
+should_not_match = ["~/vcpkg/installed/x64-linux/lib/libfmt.a", "~/.cache/other/foo"]

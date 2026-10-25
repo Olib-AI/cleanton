@@ -8,9 +8,10 @@
 //! No regex is compiled more than once — all patterns are built lazily via
 //! [`std::sync::OnceLock`].
 
+use std::cell::Cell;
 use std::sync::OnceLock;
 
-use regex::Regex;
+use regex::{Regex, RegexSet, RegexSetBuilder};
 
 use crate::engine::{DetectionEngine, FileKind, FileUnit, ScanContext};
 use crate::types::{Confidence, FileLocation, Finding, Severity, ThreatCategory};
@@ -148,16 +149,45 @@ lazy_re!(RE_PTH_OS_BRANCH_EXEC, "");
 // call. This separate OnceLock holds the complementary pattern that catches it.
 lazy_re!(RE_EVAL_BUF_B64_OUTER, "");
 
+thread_local! {
+    /// Per-thread active-pattern bitmap set during `analyze_file`. Defaults to
+    /// `u128::MAX` so standalone `get_re` callers (e.g. unit tests) run unfiltered.
+    static ACTIVE_PATTERN_MASK: Cell<u128> = const { Cell::new(u128::MAX) };
+}
+
+struct MaskGuard(u128);
+
+impl MaskGuard {
+    fn set(mask: u128) -> Self {
+        let prev = ACTIVE_PATTERN_MASK.with(|cell| {
+            let old = cell.get();
+            cell.set(mask);
+            old
+        });
+        Self(prev)
+    }
+}
+
+impl Drop for MaskGuard {
+    fn drop(&mut self) {
+        let prev = self.0;
+        ACTIVE_PATTERN_MASK.with(|cell| cell.set(prev));
+    }
+}
+
 // Helper: initialise a OnceLock<Regex> from a pattern string, returning None
-// on a regex compile error so the engine degrades gracefully.
+// when the single-pass `RegexSet` prefilter already proved `pattern` cannot
+// match the current file.
 fn get_re(lock: &'static OnceLock<Regex>, pattern: &'static str) -> Option<&'static Regex> {
+    let mask = ACTIVE_PATTERN_MASK.with(Cell::get);
+    if mask != u128::MAX
+        && let Some(bit) = script_prefilter().bit_for(lock)
+        && (mask & (1_u128 << bit)) == 0
+    {
+        return None;
+    }
     Some(lock.get_or_init(|| {
-        // Patterns are all compile-time constants; this should never fail.
-        // We assert at test time that every pattern compiles.
         Regex::new(pattern).unwrap_or_else(|_| {
-            // Fallback: a regex that matches nothing, so the engine
-            // continues without this rule rather than panicking.
-            // Fallback matches nothing: a character class that can never match.
             Regex::new(r"[^\s\S]").expect("invariant: never-match fallback regex must compile")
         })
     }))
@@ -501,6 +531,159 @@ fn bracket_delta(s: &str) -> i32 {
     delta
 }
 
+/// Fast single-pass `RegexSet` prefilter over all 74 script behavior patterns.
+struct ScriptPrefilter {
+    set: Option<RegexSet>,
+    lock_to_bit: Vec<(usize, u32)>,
+}
+
+impl ScriptPrefilter {
+    fn build() -> Self {
+        let table: &[(&'static OnceLock<Regex>, &'static str)] = &[
+            (&RE_CP_REQUIRE, PAT_CP_REQUIRE),
+            (&RE_CP_EXEC, PAT_CP_EXEC),
+            (&RE_CP_SPAWN, PAT_CP_SPAWN),
+            (&RE_CP_EXECSYNC, PAT_CP_EXECSYNC),
+            (&RE_VM_RUNNEWCTX, PAT_VM_RUNNEWCTX),
+            (&RE_DYN_REQUIRE, PAT_DYN_REQUIRE),
+            (&RE_DYN_IMPORT, PAT_DYN_IMPORT),
+            (&RE_EVAL, PAT_EVAL),
+            (&RE_FUNCTION_CTOR, PAT_FUNCTION_CTOR),
+            (&RE_EVAL_ATOB, PAT_EVAL_ATOB),
+            (&RE_BUF_B64_EVAL, PAT_BUF_B64_EVAL),
+            (&RE_FROMCHARCODE, PAT_FROMCHARCODE),
+            (&RE_HEX_STR_CHAIN, PAT_HEX_STR_CHAIN),
+            (&RE_0X_IDENTS, PAT_0X_IDENTS),
+            (&RE_SSH_KEY, PAT_SSH_KEY),
+            (&RE_AWS_CREDS, PAT_AWS_CREDS),
+            (&RE_NPMRC, PAT_NPMRC),
+            (&RE_DOTENV_READ, PAT_DOTENV_READ),
+            (&RE_PROCESS_ENV_ENUM, PAT_PROCESS_ENV_ENUM),
+            (&RE_KEYTAR, PAT_KEYTAR),
+            (&RE_BROWSER_CRED, PAT_BROWSER_CRED),
+            (&RE_SECRET_KEY_LITERAL, PAT_SECRET_KEY_LITERAL),
+            (&RE_CRYPTO_WALLET_STORE, PAT_CRYPTO_WALLET_STORE),
+            (&RE_GEM_CREDENTIALS, PAT_GEM_CREDENTIALS),
+            (&RE_FETCH_XHR, PAT_FETCH_XHR),
+            (&RE_HTTP_REQUEST, PAT_HTTP_REQUEST),
+            (&RE_CURL_CMD, PAT_CURL_CMD),
+            (&RE_WGET_CMD, PAT_WGET_CMD),
+            (&RE_PYTHON_REQUESTS, PAT_PYTHON_REQUESTS),
+            (&RE_PYTHON_URLLIB, PAT_PYTHON_URLLIB),
+            (&RE_SOCKET_CONNECT, PAT_SOCKET_CONNECT),
+            (&RE_CRONTAB, PAT_CRONTAB),
+            (&RE_BASHRC_WRITE, PAT_BASHRC_WRITE),
+            (&RE_SYSTEMD_WRITE, PAT_SYSTEMD_WRITE),
+            (&RE_WIN_RUNKEY, PAT_WIN_RUNKEY),
+            (&RE_REVSHELL_BASH, PAT_REVSHELL_BASH),
+            (&RE_REVSHELL_PYTHON, PAT_REVSHELL_PYTHON),
+            (&RE_REVSHELL_PERL, PAT_REVSHELL_PERL),
+            (&RE_NC_E, PAT_NC_E),
+            (&RE_SOCAT_EXEC, PAT_SOCAT_EXEC),
+            (&RE_CURL_BASH, PAT_CURL_BASH),
+            (&RE_WGET_BASH, PAT_WGET_BASH),
+            (&RE_DOWNLOAD_EXEC_JS, PAT_DOWNLOAD_EXEC_JS),
+            (&RE_POWERSHELL_IEX, PAT_POWERSHELL_IEX),
+            (&RE_PYTHON_EXEC_DOWNLOAD, PAT_PYTHON_EXEC_DOWNLOAD),
+            (&RE_PY_OS_SYSTEM, PAT_PY_OS_SYSTEM),
+            (&RE_PY_SUBPROCESS, PAT_PY_SUBPROCESS),
+            (&RE_PY_EVAL, PAT_PY_EVAL),
+            (&RE_PY_EXEC, PAT_PY_EXEC),
+            (&RE_SH_EVAL, PAT_SH_EVAL),
+            (&RE_SH_BASE64_PIPE, PAT_SH_BASE64_PIPE),
+            (&RE_PS_ENCODED_CMD, PAT_PS_ENCODED_CMD),
+            (&RE_PS_DOWNLOAD_STRING, PAT_PS_DOWNLOAD_STRING),
+            (&RE_PS_BYPASS, PAT_PS_BYPASS),
+            (&RE_RUBY_SYSTEM, PAT_RUBY_SYSTEM),
+            (&RE_RUBY_BACKTICK, PAT_RUBY_BACKTICK),
+            (&RE_RUBY_EVAL, PAT_RUBY_EVAL),
+            (&RE_PHP_EXEC, PAT_PHP_EXEC),
+            (&RE_PHP_EVAL, PAT_PHP_EVAL),
+            (&RE_PHP_BASE64, PAT_PHP_BASE64),
+            (&RE_PHP_PREG_REPLACE_E, PAT_PHP_PREG_REPLACE_E),
+            (&RE_NPMRC_AUTH_TOKEN, PAT_NPMRC_AUTH_TOKEN),
+            (&RE_AI_CLI_COERCION, PAT_AI_CLI_COERCION),
+            (&RE_GIT_TEMPLATE_DIR, PAT_GIT_TEMPLATE_DIR),
+            (&RE_GITHUB_TOKEN_PREFIX_CHECK, PAT_GITHUB_TOKEN_PREFIX_CHECK),
+            (&RE_ENV_CRED_PATTERN_SWEEP, PAT_ENV_CRED_PATTERN_SWEEP),
+            (&RE_GEOFENCE_GEO_API, PAT_GEOFENCE_GEO_API),
+            (&RE_GEOFENCE_TIMEZONE, PAT_GEOFENCE_TIMEZONE),
+            (&RE_SANDBOX_EVASION_CI, PAT_SANDBOX_EVASION_CI),
+            (&RE_SANDBOX_EVASION_USERNAME, PAT_SANDBOX_EVASION_USERNAME),
+            (&RE_STRING_FRAGMENT_REQUIRE, PAT_STRING_FRAGMENT_REQUIRE),
+            (&RE_DOUBLE_ENCODED_C2, PAT_DOUBLE_ENCODED_C2),
+            (&RE_PTH_OS_BRANCH_EXEC, PAT_PTH_OS_BRANCH_EXEC),
+            (&RE_EVAL_BUF_B64_OUTER, PAT_EVAL_BUF_B64_OUTER),
+        ];
+
+        let mut exprs: Vec<&'static str> = Vec::with_capacity(table.len());
+        let mut lock_to_bit: Vec<(usize, u32)> = Vec::with_capacity(table.len());
+        for (idx, &(lock, pat)) in table.iter().enumerate() {
+            let valid_pat = if Regex::new(pat).is_ok() {
+                pat
+            } else {
+                r"[^\s\S]"
+            };
+            exprs.push(valid_pat);
+            lock_to_bit.push((std::ptr::from_ref(lock) as usize, idx as u32));
+        }
+        lock_to_bit.sort_unstable_by_key(|&(addr, _)| addr);
+
+        let set = RegexSetBuilder::new(&exprs)
+            .multi_line(true)
+            .size_limit(64 * 1024 * 1024)
+            .dfa_size_limit(64 * 1024 * 1024)
+            .build()
+            .ok();
+
+        Self { set, lock_to_bit }
+    }
+
+    fn bit_for(&self, lock: &'static OnceLock<Regex>) -> Option<u32> {
+        let addr = std::ptr::from_ref(lock) as usize;
+        self.lock_to_bit
+            .binary_search_by_key(&addr, |&(k, _)| k)
+            .ok()
+            .and_then(|pos| self.lock_to_bit.get(pos).map(|&(_, bit)| bit))
+    }
+
+    fn compute_mask(&self, text: &str, folded_extra: &str) -> u128 {
+        let Some(ref set) = self.set else {
+            return u128::MAX;
+        };
+        let mut mask = 0_u128;
+        for idx in set.matches(text) {
+            if idx < 128 {
+                mask |= 1_u128 << idx;
+            }
+        }
+        if !folded_extra.is_empty() {
+            for idx in set.matches(folded_extra) {
+                if idx < 128 {
+                    mask |= 1_u128 << idx;
+                }
+            }
+        }
+        mask
+    }
+}
+
+fn script_prefilter() -> &'static ScriptPrefilter {
+    static PREFILTER: OnceLock<ScriptPrefilter> = OnceLock::new();
+    PREFILTER.get_or_init(ScriptPrefilter::build)
+}
+
+/// True when any physical line ends with `\` or leaves `(`/`[` unclosed across
+/// a newline, requiring `logical_lines` folding before prefiltering.
+fn has_cross_line_continuation(text: &str) -> bool {
+    for line in text.lines() {
+        if line.ends_with('\\') || bracket_delta(line) > 0 {
+            return true;
+        }
+    }
+    false
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // ScriptBehaviorEngine
 // ─────────────────────────────────────────────────────────────────────────────
@@ -526,11 +709,31 @@ impl ScriptBehaviorEngine {
         let path = &file.rel_path;
         let kind = file.kind;
 
-        // We do a line-indexed scan so we can report line numbers. Physical
-        // lines are folded into logical lines (see `logical_lines`) so a call
-        // wrapped across several physical lines — a common formatter/obfuscation
-        // evasion — is still matched by the per-line rules below.
-        let lines: Vec<(usize, String)> = logical_lines(&text);
+        // Fast path: when no physical line folds onto the next, prefilter
+        // `text` directly before allocating `logical_lines`.
+        let prefilter = script_prefilter();
+        let (lines, active_mask): (Vec<(usize, String)>, u128) =
+            if !has_cross_line_continuation(&text) {
+                let mask = prefilter.compute_mask(&text, "");
+                if mask == 0 {
+                    return;
+                }
+                (logical_lines(&text), mask)
+            } else {
+                let folded = logical_lines(&text);
+                let mut joined_folded = String::new();
+                for (_, line) in &folded {
+                    joined_folded.push_str(line);
+                    joined_folded.push('\n');
+                }
+                let mask = prefilter.compute_mask(&text, &joined_folded);
+                if mask == 0 {
+                    return;
+                }
+                (folded, mask)
+            };
+
+        let _mask_guard = MaskGuard::set(active_mask);
 
         // --- Capability flags accumulated for chain detection ---
         let mut has_cred_read = false;
