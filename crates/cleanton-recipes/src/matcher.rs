@@ -25,6 +25,36 @@ static DEFAULT_PROTECTED: LazyLock<ProtectedPaths> = LazyLock::new(ProtectedPath
 static GLOB_CACHE: LazyLock<RwLock<HashMap<String, Option<Pattern>>>> =
     LazyLock::new(|| RwLock::new(HashMap::new()));
 
+/// Memoized `~`-expansion of recipe glob patterns, keyed by the raw pattern.
+///
+/// `expand_tilde` reads `$HOME` and builds a fresh `PathBuf` plus a `String` per
+/// call, and the two call sites below run once per (entry, recipe) pair — tens
+/// of millions of allocations on a full home scan. Recipes are a fixed set, so
+/// the expansion is computed once per pattern and reused.
+static EXPANDED_CACHE: LazyLock<RwLock<HashMap<String, String>>> =
+    LazyLock::new(|| RwLock::new(HashMap::new()));
+
+/// Run `f` against `pattern`'s `~`-expanded form, memoizing the expansion.
+/// Patterns that do not start with `~` are passed through untouched.
+fn with_expanded_pattern<R>(pattern: &str, f: impl FnOnce(&str) -> R) -> R {
+    if !pattern.starts_with('~') {
+        return f(pattern);
+    }
+    if let Ok(cache) = EXPANDED_CACHE.read()
+        && let Some(expanded) = cache.get(pattern)
+    {
+        return f(expanded.as_str());
+    }
+    let expanded = expand_tilde(&PathBuf::from(pattern))
+        .to_string_lossy()
+        .into_owned();
+    let out = f(expanded.as_str());
+    if let Ok(mut cache) = EXPANDED_CACHE.write() {
+        cache.entry(pattern.to_owned()).or_insert(expanded);
+    }
+    out
+}
+
 /// Run `f` against the compiled form of `pattern`, compiling and caching on first
 /// use. Returns `None` when the pattern is invalid (so callers treat it as a
 /// non-match, exactly as `Pattern::new(..).is_ok_and(..)` did).
@@ -177,14 +207,7 @@ fn spec_selects_entry(
     }
 
     if matcher.exclude.paths.iter().any(|pattern| {
-        let expanded = if pattern.starts_with('~') {
-            expand_tilde(&PathBuf::from(pattern))
-                .to_string_lossy()
-                .into_owned()
-        } else {
-            pattern.clone()
-        };
-        glob_matches_path(&expanded, &entry.path)
+        with_expanded_pattern(pattern, |expanded| glob_matches_path(expanded, &entry.path))
     }) {
         return false;
     }
@@ -224,17 +247,12 @@ fn spec_selects_entry(
         }
     }
 
-    if let Some(path_glob) = &matcher.path_glob {
-        let expanded = if path_glob.starts_with('~') {
-            expand_tilde(&PathBuf::from(path_glob))
-                .to_string_lossy()
-                .into_owned()
-        } else {
-            path_glob.clone()
-        };
-        if !glob_selects_entry(matcher, &expanded, entry) {
-            return false;
-        }
+    if let Some(path_glob) = &matcher.path_glob
+        && !with_expanded_pattern(path_glob, |expanded| {
+            glob_selects_entry(matcher, expanded, entry)
+        })
+    {
+        return false;
     }
 
     if !context_markers_hold(matcher, entry, parent_contains) {
@@ -317,6 +335,24 @@ pub fn directory_gate(
     entry: &FileEntry,
     newest_in_subtree: impl Fn(&Path) -> Option<SystemTime>,
 ) -> DirectoryGate {
+    directory_gate_with_context(
+        recipe,
+        entry,
+        |parent: &Path, marker: &str| parent.join(marker).exists(),
+        newest_in_subtree,
+    )
+}
+
+/// [`directory_gate`] with the "does this directory contain `marker`" probe
+/// injected, so bulk callers can serve it from a per-directory cache instead of
+/// running a `stat(2)` per (directory, recipe) pair.
+#[must_use]
+pub fn directory_gate_with_context(
+    recipe: &RecipeDocument,
+    entry: &FileEntry,
+    parent_contains: impl Fn(&Path, &str) -> bool,
+    newest_in_subtree: impl Fn(&Path) -> Option<SystemTime>,
+) -> DirectoryGate {
     if entry.kind != FileKind::Directory {
         return DirectoryGate::NoMatch;
     }
@@ -326,7 +362,6 @@ pub fn directory_gate(
         return DirectoryGate::NoMatch;
     }
 
-    let parent_contains = |parent: &Path, marker: &str| parent.join(marker).exists();
     let mut gate_failed = false;
     for spec in std::iter::once(&recipe.matcher).chain(recipe.matcher.any_of.iter()) {
         if !spec_selects_entry(spec, entry, &parent_contains) {
@@ -407,13 +442,31 @@ pub fn action_for_entry_with_subtree_mtime(
     entry: &FileEntry,
     newest_in_subtree: impl Fn(&Path) -> Option<SystemTime>,
 ) -> Option<CleanupAction> {
-    recipe_matches_entry_full(
+    action_for_entry_with_context(
         recipe,
         entry,
         |parent, marker| parent.join(marker).exists(),
         newest_in_subtree,
     )
-    .then(|| build_action(recipe, entry))
+}
+
+/// Like [`action_for_entry_with_subtree_mtime`], but both injected probes are
+/// supplied by the caller: the newest-mtime-in-subtree lookup *and* the
+/// "does this directory contain `marker`" context probe.
+///
+/// Bulk analysis runs the context probe once per (entry, recipe) pair, i.e.
+/// millions of `stat(2)` calls for `parent_must_contain` recipes. Having the
+/// caller supply a memoized probe turns that into at most one `stat` per
+/// (directory, marker) without changing any matching semantics.
+#[must_use]
+pub fn action_for_entry_with_context(
+    recipe: &RecipeDocument,
+    entry: &FileEntry,
+    parent_contains: impl Fn(&Path, &str) -> bool,
+    newest_in_subtree: impl Fn(&Path) -> Option<SystemTime>,
+) -> Option<CleanupAction> {
+    recipe_matches_entry_full(recipe, entry, parent_contains, newest_in_subtree)
+        .then(|| build_action(recipe, entry))
 }
 
 fn build_action(recipe: &RecipeDocument, entry: &FileEntry) -> CleanupAction {

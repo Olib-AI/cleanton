@@ -2,7 +2,8 @@ use crate::animation::{AnimatedValue, EasingFunction};
 use crate::capacity::{self, CapacityView};
 use crate::theme::{DARK_THEME, Theme};
 use crate::widgets::FileTreeState;
-use cleanton_common::{CleantonConfig, CleanupPlan, ExecutionResult, ScanResult};
+use cleanton_common::{CleantonConfig, CleanupPlan, ExecutionResult};
+use cleanton_engine::ScanSummary;
 use cleanton_engine::{
     AnnotatedAction, DockerAnalysis, InstalledApp, Orchestrator, SnapshotAnalysis,
     SnapshotConfirmState, Suggestions, UninstallPlan,
@@ -79,7 +80,7 @@ pub struct App {
     // Scanner state (scan is launched from the Dashboard; there is no separate
     // Scanner screen, matching the Slint app).
     pub scan_progress: Option<(u64, u64, u64)>, // (files, dirs, bytes)
-    pub scan_result: Option<ScanResult>,
+    pub scan_result: Option<ScanSummary>,
 
     // Review-only Results analysis surfaced alongside the cleanup plan: Docker
     // reclaimable accounting (independent of the scan root) and large-item /
