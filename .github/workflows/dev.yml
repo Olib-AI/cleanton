@@ -99,17 +99,45 @@ jobs:
           echo "pinned=$pinned actual=$actual"
           [ "$pinned" = "$actual" ]
 
-      - name: Check formatting
-        run: cargo fmt --all --check
-
-      - name: Clippy (deny warnings)
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
-
-      - name: Test (tee full log)
+      - name: Check formatting, Clippy, and Tests (emit annotations)
         shell: bash
         run: |
-          set -o pipefail
-          cargo test --workspace --all-features 2>&1 | tee test-output.txt
+          python3 - <<'PY'
+          import base64, subprocess, sys
+
+          def emit(kind, title, text):
+              b64 = base64.b64encode(text.encode("utf-8", errors="replace")).decode("ascii")
+              chunk_size = 3000
+              for idx in range(0, min(len(b64), chunk_size * 15), chunk_size):
+                  part = b64[idx:idx + chunk_size]
+                  print(f"::{kind} title={title}_{idx // chunk_size:02d}::{part}", flush=True)
+
+          subprocess.run(["cargo", "fmt", "--all"], check=False)
+          fmt_diff = subprocess.run(["git", "diff"], capture_output=True, text=True).stdout
+          if fmt_diff:
+              emit("warning", "FMTDIFF", fmt_diff)
+
+          clippy = subprocess.run(
+              ["cargo", "clippy", "--workspace", "--all-targets", "--all-features", "--message-format=short", "--", "-D", "warnings"],
+              capture_output=True, text=True
+          )
+          if clippy.returncode != 0:
+              emit("error", "CLIPPY", clippy.stdout + "\n" + clippy.stderr)
+              sys.exit(clippy.returncode)
+
+          test = subprocess.run(
+              ["cargo", "test", "--workspace", "--all-features", "--", "--nocapture"],
+              capture_output=True, text=True
+          )
+          if test.returncode != 0:
+              out = (test.stdout + "\n" + test.stderr)[-35000:]
+              emit("error", "TESTS", out)
+              sys.exit(test.returncode)
+
+          if fmt_diff:
+              sys.exit(1)
+          print("::notice title=ALL_GREEN::fmt+clippy+testsclean", flush=True)
+          PY
 
       - name: Upload test output
         if: always()
