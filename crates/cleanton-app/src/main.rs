@@ -1013,11 +1013,14 @@ fn main() -> Result<(), slint::PlatformError> {
             return;
         }
 
-        // Selected, non-admin paths in review order.
+        // Selected paths in review order. Admin-owned items are included: the
+        // executor asks for administrator rights once per run and still moves
+        // them into the user's Trash, which is the only way an App Store bundle
+        // (root-owned in /Applications) can actually be uninstalled here.
         let rows = state.get_leftover_rows();
         let selected_paths: HashSet<String> = rows
             .iter()
-            .filter(|row| row.selected && !row.admin)
+            .filter(|row| row.selected)
             .map(|row| row.path.to_string())
             .collect();
         let (paths, agent_labels) = APP_PLAN.with(|cell| {
@@ -1031,6 +1034,8 @@ fn main() -> Result<(), slint::PlatformError> {
                 .filter(|item| selected_paths.contains(&item.path.display().to_string()))
                 .map(|item| item.path.clone())
                 .collect();
+            // Only the app's user launch agents are stopped; a LaunchDaemon
+            // needs administrator rights and dies when the uninstall removes it.
             let labels: Vec<String> = plan
                 .items
                 .iter()
@@ -3847,8 +3852,11 @@ fn leftover_row(item: &cleanton_engine::LeftoverItem) -> LeftoverRow {
         kind: SharedString::from(item.kind.label()),
         size: SharedString::from(display::human_bytes(item.bytes)),
         admin: item.admin_required,
-        // Everything trashable starts selected; admin items are review-only.
-        selected: !item.admin_required,
+        // Everything starts selected. Admin-owned items are included too: the
+        // executor asks for the administrator password once per run and still
+        // moves them into the Trash, so an App Store bundle can actually be
+        // uninstalled instead of being review-only.
+        selected: true,
     }
 }
 

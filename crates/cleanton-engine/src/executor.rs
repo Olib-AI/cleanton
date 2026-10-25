@@ -549,9 +549,11 @@ pub(crate) fn trash_uninstall_paths(
         })?;
     // Only the user's *additional* configured protections are re-checked here:
     // the default set necessarily covers /Applications and Containers, which
-    // the uninstall scope legitimately carves into.
+    // the uninstall scope legitimately carves into. `ProtectedPaths::new` merges
+    // the defaults in, so using it here would mark every item as protected and
+    // the confirmed uninstall would silently skip everything.
     let defaults = ProtectedPaths::defaults();
-    let configured = ProtectedPaths::new(config.safety.protected_paths.clone());
+    let configured = ProtectedPaths::configured_only(config.safety.protected_paths.clone());
 
     let mut result = ExecutionResult {
         attempted_actions: 0,
