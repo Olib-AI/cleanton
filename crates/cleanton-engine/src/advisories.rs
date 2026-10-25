@@ -580,9 +580,9 @@ fn summary_for(raw: &RawAdvisory) -> String {
 fn severity_from_label(label: &str) -> Severity {
     match label.trim().to_ascii_lowercase().as_str() {
         "critical" => Severity::Critical,
-        "high" => Severity::High,
         "moderate" | "medium" => Severity::Medium,
         "low" => Severity::Low,
+        // "high" and any unrecognised label default to High.
         _ => Severity::High,
     }
 }
