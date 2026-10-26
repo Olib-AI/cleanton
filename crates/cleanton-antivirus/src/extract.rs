@@ -1523,7 +1523,10 @@ mod tests {
         match result {
             Err(AvError::LimitExceeded(_)) => {}
             Ok(loaded) => {
-                assert!(loaded.files.is_empty(), "lying-size entries must not be retained");
+                assert!(
+                    loaded.files.is_empty(),
+                    "lying-size entries must not be retained"
+                );
                 assert!(!loaded.errors.is_empty(), "rejections must be recorded");
             }
             other => panic!("flood must be bounded, got: {other:?}"),
