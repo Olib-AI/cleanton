@@ -463,7 +463,18 @@ impl LoadState {
                 continue;
             }
 
-            let raw_name = entry.name().to_owned();
+            // `zip` 9 returns `Result<Cow<str>, ZipError>` from `name()`
+            // (the stored name may not be valid UTF-8).
+            let raw_name = match entry.name() {
+                Ok(name) => name.into_owned(),
+                Err(e) => {
+                    self.errors.push(format!(
+                        "bad zip entry name #{} in '{}': {}",
+                        i, archive_name, e
+                    ));
+                    continue;
+                }
+            };
 
             // Path traversal guard.
             if !is_safe_archive_path(&raw_name) {
