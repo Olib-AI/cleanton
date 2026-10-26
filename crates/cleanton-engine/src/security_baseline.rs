@@ -269,16 +269,17 @@ fn to_hex(bytes: &[u8]) -> String {
 /// the package hasher. Content is streamed, never fully buffered.
 fn hash_file_record(hasher: &mut Sha256, rel: &str, file: &Path) -> std::io::Result<()> {
     let mut content = Sha256::new();
-    let mut reader = std::fs::File::open(file)?;
     // `sha2` 0.11 hashers no longer implement `std::io::Write`, so stream
-    // through a fixed buffer instead of `std::io::copy`.
-    let mut buf = [0u8; 64 * 1024];
+    // through a buffered reader instead of `std::io::copy`.
+    let mut reader = std::io::BufReader::with_capacity(64 * 1024, std::fs::File::open(file)?);
     loop {
-        let n = std::io::Read::read(&mut reader, &mut buf)?;
-        if n == 0 {
+        let chunk = std::io::BufRead::fill_buf(&mut reader)?;
+        if chunk.is_empty() {
             break;
         }
-        content.update(&buf[..n]);
+        content.update(chunk);
+        let consumed = chunk.len();
+        std::io::BufRead::consume(&mut reader, consumed);
     }
     hasher.update(rel.as_bytes());
     hasher.update([0u8]);
