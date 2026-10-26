@@ -57,7 +57,7 @@ tui-big-text = "0.8"
 slint = "1.17"
 slint-build = "1.17"
 tempfile = "3"
-sha2 = "0.10"
+sha2 = "0.11"
 # cleanton-antivirus (vendored from rusted-batata rb-antivirus) additions:
 regex = "1"
 base64 = "0.23"
