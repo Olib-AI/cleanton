@@ -18,10 +18,24 @@ min_size_mb = 50
 [match.exclude]
 paths = ["~/Library/Caches/pypoetry/virtualenvs", "~/Library/Caches/pypoetry/virtualenvs/**"]
 
+# Linux (XDG): Poetry's cache lives in ~/.cache/pypoetry (virtualenvs excluded too).
+[[match.any_of]]
+min_size_mb = 50
+path_glob = "~/.cache/pypoetry/**"
+exclude = { paths = ["~/.cache/pypoetry/virtualenvs", "~/.cache/pypoetry/virtualenvs/**"] }
+
 [action]
 type = "trash"
 prompt = "Move {size} of Poetry cache to Trash?"
 
 [test]
-should_match = ["~/Library/Caches/pypoetry/artifacts/foo"]
-should_not_match = ["~/Library/Caches/Homebrew", "~/Library/Caches/pypoetry/virtualenvs/api-abc123-py3.12/bin/python"]
+should_match = [
+    "~/Library/Caches/pypoetry/artifacts/foo",
+    "~/.cache/pypoetry/artifacts/foo",
+]
+should_not_match = [
+    "~/Library/Caches/Homebrew",
+    "~/Library/Caches/pypoetry/virtualenvs/api-abc123-py3.12/bin/python",
+    "~/.cache/pypoetry/virtualenvs/api-abc123-py3.12/bin/python",
+    "~/.cache/other/foo",
+]

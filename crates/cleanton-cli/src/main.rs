@@ -132,6 +132,32 @@ enum Command {
         #[arg(long, value_name = "PATH")]
         baseline: Option<PathBuf>,
     },
+    /// Watch installed packages continuously and report new risk as it
+    /// appears (the lightweight background helper).
+    ///
+    /// Cheap by construction: while nothing changes the watcher costs one
+    /// `stat` per package root per tick and sleeps in between, backing off from
+    /// the base interval to 15 minutes on a quiet machine. When a package
+    /// manager installs or updates something, only the affected directories are
+    /// examined: an advisory lookup by version, a lifecycle-hook check, and one
+    /// content scan of that single package — so a newly installed package is
+    /// checked immediately without rescanning everything.
+    ///
+    /// Read-only, like the rest of the security engine: it reports and never
+    /// removes, quarantines, or modifies a package.
+    Watch {
+        /// Base idle interval between checks, in seconds.
+        #[arg(long, default_value_t = 30, value_name = "SECONDS")]
+        interval: u64,
+        /// Take one pass and exit (for cron, or a launchd `StartInterval` job).
+        #[arg(long)]
+        once: bool,
+        /// Print a launchd agent definition for this watcher and exit (macOS).
+        /// It is printed, never installed: writing to `~/Library/LaunchAgents`
+        /// stays the user's decision.
+        #[arg(long)]
+        print_agent: bool,
+    },
     Interactive,
 }
 
@@ -266,6 +292,11 @@ async fn run_app(cli: Cli) -> Result<i32> {
             review_all,
             baseline,
         } => run_security(&cli, establish_baseline, all, &review, review_all, baseline),
+        Command::Watch {
+            interval,
+            once,
+            print_agent,
+        } => Ok(run_watch(&cli, &config, interval, once, print_agent)),
         Command::Interactive => run_interactive(&cli, &config).await,
     }
 }
@@ -669,6 +700,293 @@ async fn run_clean(cli: &Cli, config: &CleantonConfig, dry_run: bool, yes: bool)
 /// changed without a version bump (same-version tamper). Reviews are applied
 /// BEFORE the exit code is computed, so `--review-all` on a surfaced set
 /// exits 0.
+/// The background watcher: a slow, cheap loop that checks packages the moment
+/// they appear and offers disk or memory cleanup when system resources run high.
+fn run_watch(
+    cli: &Cli,
+    config: &CleantonConfig,
+    interval: u64,
+    once: bool,
+    print_agent: bool,
+) -> i32 {
+    use cleanton_engine::background::{PackageWatcher, WatchEvent, WatchOptions};
+
+    let mut options = WatchOptions::with_idle_seconds(interval);
+    options.disk_pressure_percent = config.background.disk_pressure_percent;
+    options.memory_pressure_percent = config.background.memory_pressure_percent;
+    let mut watcher = PackageWatcher::for_default_targets(options);
+
+    if print_agent {
+        if cfg!(target_os = "linux") {
+            println!("{}", systemd_user_unit(interval));
+        } else {
+            println!("{}", launch_agent_plist(interval));
+        }
+        return 0;
+    }
+
+    if !cli.json {
+        let roots = watcher.roots().collect::<Vec<_>>();
+        let monitors_resources =
+            options.disk_pressure_percent > 0 || options.memory_pressure_percent > 0;
+        if roots.is_empty() && !monitors_resources {
+            println!(
+                "No package locations found to watch and resource pressure thresholds are disabled."
+            );
+            return 0;
+        }
+        if roots.is_empty() {
+            println!(
+                "Monitoring disk (>={}%) and memory (>={}%) pressure; idle interval {}s, backing off to {}s while quiet.",
+                options.disk_pressure_percent,
+                options.memory_pressure_percent,
+                options.idle.as_secs(),
+                options.max_idle.as_secs()
+            );
+        } else {
+            println!(
+                "Watching {} package location(s) plus disk (>={}%) and memory (>={}%) usage; idle interval {}s, backing off to {}s while quiet.",
+                roots.len(),
+                options.disk_pressure_percent,
+                options.memory_pressure_percent,
+                options.idle.as_secs(),
+                options.max_idle.as_secs()
+            );
+            for target in roots {
+                println!("  - {} ({})", target.root.display(), target.kind.label());
+            }
+        }
+        println!("Ctrl-C stops the watcher. Nothing is ever removed without confirmation.");
+    }
+
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    let mut alerts = 0_usize;
+    let mut emit = |event: WatchEvent| {
+        if cli.json {
+            match serde_json::to_string(&watch_event_json(&event)) {
+                Ok(line) => println!("{line}"),
+                Err(err) => eprintln!("warning: could not serialize event: {err}"),
+            }
+            return;
+        }
+        match event {
+            WatchEvent::Quiet | WatchEvent::RootChanged { .. } => {}
+            other => print_watch_event(&other),
+        }
+    };
+    if once {
+        for event in watcher.tick(&cancel) {
+            if matches!(
+                event,
+                WatchEvent::Advisory { .. } | WatchEvent::ContentFinding { .. }
+            ) {
+                alerts = alerts.saturating_add(1);
+            }
+            emit(event);
+        }
+    } else {
+        watcher.run(&cancel, &mut emit);
+    }
+    if alerts > 0 { 3 } else { 0 }
+}
+
+/// One watch event as JSON (the `--json` stream shape).
+fn watch_event_json(event: &cleanton_engine::background::WatchEvent) -> serde_json::Value {
+    use cleanton_engine::background::{CleanupOffer, WatchEvent};
+
+    match event {
+        WatchEvent::Quiet => serde_json::json!({ "event": "quiet" }),
+        WatchEvent::RootChanged { root, new_packages } => serde_json::json!({
+            "event": "root_changed",
+            "root": root.display().to_string(),
+            "new_packages": new_packages,
+        }),
+        WatchEvent::Advisory {
+            package,
+            version,
+            advisory,
+            severity,
+            summary,
+            remediation,
+        } => serde_json::json!({
+            "event": "advisory",
+            "package": package,
+            "version": version,
+            "advisory": advisory,
+            "severity": cleanton_engine::security::severity_label(*severity),
+            "summary": summary,
+            "remediation": remediation,
+        }),
+        WatchEvent::InstallHook { package, hook } => serde_json::json!({
+            "event": "install_hook",
+            "package": package,
+            "hook": hook,
+        }),
+        WatchEvent::ResourcePressure {
+            kind,
+            used_percent,
+            available_bytes,
+            suggestion,
+            offer,
+        } => {
+            let offer_json = match offer {
+                CleanupOffer::Disk {
+                    candidates,
+                    estimated_reclaimable_bytes,
+                } => serde_json::json!({
+                    "type": "disk_cleanup",
+                    "estimated_reclaimable_bytes": estimated_reclaimable_bytes,
+                    "recommended_command": "cleanton clean ~",
+                    "candidates": candidates.iter().map(|c| serde_json::json!({
+                        "label": c.label,
+                        "path": c.path.display().to_string(),
+                        "bytes": c.bytes,
+                    })).collect::<Vec<_>>(),
+                }),
+                CleanupOffer::Memory {
+                    top_processes,
+                    recommended_command,
+                } => serde_json::json!({
+                    "type": "memory_cleanup",
+                    "recommended_command": recommended_command,
+                    "top_processes": top_processes.iter().map(|p| serde_json::json!({
+                        "pid": p.pid,
+                        "name": p.name,
+                        "rss_bytes": p.rss_bytes,
+                    })).collect::<Vec<_>>(),
+                }),
+            };
+            serde_json::json!({
+                "event": "resource_pressure",
+                "kind": kind.label(),
+                "used_percent": used_percent,
+                "available_bytes": available_bytes,
+                "suggestion": suggestion,
+                "offer": offer_json,
+            })
+        }
+        WatchEvent::ContentFinding {
+            package,
+            verdict,
+            findings,
+            headline,
+        } => serde_json::json!({
+            "event": "content_finding",
+            "package": package,
+            "verdict": cleanton_engine::security::verdict_label(*verdict),
+            "findings": findings,
+            "headline": headline,
+        }),
+    }
+}
+
+fn print_watch_event(event: &cleanton_engine::background::WatchEvent) {
+    use cleanton_engine::background::{CleanupOffer, WatchEvent};
+    use cleanton_engine::security::{severity_label, verdict_label};
+
+    match event {
+        WatchEvent::Quiet | WatchEvent::RootChanged { .. } => {}
+        WatchEvent::Advisory {
+            package,
+            version,
+            advisory,
+            severity,
+            summary,
+            remediation,
+        } => println!(
+            "[{}] {package} {version}: {advisory} ({summary}) - {remediation}",
+            severity_label(*severity)
+        ),
+        WatchEvent::InstallHook { package, hook } => println!(
+            "[info] {package} runs a `{hook}` script at install time; review it if the package is unfamiliar"
+        ),
+        WatchEvent::ResourcePressure {
+            kind,
+            used_percent,
+            suggestion,
+            offer,
+            ..
+        } => {
+            println!(
+                "[pressure] {} at {used_percent}% used - {suggestion}",
+                kind.label()
+            );
+            match offer {
+                CleanupOffer::Disk { .. } => {
+                    println!(
+                        "  -> Disk cleanup offer: run `cleanton plan ~` to preview or `cleanton clean ~` to move safe caches and build artifacts to Trash."
+                    );
+                }
+                CleanupOffer::Memory {
+                    recommended_command,
+                    ..
+                } => {
+                    println!(
+                        "  -> Memory cleanup offer: run `{recommended_command}` to inspect and stop idle background services."
+                    );
+                }
+            }
+        }
+        WatchEvent::ContentFinding {
+            package,
+            verdict,
+            findings,
+            headline,
+        } => println!(
+            "[{}] {package}: {findings} finding(s) - {headline}",
+            verdict_label(*verdict)
+        ),
+    }
+}
+
+/// A systemd user unit that runs the watcher on Linux (Ubuntu). Printed, not
+/// installed: writing to `~/.config/systemd/user` stays the user's decision.
+fn systemd_user_unit(interval: u64) -> String {
+    let binary = std::env::current_exe().map_or_else(
+        |_| "/usr/local/bin/cleanton".to_owned(),
+        |path| path.display().to_string(),
+    );
+    format!(
+        "[Unit]\nDescription=Cleanton background package and resource helper\n\n[Service]\nType=simple\nExecStart={binary} watch --interval {interval}\nNice=10\nIOSchedulingClass=idle\nRestart=on-failure\n\n[Install]\nWantedBy=default.target"
+    )
+}
+
+/// A launchd agent that runs the watcher as a user background job. Printed, not
+/// installed: the plist path and the decision to load it are the user's.
+fn launch_agent_plist(interval: u64) -> String {
+    let binary = std::env::current_exe().map_or_else(
+        |_| "/usr/local/bin/cleanton".to_owned(),
+        |path| path.display().to_string(),
+    );
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>dev.cleanton.watch</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{binary}</string>
+        <string>watch</string>
+        <string>--interval</string>
+        <string>{interval}</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <false/>
+    <key>LowPriorityIO</key>
+    <true/>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/cleanton-watch.err</string>
+</dict>
+</plist>"#
+    )
+}
+
 fn run_security(
     cli: &Cli,
     establish_baseline: bool,

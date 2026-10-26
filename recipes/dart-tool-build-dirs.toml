@@ -1,0 +1,21 @@
+[recipe]
+id = "dart-tool-build-dirs"
+name = "Dart & Flutter .dart_tool Caches"
+description = "Per-project .dart_tool package config, build_runner and analyzer caches"
+category = "dart"
+safety_level = "safe"
+enabled = true
+priority = 52
+
+[match]
+directory_name = ".dart_tool"
+parent_must_contain = ["pubspec.yaml"]
+min_age_days = 7
+
+[action]
+type = "trash"
+prompt = "Move {size} of .dart_tool build caches to Trash?"
+
+[test]
+should_match = ["projects/flutter_app/.dart_tool"]
+should_not_match = ["projects/flutter_app/lib", "loose/.dart_tool"]

@@ -13,10 +13,21 @@ priority = 50
 path_glob = "~/Library/Application Support/Windsurf/*Cache*/**"
 min_age_days = 7
 
+[[match.any_of]]
+path_glob = "~/.config/Windsurf/*Cache*/**"
+min_age_days = 7
+
 [action]
 type = "trash"
 prompt = "Move {size} of Windsurf cache to Trash?"
 
 [test]
-should_match = ["~/Library/Application Support/Windsurf/CachedData/abc/module.js"]
-should_not_match = ["~/Library/Application Support/Windsurf/User/keybindings.json", "~/Library/Application Support/Windsurf/User/globalStorage/state.vscdb"]
+should_match = [
+    "~/Library/Application Support/Windsurf/CachedData/abc/module.js",
+    "~/.config/Windsurf/CachedData/abc/module.js",
+]
+should_not_match = [
+    "~/Library/Application Support/Windsurf/User/keybindings.json",
+    "~/Library/Application Support/Windsurf/User/globalStorage/state.vscdb",
+    "~/.config/Windsurf/User/keybindings.json",
+]

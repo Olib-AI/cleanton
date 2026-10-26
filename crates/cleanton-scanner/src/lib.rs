@@ -5,7 +5,10 @@ mod sizing;
 mod snapshots;
 mod walker;
 
-pub use capacity_ffi::{VolumeCapacity, is_case_sensitive, volume_capacity};
+pub use capacity_ffi::{
+    MemoryUsage, ProcessMemorySample, VolumeCapacity, is_case_sensitive, memory_usage,
+    reclaim_process_memory, top_memory_processes, volume_capacity,
+};
 pub use cleanton_common::{Ecosystem, ProjectRoot};
 pub use project::{detect_project_roots, detect_project_roots_from_entries};
 pub use sizing::{TargetSize, TargetSizing, size_targets};

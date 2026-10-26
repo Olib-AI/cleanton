@@ -1,0 +1,50 @@
+[recipe]
+id = "node-bundler-caches"
+name = "Node Bundler Caches"
+# Each tool owns one subdirectory of node_modules/.cache and rebuilds it on
+# the next run. Scoped strictly to known bundler/linter subdirectories under
+# node_modules/.cache so other tool state is untouched.
+description = "Per-project babel-loader, SWC, Nx, Storybook, Webpack, ESLint and Terser caches under node_modules/.cache"
+category = "node"
+safety_level = "safe"
+enabled = true
+priority = 52
+
+[match]
+path_glob = "**/node_modules/.cache/babel-loader/**"
+
+[[match.any_of]]
+path_glob = "**/node_modules/.cache/swc/**"
+
+[[match.any_of]]
+path_glob = "**/node_modules/.cache/nx/**"
+
+[[match.any_of]]
+path_glob = "**/node_modules/.cache/storybook/**"
+
+[[match.any_of]]
+path_glob = "**/node_modules/.cache/webpack/**"
+
+[[match.any_of]]
+path_glob = "**/node_modules/.cache/eslint/**"
+
+[[match.any_of]]
+path_glob = "**/node_modules/.cache/terser-webpack-plugin/**"
+
+[action]
+type = "trash"
+prompt = "Move {size} of Node bundler caches to Trash?"
+
+[test]
+should_match = [
+    "projects/app/node_modules/.cache/babel-loader/abc.json",
+    "projects/app/node_modules/.cache/swc/abc",
+    "projects/app/node_modules/.cache/nx/abc",
+    "projects/app/node_modules/.cache/storybook/abc",
+    "projects/app/node_modules/.cache/webpack/default-development/0.pack",
+]
+should_not_match = [
+    "projects/app/node_modules/.cache/other/abc",
+    "projects/app/.cache/babel-loader/abc",
+    "projects/app/node_modules/react/index.js",
+]

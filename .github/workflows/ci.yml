@@ -23,7 +23,7 @@ jobs:
       matrix:
         os: [macos-14, ubuntu-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
@@ -63,7 +63,7 @@ jobs:
     runs-on: macos-14
     needs: rust
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust toolchain (1.99.1)
         uses: dtolnay/rust-toolchain@stable
@@ -84,3 +84,33 @@ jobs:
           name: cleanton-macos-unsigned-${{ runner.arch }}
           path: packaging/dist/
           if-no-files-found: error
+
+  copy:
+    name: User-visible copy (no em dashes)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Reject em dashes in rendered copy
+        run: python3 scripts/check-ui-copy.py
+
+  audit:
+    name: cargo audit (required)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain (1.99.1)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.99.1"
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@cargo-audit
+
+      - name: cargo audit (policy from .cargo/audit.toml)
+        run: cargo audit --deny unsound

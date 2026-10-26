@@ -6,7 +6,10 @@ pub mod safety;
 pub mod types;
 pub mod usage_history;
 
-pub use config::{CleantonConfig, GeneralConfig, MlConfig, SafetyConfig, ScanningConfig, UiConfig};
+pub use config::{
+    BackgroundConfig, CleantonConfig, GeneralConfig, MlConfig, SafetyConfig, ScanningConfig,
+    UiConfig,
+};
 pub use error::{CleantonError, Result};
 pub use paths::{FIRMLINK_ALIASES, firmlink_canonical};
 pub use safety::{

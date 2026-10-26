@@ -122,6 +122,32 @@ impl ProtectedPaths {
             .map(|path| expand_tilde(&path))
             .collect::<Vec<_>>();
 
+        Self::assemble(hardcoded, user_scoped, user_configured)
+    }
+
+    /// Only the paths the user added to their own config, with none of the
+    /// built-in defaults.
+    ///
+    /// This exists for the one scope that must be *narrower* than the defaults
+    /// while still honouring the user's choices: an app uninstall deliberately
+    /// carves into `/Applications` and `~/Library`, which [`Self::new`] always
+    /// protects, so a set built from [`Self::new`] would refuse every item and
+    /// the confirmed uninstall would silently do nothing.
+    #[must_use]
+    pub fn configured_only(user_configured: impl IntoIterator<Item = PathBuf>) -> Self {
+        let user_configured = user_configured
+            .into_iter()
+            .map(|path| expand_tilde(&path))
+            .collect::<Vec<_>>();
+        Self::assemble(Vec::new(), Vec::new(), user_configured)
+    }
+
+    /// Build the precomputed comparison sets from the three protection sources.
+    fn assemble(
+        hardcoded: Vec<PathBuf>,
+        user_scoped: Vec<PathBuf>,
+        user_configured: Vec<PathBuf>,
+    ) -> Self {
         // Resolve each root's candidate forms (including its `canonicalize`d form,
         // to catch symlinked roots) once, then store the normalized prefixes.
         let mut normalized_roots = Vec::new();
@@ -234,6 +260,19 @@ mod tests {
         let protected = ProtectedPaths::defaults();
         assert!(!protected.is_protected(Path::new("/Applications-old")));
         assert!(!protected.is_protected(Path::new("/Users/example/Documents-old")));
+    }
+
+    #[test]
+    fn configured_only_keeps_the_users_paths_and_drops_the_defaults() {
+        // The uninstall scope depends on this: with the defaults merged in (as
+        // `new` does) every `/Applications` bundle and `~/Library` leftover
+        // would read as protected and a confirmed uninstall would skip every
+        // item.
+        let protected = ProtectedPaths::configured_only([PathBuf::from("/Users/alice/critical")]);
+        assert!(protected.is_protected(Path::new("/Users/alice/critical/cache")));
+        assert!(!protected.is_protected(Path::new("/Applications/Some App.app")));
+        assert!(!protected.is_protected(Path::new("/Library/LaunchDaemons/x.plist")));
+        assert!(!ProtectedPaths::configured_only([]).is_protected(Path::new("/tmp")));
     }
 
     #[test]

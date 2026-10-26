@@ -18,7 +18,7 @@ jobs:
     name: macOS arm64 signed & notarized release
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust toolchain (1.99.1)
         uses: dtolnay/rust-toolchain@stable
@@ -28,13 +28,15 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Verify required Apple secrets
+      - name: Verify required secrets
         env:
           APPLE_CERTIFICATE_B64: ${{ secrets.APPLE_CERTIFICATE_B64 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           set -euo pipefail
           for var in APPLE_CERTIFICATE_B64 APPLE_CERTIFICATE_PASSWORD \
@@ -44,6 +46,12 @@ jobs:
               exit 1
             fi
           done
+          if [[ "${GITHUB_REF:-}" =~ ^refs/tags/v ]]; then
+            if [[ -z "${HOMEBREW_TAP_DEPLOY_KEY:-}" && -z "${HOMEBREW_TAP_TOKEN:-}" ]]; then
+              echo "::error::Either HOMEBREW_TAP_DEPLOY_KEY or HOMEBREW_TAP_TOKEN must be set to update the Homebrew tap"
+              exit 1
+            fi
+          fi
 
       - name: Rust release gates
         run: |
@@ -61,7 +69,7 @@ jobs:
         run: ./packaging/build-macos.sh --notarize
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         if: startsWith(github.ref, 'refs/tags/v')
         with:
           files: |
@@ -70,3 +78,76 @@ jobs:
             packaging/dist/SHA256SUMS
           fail_on_unmatched_files: true
           generate_release_notes: true
+
+      - name: Update Homebrew Cask in tap
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          APP_TAR="packaging/dist/cleanton-app-macos-arm64.tar.gz"
+
+          if [[ ! -f "$APP_TAR" ]]; then
+            echo "::error::$APP_TAR not found"
+            exit 1
+          fi
+
+          SHA256="$(shasum -a 256 "$APP_TAR" | awk '{print $1}')"
+          echo "Updating Homebrew cask to version ${VERSION} with sha256 ${SHA256}..."
+
+          TAP_DIR="$(mktemp -d)"
+          SSH_KEY_FILE=""
+
+          if [[ -n "${HOMEBREW_TAP_DEPLOY_KEY:-}" ]]; then
+            mkdir -p ~/.ssh
+            chmod 700 ~/.ssh
+            SSH_KEY_FILE="$(mktemp "${RUNNER_TEMP:-/tmp}/tap_key_XXXXXX")"
+            echo "$HOMEBREW_TAP_DEPLOY_KEY" > "$SSH_KEY_FILE"
+            chmod 600 "$SSH_KEY_FILE"
+            ssh-keyscan -t rsa,ecdsa,ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null || true
+            export GIT_SSH_COMMAND="ssh -i $SSH_KEY_FILE -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+            git clone git@github.com:Olib-AI/homebrew-tap.git "$TAP_DIR"
+          elif [[ -n "${HOMEBREW_TAP_TOKEN:-}" ]]; then
+            git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/Olib-AI/homebrew-tap.git" "$TAP_DIR"
+          else
+            echo "::error::Neither HOMEBREW_TAP_DEPLOY_KEY nor HOMEBREW_TAP_TOKEN is set"
+            exit 1
+          fi
+
+          CASK_FILE="$TAP_DIR/Casks/cleanton.rb"
+          if [[ ! -f "$CASK_FILE" ]]; then
+            echo "::error::Cask file $CASK_FILE not found in tap repo"
+            exit 1
+          fi
+
+          VERSION="$VERSION" SHA256="$SHA256" CASK_FILE="$CASK_FILE" python3 -c "
+          import os, re
+          version = os.environ['VERSION']
+          sha = os.environ['SHA256']
+          path = os.environ['CASK_FILE']
+          with open(path, 'r', encoding='utf-8') as f:
+              content = f.read()
+          content = re.sub(r'version \"[^\"]+\"', f'version \"{version}\"', content)
+          content = re.sub(r'sha256 \"[^\"]+\"', f'sha256 \"{sha}\"', content)
+          with open(path, 'w', encoding='utf-8') as f:
+              f.write(content)
+          "
+
+          cd "$TAP_DIR"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          if git diff --quiet; then
+            echo "No changes in cask definition; skipping commit."
+          else
+            git commit -am "Update cleanton cask to ${VERSION}"
+            git pull --rebase origin main || true
+            git push origin main
+            echo "Successfully updated and pushed cleanton cask ${VERSION} to Olib-AI/homebrew-tap"
+          fi
+
+          if [[ -n "$SSH_KEY_FILE" ]]; then
+            rm -f "$SSH_KEY_FILE"
+          fi

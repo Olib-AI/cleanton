@@ -1,0 +1,21 @@
+[recipe]
+id = "ocaml-dune-build-dirs"
+name = "OCaml Dune _build Directories"
+description = "OCaml and ReasonML Dune _build project compilation directories"
+category = "ocaml"
+safety_level = "safe"
+enabled = true
+priority = 52
+
+[match]
+directory_name = "_build"
+parent_must_contain = ["dune-project"]
+min_age_days = 7
+
+[action]
+type = "trash"
+prompt = "Move {size} of OCaml Dune _build directories to Trash?"
+
+[test]
+should_match = ["projects/ocaml-compiler/_build"]
+should_not_match = ["projects/ocaml-compiler/lib", "loose/_build"]

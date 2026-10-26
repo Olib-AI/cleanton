@@ -1,0 +1,1028 @@
+//! Continuous, cheap security watching.
+//!
+//! The on-demand security scan is expensive by design: it fingerprints and
+//! content-scans every installed package so the baseline diff can be trusted.
+//! That is the right cost when the user asked for a scan, and completely wrong
+//! for a process that runs all day. So the watcher works in two stages:
+//!
+//! 1. **Idle.** One `stat` per watched package root. A package manager that
+//!    installs, updates, or removes anything necessarily touches the parent
+//!    directory, so an unchanged parent mtime means "nothing can have changed"
+//!    and the tick ends there. No walking, no file reads, no subprocesses.
+//!    Between ticks the thread sleeps, and the interval backs off from
+//!    [`WatchOptions::idle`] to [`WatchOptions::max_idle`] while the machine is
+//!    quiet, so an idle watcher costs a handful of syscalls every few minutes.
+//!
+//! 2. **Change.** When a root's mtime moves, that directory is listed once and
+//!    the entry list is diffed against the previous snapshot. Only the new or
+//!    touched package directories are examined, and only those: an advisory
+//!    lookup by version (a `HashMap` probe), a lifecycle-hook check on the
+//!    manifest, and one content scan of that single directory. A freshly
+//!    installed package is therefore checked immediately, without rescanning
+//!    anything else.
+//!
+//! The watcher is read-only, like everything else in the security engine: it
+//! reports, and never removes, quarantines, or modifies a package. Its only
+//! state is in memory.
+
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, SystemTime};
+
+use cleanton_antivirus::{ScanConfig, Scanner, Verdict};
+use cleanton_scanner::VolumeCapacity;
+
+use crate::advisories::{AdvisoryDatabase, Ecosystem, PackageSubject};
+use crate::security::{self, SecurityTarget, SecurityTargetKind, Severity};
+
+/// Bounds on the work a single tick may do, so a large install cannot turn one
+/// tick into a full scan.
+const MAX_PACKAGES_PER_TICK: usize = 24;
+
+/// Tuning for the watcher loop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WatchOptions {
+    /// Sleep between ticks while idle.
+    pub idle: Duration,
+    /// Upper bound on the backed-off idle sleep.
+    pub max_idle: Duration,
+    /// Short sleep after a change, so a package manager mid-install is allowed
+    /// to finish before it is checked.
+    pub burst: Duration,
+    /// Quiet ticks before the idle interval doubles towards `max_idle`.
+    pub quiet_ticks_before_backoff: u32,
+    /// Disk-used percentage (of the home volume) at/above which a
+    /// `ResourcePressure` event suggests a disk cleanup. `0` disables.
+    pub disk_pressure_percent: u8,
+    /// Memory-used percentage at/above which a `ResourcePressure` event
+    /// suggests memory relief. `0` disables. Cleanton never kills processes
+    /// or purges memory itself — the event is advice, acted on by the user.
+    pub memory_pressure_percent: u8,
+}
+
+impl Default for WatchOptions {
+    fn default() -> Self {
+        Self {
+            idle: Duration::from_secs(30),
+            max_idle: Duration::from_mins(15),
+            burst: Duration::from_secs(5),
+            quiet_ticks_before_backoff: 4,
+            disk_pressure_percent: 85,
+            memory_pressure_percent: 85,
+        }
+    }
+}
+
+impl WatchOptions {
+    /// Idle interval from a `--interval` style number of seconds, with the
+    /// backoff ceiling kept at least as large as the base interval.
+    #[must_use]
+    pub fn with_idle_seconds(seconds: u64) -> Self {
+        let defaults = Self::default();
+        let idle = Duration::from_secs(seconds.max(1));
+        Self {
+            idle,
+            max_idle: defaults.max_idle.max(idle),
+            burst: defaults.burst.min(idle),
+            quiet_ticks_before_backoff: defaults.quiet_ticks_before_backoff,
+            disk_pressure_percent: defaults.disk_pressure_percent,
+            memory_pressure_percent: defaults.memory_pressure_percent,
+        }
+    }
+}
+
+/// Something a tick observed. `Quiet` exists so a caller can distinguish
+/// "checked and found nothing" from "did not check".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WatchEvent {
+    /// Nothing changed under any watched root.
+    Quiet,
+    /// A watched root changed; `new_packages` entries were examined.
+    RootChanged { root: PathBuf, new_packages: usize },
+    /// An examined package version falls inside a published advisory.
+    Advisory {
+        package: String,
+        version: String,
+        advisory: String,
+        severity: Severity,
+        summary: String,
+        remediation: String,
+    },
+    /// A newly installed package runs a script at install time. Not a verdict,
+    /// just the fact that makes install-time compromise possible.
+    InstallHook { package: String, hook: String },
+    /// Disk or memory usage crossed its pressure threshold. Edge-triggered with
+    /// hysteresis: emitted once when pressure starts, and again only after usage
+    /// has dropped comfortably back below the threshold. `suggestion` is the
+    /// user-facing cleanup advice and `offer` carries concrete candidates so
+    /// CLI/TUI/GUI surfaces can offer one-step reviewed cleanup.
+    ResourcePressure {
+        kind: ResourceKind,
+        used_percent: u8,
+        available_bytes: u64,
+        suggestion: String,
+        offer: CleanupOffer,
+    },
+    /// A newly installed package did not come back clean from the content scan.
+    ContentFinding {
+        package: String,
+        verdict: Verdict,
+        findings: usize,
+        headline: String,
+    },
+}
+
+/// One measured reclaimable directory surfaced in a disk-pressure cleanup offer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiskReliefCandidate {
+    pub label: String,
+    pub path: PathBuf,
+    pub bytes: u64,
+}
+
+/// One high-RSS user process surfaced in a memory-pressure cleanup offer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemoryProcessCandidate {
+    pub pid: u32,
+    pub name: String,
+    pub rss_bytes: u64,
+}
+
+/// Structured cleanup offer emitted when disk or memory usage is too high.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CleanupOffer {
+    Disk {
+        candidates: Vec<DiskReliefCandidate>,
+        estimated_reclaimable_bytes: u64,
+    },
+    Memory {
+        top_processes: Vec<MemoryProcessCandidate>,
+        recommended_command: String,
+    },
+}
+
+/// Live resource snapshot used by the desktop and terminal UIs' background helper.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ResourceStatus {
+    pub disk_used_percent: u8,
+    pub disk_available_bytes: u64,
+    pub disk_total_bytes: u64,
+    pub memory_used_percent: u8,
+    pub memory_available_bytes: u64,
+    pub memory_total_bytes: u64,
+    pub disk_offer: Option<(String, CleanupOffer)>,
+    pub memory_offer: Option<(String, CleanupOffer)>,
+}
+
+impl WatchEvent {
+    /// Whether this event is worth waking a user for.
+    #[must_use]
+    pub fn is_reportable(&self) -> bool {
+        !matches!(self, Self::Quiet)
+    }
+}
+
+/// Which resource a [`WatchEvent::ResourcePressure`] event is about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResourceKind {
+    Disk,
+    Memory,
+}
+
+impl ResourceKind {
+    /// Short label for logs / JSON (`"disk"` / `"memory"`).
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Disk => "disk",
+            Self::Memory => "memory",
+        }
+    }
+}
+
+/// Per-root snapshot: the directory mtime plus the entry mtimes it was taken
+/// at. Kept as `BTreeMap` so diffing is deterministic and cheap to print.
+#[derive(Debug, Clone, Default)]
+struct RootState {
+    mtime: Option<SystemTime>,
+    entries: BTreeMap<String, Option<SystemTime>>,
+}
+
+/// Hysteresis band (in percentage points) below the pressure threshold before a
+/// previously triggered alert rearms, preventing repeated notifications when
+/// usage hovers near the threshold.
+const PRESSURE_HYSTERESIS_PERCENT: u8 = 5;
+
+/// The watcher itself: targets plus their last snapshot.
+#[derive(Debug)]
+pub struct PackageWatcher {
+    roots: Vec<(SecurityTarget, RootState)>,
+    advisories: AdvisoryDatabase,
+    scanner: Scanner,
+    options: WatchOptions,
+    disk_pressure_active: bool,
+    memory_pressure_active: bool,
+}
+
+impl PackageWatcher {
+    /// Watch the package roots that currently exist on this machine.
+    #[must_use]
+    pub fn for_default_targets(options: WatchOptions) -> Self {
+        Self::new(security::discover_default_targets(), options)
+    }
+
+    /// Watch an explicit target set.
+    #[must_use]
+    pub fn new(targets: Vec<SecurityTarget>, options: WatchOptions) -> Self {
+        Self {
+            roots: targets
+                .into_iter()
+                .map(|target| (target, RootState::default()))
+                .collect(),
+            advisories: AdvisoryDatabase::load(),
+            scanner: Scanner::with_default_engines(ScanConfig::default()),
+            options,
+            disk_pressure_active: false,
+            memory_pressure_active: false,
+        }
+    }
+
+    /// Watched roots (for logging / display).
+    pub fn roots(&self) -> impl Iterator<Item = &SecurityTarget> {
+        self.roots.iter().map(|(target, _)| target)
+    }
+
+    /// Longest sleep the loop will currently use.
+    #[must_use]
+    pub fn options(&self) -> WatchOptions {
+        self.options
+    }
+
+    /// Take one pass over every watched root.
+    pub fn tick(&mut self, cancel: &AtomicBool) -> Vec<WatchEvent> {
+        let mut events = Vec::new();
+        for (target, state) in &mut self.roots {
+            if cancel.load(Ordering::Relaxed) {
+                break;
+            }
+            // Stage 1: one stat. An unchanged directory mtime proves no entry
+            // was added, removed, or renamed, so there is nothing to check.
+            let Ok(metadata) = std::fs::metadata(&target.root) else {
+                // The root disappeared (an uninstalled toolchain): forget the
+                // snapshot so a reappearing root is examined from scratch.
+                state.mtime = None;
+                state.entries.clear();
+                continue;
+            };
+            let mtime = metadata.modified().ok();
+            if let (Some(current), Some(previous)) = (mtime, state.mtime)
+                && current == previous
+            {
+                continue;
+            }
+
+            // Stage 2: the directory moved. List it once and diff.
+            let current = list_entries(&target.root);
+            let first_observation = state.mtime.is_none();
+            state.mtime = mtime;
+            let previous = std::mem::replace(&mut state.entries, current);
+            if first_observation {
+                // Prime only. An install that predates the watcher is not
+                // "newly installed", and re-reporting a machine's whole
+                // package set at every start is exactly the noise this
+                // watcher exists to avoid.
+                continue;
+            }
+            let mut candidates: Vec<String> = state
+                .entries
+                .iter()
+                .filter(|(name, mtime)| previous.get(*name) != Some(*mtime))
+                .map(|(name, _)| name.clone())
+                .collect();
+            if candidates.is_empty() {
+                continue;
+            }
+            candidates.truncate(MAX_PACKAGES_PER_TICK);
+            let examined = candidates.len();
+            for name in &candidates {
+                for dir in expand_entry(&target.root, name) {
+                    events.extend(check_package(
+                        &self.advisories,
+                        &self.scanner,
+                        target.kind,
+                        &dir,
+                    ));
+                }
+            }
+            events.push(WatchEvent::RootChanged {
+                root: target.root.clone(),
+                new_packages: examined,
+            });
+        }
+        events.extend(self.resource_pressure_events());
+        if events.is_empty() {
+            events.push(WatchEvent::Quiet);
+        }
+        events
+    }
+
+    /// Edge-triggered disk/memory pressure check with hysteresis: two syscall-scale
+    /// reads (`statfs` on the home volume, `/proc/meminfo` or `host_statistics64`
+    /// for memory), cheap enough to run every tick alongside package-root stats.
+    fn resource_pressure_events(&mut self) -> Vec<WatchEvent> {
+        let mut events = Vec::new();
+        if self.options.disk_pressure_percent > 0
+            && let Some(home) = std::env::var_os("HOME").map(PathBuf::from)
+            && let Ok(capacity) = cleanton_scanner::volume_capacity(&home)
+            && capacity.total_bytes > 0
+        {
+            #[allow(
+                clippy::cast_precision_loss,
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss
+            )]
+            let used_percent = ((capacity.used_bytes as f64 / capacity.total_bytes as f64) * 100.0)
+                .round()
+                .clamp(0.0, 100.0) as u8;
+            let threshold = self.options.disk_pressure_percent;
+            let clear_below = threshold.saturating_sub(PRESSURE_HYSTERESIS_PERCENT);
+            if used_percent >= threshold && !self.disk_pressure_active {
+                self.disk_pressure_active = true;
+                let (suggestion, offer) = build_disk_offer(used_percent, &capacity, &home);
+                events.push(WatchEvent::ResourcePressure {
+                    kind: ResourceKind::Disk,
+                    used_percent,
+                    available_bytes: capacity.available_bytes,
+                    suggestion,
+                    offer,
+                });
+            } else if used_percent <= clear_below {
+                self.disk_pressure_active = false;
+            }
+        }
+        if self.options.memory_pressure_percent > 0
+            && let Some(memory) = cleanton_scanner::memory_usage()
+        {
+            #[allow(
+                clippy::cast_precision_loss,
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss
+            )]
+            let used_percent = (memory.used_fraction * 100.0).round().clamp(0.0, 100.0) as u8;
+            let threshold = self.options.memory_pressure_percent;
+            let clear_below = threshold.saturating_sub(PRESSURE_HYSTERESIS_PERCENT);
+            if used_percent >= threshold && !self.memory_pressure_active {
+                self.memory_pressure_active = true;
+                let (suggestion, offer) = build_memory_offer(used_percent, memory.available_bytes);
+                events.push(WatchEvent::ResourcePressure {
+                    kind: ResourceKind::Memory,
+                    used_percent,
+                    available_bytes: memory.available_bytes,
+                    suggestion,
+                    offer,
+                });
+            } else if used_percent <= clear_below {
+                self.memory_pressure_active = false;
+            }
+        }
+        events
+    }
+
+    /// The endless loop: tick, emit, then sleep with backoff.
+    pub fn run(&mut self, cancel: &AtomicBool, emit: &mut dyn FnMut(WatchEvent)) {
+        let mut interval = self.options.idle;
+        let mut quiet = 0_u32;
+        while !cancel.load(Ordering::Relaxed) {
+            let events = self.tick(cancel);
+            let busy = events.iter().any(WatchEvent::is_reportable);
+            for event in events {
+                emit(event);
+            }
+            if busy {
+                quiet = 0;
+                interval = self.options.burst;
+            } else {
+                quiet = quiet.saturating_add(1);
+                if quiet >= self.options.quiet_ticks_before_backoff {
+                    quiet = 0;
+                    interval = interval.saturating_mul(2).min(self.options.max_idle);
+                } else {
+                    interval = self.options.idle;
+                }
+            }
+            sleep_interruptibly(interval, cancel);
+        }
+    }
+}
+
+/// Entry budget for one disk-relief measurement. A pressure event is
+/// edge-triggered (it fires once when the disk fills up, not once per tick), so
+/// a one-off walk is affordable — but it must still never become an unbounded
+/// traversal of a huge or actively-written cache tree on the watcher thread.
+const RELIEF_ENTRY_CAP: usize = 20_000;
+
+/// Candidates smaller than this are not worth naming in the advice.
+const RELIEF_MIN_BYTES: u64 = 64 * 1024 * 1024;
+
+/// How many reclaimable directories the advice names.
+const RELIEF_TOP_N: usize = 4;
+
+/// How many high-memory processes are named in memory relief offers.
+const MEMORY_TOP_PROCESSES: usize = 4;
+
+/// Capture a live snapshot of disk and memory usage, computing cleanup offers
+/// only when a configured threshold is exceeded.
+#[must_use]
+pub fn snapshot_resource_status(disk_threshold: u8, memory_threshold: u8) -> ResourceStatus {
+    let mut status = ResourceStatus::default();
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from)
+        && let Ok(capacity) = cleanton_scanner::volume_capacity(&home)
+        && capacity.total_bytes > 0
+    {
+        #[allow(
+            clippy::cast_precision_loss,
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss
+        )]
+        let used_percent = ((capacity.used_bytes as f64 / capacity.total_bytes as f64) * 100.0)
+            .round()
+            .clamp(0.0, 100.0) as u8;
+        status.disk_used_percent = used_percent;
+        status.disk_available_bytes = capacity.available_bytes;
+        status.disk_total_bytes = capacity.total_bytes;
+        if disk_threshold > 0 && used_percent >= disk_threshold {
+            status.disk_offer = Some(build_disk_offer(used_percent, &capacity, &home));
+        }
+    }
+    if let Some(memory) = cleanton_scanner::memory_usage() {
+        #[allow(
+            clippy::cast_precision_loss,
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss
+        )]
+        let used_percent = (memory.used_fraction * 100.0).round().clamp(0.0, 100.0) as u8;
+        status.memory_used_percent = used_percent;
+        status.memory_available_bytes = memory.available_bytes;
+        status.memory_total_bytes = memory.total_bytes;
+        if memory_threshold > 0 && used_percent >= memory_threshold {
+            status.memory_offer = Some(build_memory_offer(used_percent, memory.available_bytes));
+        }
+    }
+    status
+}
+
+/// Sum a directory against a budget shared by the whole measurement, stopping
+/// as soon as it is spent. The figure is therefore a lower bound, which is the
+/// safe direction for cleanup advice: it under-promises rather than over-promises.
+fn sized_dir(path: &Path, budget: &mut usize) -> u64 {
+    let mut total = 0_u64;
+    for entry in walkdir::WalkDir::new(path).follow_links(false) {
+        if *budget == 0 {
+            break;
+        }
+        *budget = budget.saturating_sub(1);
+        let Ok(entry) = entry else {
+            continue;
+        };
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        if let Ok(metadata) = entry.metadata() {
+            total = total.saturating_add(metadata.len());
+        }
+    }
+    total
+}
+
+/// The largest reclaimable directories under macOS and Linux cache/developer/Trash
+/// locations, sorted largest-first and capped at [`RELIEF_TOP_N`].
+fn measure_disk_relief_candidates(home: &Path) -> Vec<DiskReliefCandidate> {
+    let mut budget = RELIEF_ENTRY_CAP;
+    let mut found: Vec<DiskReliefCandidate> = Vec::new();
+    for root in [home.join("Library/Caches"), home.join(".cache")] {
+        let Ok(entries) = std::fs::read_dir(&root) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            if budget == 0 {
+                break;
+            }
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let size = sized_dir(&path, &mut budget);
+            if size >= RELIEF_MIN_BYTES {
+                found.push(DiskReliefCandidate {
+                    label: name,
+                    path,
+                    bytes: size,
+                });
+            }
+        }
+    }
+
+    for (label, path) in [
+        (
+            "Xcode DerivedData",
+            home.join("Library/Developer/Xcode/DerivedData"),
+        ),
+        ("Cargo registry", home.join(".cargo/registry")),
+        ("Gradle caches", home.join(".gradle/caches")),
+        ("npm cache", home.join(".npm/_cacache")),
+        ("Trash", home.join(".Trash")),
+        ("Trash", home.join(".local/share/Trash/files")),
+    ] {
+        if budget == 0 {
+            break;
+        }
+        if path.is_dir() {
+            let size = sized_dir(&path, &mut budget);
+            if size >= RELIEF_MIN_BYTES {
+                found.push(DiskReliefCandidate {
+                    label: label.to_owned(),
+                    path,
+                    bytes: size,
+                });
+            }
+        }
+    }
+
+    found.sort_by(|a, b| b.bytes.cmp(&a.bytes).then_with(|| a.label.cmp(&b.label)));
+    found.truncate(RELIEF_TOP_N);
+    found
+}
+
+/// Bytes as a short human figure (`18.4 GB`). Local to this module: the engine
+/// does not take on a formatting dependency for one string.
+fn human_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    #[allow(clippy::cast_precision_loss)]
+    let mut value = bytes as f64;
+    let mut unit = 0_usize;
+    while value >= 1024.0 && unit + 1 < UNITS.len() {
+        value /= 1024.0;
+        unit = unit.saturating_add(1);
+    }
+    let label = UNITS.get(unit).copied().unwrap_or("TB");
+    if unit == 0 || value >= 100.0 {
+        format!("{value:.0} {label}")
+    } else {
+        format!("{value:.1} {label}")
+    }
+}
+
+fn build_disk_offer(
+    used_percent: u8,
+    capacity: &VolumeCapacity,
+    home: &Path,
+) -> (String, CleanupOffer) {
+    let free = human_bytes(capacity.available_bytes);
+    let candidates = measure_disk_relief_candidates(home);
+    let estimated_reclaimable_bytes: u64 = candidates
+        .iter()
+        .fold(0_u64, |acc, item| acc.saturating_add(item.bytes));
+
+    let mut advice = format!("Disk usage is high at {used_percent}% ({free} available).");
+    if candidates.is_empty() {
+        advice.push_str(
+            " Offer disk cleanup: run a Cleanton scan to review caches and build artifacts, \
+             then empty the Trash to reclaim freed space.",
+        );
+    } else {
+        use std::fmt::Write as _;
+
+        let named: Vec<String> = candidates
+            .iter()
+            .map(|c| format!("{} ({})", c.label, human_bytes(c.bytes)))
+            .collect();
+        let _ = write!(
+            advice,
+            " At least {} is reclaimable across {}. Run Disk Cleanup to review and move caches to Trash, or empty the Trash.",
+            human_bytes(estimated_reclaimable_bytes),
+            named.join(", ")
+        );
+    }
+
+    (
+        advice,
+        CleanupOffer::Disk {
+            candidates,
+            estimated_reclaimable_bytes,
+        },
+    )
+}
+
+fn build_memory_offer(used_percent: u8, available_bytes: u64) -> (String, CleanupOffer) {
+    // Immediately return any unused Cleanton allocator pages back to the OS.
+    let _ = cleanton_scanner::reclaim_process_memory();
+
+    let top_processes: Vec<MemoryProcessCandidate> =
+        cleanton_scanner::top_memory_processes(MEMORY_TOP_PROCESSES)
+            .into_iter()
+            .map(|sample| MemoryProcessCandidate {
+                pid: sample.pid,
+                name: sample.name,
+                rss_bytes: sample.rss_bytes,
+            })
+            .collect();
+
+    let mut advice = format!(
+        "Memory usage is high at {used_percent}% ({} available).",
+        human_bytes(available_bytes)
+    );
+    if !top_processes.is_empty() {
+        let summary: Vec<String> = top_processes
+            .iter()
+            .map(|proc_entry| {
+                format!(
+                    "{} ({}, PID {})",
+                    proc_entry.name,
+                    human_bytes(proc_entry.rss_bytes),
+                    proc_entry.pid
+                )
+            })
+            .collect();
+        advice.push_str(" Heaviest user processes: ");
+        advice.push_str(&summary.join(", "));
+        advice.push('.');
+    }
+    advice.push_str(
+        " Offer memory cleanup: stop idle background services in Cleanton Services (`cleanton services list`) \
+         or close unused heavy apps; Cleanton reclaimed its own unused allocator pages and never kills user apps without review.",
+    );
+
+    (
+        advice,
+        CleanupOffer::Memory {
+            top_processes,
+            recommended_command: "cleanton services list".to_owned(),
+        },
+    )
+}
+
+/// Investigate one package directory: advisory lookup, lifecycle hooks, and
+/// a single-directory content scan.
+fn check_package(
+    advisories: &AdvisoryDatabase,
+    scanner: &Scanner,
+    kind: SecurityTargetKind,
+    dir: &Path,
+) -> Vec<WatchEvent> {
+    let Some((ecosystem, name, version)) = package_identity(kind, dir) else {
+        return Vec::new();
+    };
+    let mut events = Vec::new();
+    if let Some(version) = version.as_deref().filter(|version| !version.is_empty()) {
+        let subject = PackageSubject::new(ecosystem, name.clone(), version);
+        for advisory in advisories.matches(&subject) {
+            events.push(WatchEvent::Advisory {
+                package: name.clone(),
+                version: version.to_owned(),
+                advisory: advisory.id.clone(),
+                severity: advisory.severity,
+                summary: advisory.summary.clone(),
+                remediation: advisory.remediation(),
+            });
+        }
+    }
+    if let Some(hook) = install_hook(kind, dir) {
+        events.push(WatchEvent::InstallHook {
+            package: name.clone(),
+            hook,
+        });
+    }
+    if kind.is_version_only() {
+        // Version-only ecosystems are never content-scanned; see
+        // `SecurityTargetKind::is_version_only`.
+        return events;
+    }
+    if let Ok(report) = scanner.scan_path(dir)
+        && !matches!(report.verdict, Verdict::Clean)
+    {
+        events.push(WatchEvent::ContentFinding {
+            package: name,
+            verdict: report.verdict,
+            findings: report.findings.len(),
+            headline: report
+                .findings
+                .first()
+                .map_or_else(String::new, |finding| finding.title.clone()),
+        });
+    }
+    events
+}
+
+/// Sleep in small slices so a cancellation request is honoured promptly.
+fn sleep_interruptibly(total: Duration, cancel: &AtomicBool) {
+    const SLICE: Duration = Duration::from_millis(200);
+    let mut slept = Duration::ZERO;
+    while slept < total {
+        if cancel.load(Ordering::Relaxed) {
+            return;
+        }
+        let step = SLICE.min(total.saturating_sub(slept));
+        std::thread::sleep(step);
+        slept = slept.saturating_add(step);
+    }
+}
+
+/// Entry name → modification time for one directory. Unreadable entries keep
+/// `None` so name-level changes are still detected.
+fn list_entries(root: &Path) -> BTreeMap<String, Option<SystemTime>> {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return BTreeMap::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') {
+                return None;
+            }
+            let mtime = entry.metadata().ok().and_then(|meta| meta.modified().ok());
+            Some((name, mtime))
+        })
+        .collect()
+}
+
+/// A changed entry expands to the package directories it contains: scoped npm
+/// directories hold one package per child, everything else is the package.
+fn expand_entry(root: &Path, name: &str) -> Vec<PathBuf> {
+    let dir = root.join(name);
+    if !name.starts_with('@') || !dir.is_dir() {
+        return vec![dir];
+    }
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .collect()
+}
+
+/// Ecosystem, name, and version for a package directory, without spawning any
+/// package manager.
+fn package_identity(
+    kind: SecurityTargetKind,
+    dir: &Path,
+) -> Option<(Ecosystem, String, Option<String>)> {
+    let fallback = dir.file_name().map_or_else(
+        || dir.display().to_string(),
+        |name| name.to_string_lossy().into_owned(),
+    );
+    match kind {
+        SecurityTargetKind::NodeGlobal
+        | SecurityTargetKind::NodeProject
+        | SecurityTargetKind::EditorExtensions => {
+            let (name, version) = security::npm_manifest(dir, &fallback);
+            Some((Ecosystem::Npm, name, version))
+        }
+        SecurityTargetKind::PythonSitePackages => {
+            // `*.dist-info` metadata lives beside the package directory, in
+            // site-packages itself.
+            let site_packages = dir.parent().unwrap_or(dir);
+            let version = security::python_dist_info_version(site_packages, &fallback);
+            Some((Ecosystem::PyPI, fallback, version))
+        }
+        SecurityTargetKind::RubyGems => {
+            let (name, version) = security::gem_identity(dir, &fallback);
+            Some((Ecosystem::RubyGems, name, version))
+        }
+        SecurityTargetKind::CargoRegistry => {
+            let (name, version) = security::cargo_identity(dir, &fallback);
+            Some((Ecosystem::CratesIo, name, version))
+        }
+        SecurityTargetKind::GoModuleCache => {
+            let (name, version) = security::split_versioned_dir_name(&fallback)?;
+            Some((Ecosystem::Go, name, Some(version)))
+        }
+        // A persistence file has no manifest and no advisory feed; the content
+        // engines are the only thing that can judge it, and they run without an
+        // ecosystem. Returning `None` keeps the watcher from inventing one.
+        SecurityTargetKind::HostPersistence => None,
+    }
+}
+
+/// The install-time script a package declares, when its ecosystem has one.
+fn install_hook(kind: SecurityTargetKind, dir: &Path) -> Option<String> {
+    if !matches!(
+        kind,
+        SecurityTargetKind::NodeGlobal
+            | SecurityTargetKind::NodeProject
+            | SecurityTargetKind::EditorExtensions
+    ) {
+        return None;
+    }
+    let manifest = std::fs::read_to_string(dir.join("package.json")).ok()?;
+    let value = serde_json::from_str::<serde_json::Value>(&manifest).ok()?;
+    let scripts = value.get("scripts")?;
+    ["preinstall", "install", "postinstall"]
+        .into_iter()
+        .find(|hook| scripts.get(*hook).is_some())
+        .map(str::to_owned)
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+    use super::*;
+
+    fn write(path: &Path, contents: &str) {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(path, contents).unwrap();
+    }
+
+    fn quiet(events: &[WatchEvent]) -> bool {
+        !events.iter().any(WatchEvent::is_reportable)
+    }
+
+    #[test]
+    fn idle_tick_reports_quiet_and_does_no_work() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("node_modules");
+        write(
+            &root.join("add/index.js"),
+            "module.exports = (a, b) => a + b;\n",
+        );
+        let target = SecurityTarget {
+            kind: SecurityTargetKind::NodeGlobal,
+            root: root.clone(),
+        };
+        let mut watcher = PackageWatcher::new(vec![target], WatchOptions::default());
+        let cancel = AtomicBool::new(false);
+        // First tick primes the snapshot (and examines the existing package).
+        let _ = watcher.tick(&cancel);
+        // Second tick has nothing to do.
+        assert!(quiet(&watcher.tick(&cancel)));
+    }
+
+    #[test]
+    fn newly_installed_vulnerable_package_is_reported_immediately() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("node_modules");
+        std::fs::create_dir_all(&root).unwrap();
+        let target = SecurityTarget {
+            kind: SecurityTargetKind::NodeGlobal,
+            root: root.clone(),
+        };
+        let mut watcher = PackageWatcher::new(vec![target], WatchOptions::default());
+        let cancel = AtomicBool::new(false);
+        let _ = watcher.tick(&cancel);
+
+        // An install appears, pinned to a version with a published advisory.
+        // The short sleep also keeps the parent directory mtime distinct on
+        // filesystems with coarse timestamp granularity.
+        std::thread::sleep(Duration::from_millis(20));
+        write(
+            &root.join("lodash/package.json"),
+            r#"{ "name": "lodash", "version": "4.17.20" }"#,
+        );
+        write(&root.join("lodash/index.js"), "module.exports = {};\n");
+
+        let events = watcher.tick(&cancel);
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                WatchEvent::Advisory { package, advisory, .. }
+                    if package == "lodash" && advisory == "CVE-2021-23337"
+            )),
+            "expected the advisory hit, got {events:?}"
+        );
+    }
+
+    #[test]
+    fn install_hooks_are_reported_for_new_packages() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("node_modules");
+        std::fs::create_dir_all(&root).unwrap();
+        let target = SecurityTarget {
+            kind: SecurityTargetKind::NodeGlobal,
+            root: root.clone(),
+        };
+        let mut watcher = PackageWatcher::new(vec![target], WatchOptions::default());
+        let cancel = AtomicBool::new(false);
+        let _ = watcher.tick(&cancel);
+        std::thread::sleep(Duration::from_millis(20));
+        write(
+            &root.join("hooky/package.json"),
+            r#"{ "name": "hooky", "version": "9.9.9", "scripts": { "postinstall": "node setup.js" } }"#,
+        );
+        write(&root.join("hooky/setup.js"), "console.log('hi');\n");
+        let events = watcher.tick(&cancel);
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                WatchEvent::InstallHook { package, hook } if package == "hooky" && hook == "postinstall"
+            )),
+            "expected the lifecycle hook, got {events:?}"
+        );
+    }
+
+    #[test]
+    fn pressure_events_are_edge_triggered_and_thresholds_can_disable() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("node_modules");
+        std::fs::create_dir_all(&root).unwrap();
+        let target = SecurityTarget {
+            kind: SecurityTargetKind::NodeGlobal,
+            root,
+        };
+        // Threshold of 1% is crossed on any real machine, 0 disables.
+        let options = WatchOptions {
+            disk_pressure_percent: 1,
+            memory_pressure_percent: 0,
+            ..WatchOptions::default()
+        };
+        let mut watcher = PackageWatcher::new(vec![target.clone()], options);
+        let first = watcher.resource_pressure_events();
+        assert_eq!(
+            first.len(),
+            1,
+            "expected one disk pressure event: {first:?}"
+        );
+        assert!(matches!(
+            first.first(),
+            Some(WatchEvent::ResourcePressure {
+                kind: ResourceKind::Disk,
+                ..
+            })
+        ));
+        // Still under pressure: no repeat event.
+        assert!(watcher.resource_pressure_events().is_empty());
+
+        let off = WatchOptions {
+            disk_pressure_percent: 0,
+            memory_pressure_percent: 0,
+            ..WatchOptions::default()
+        };
+        let mut watcher = PackageWatcher::new(vec![target], off);
+        assert!(watcher.resource_pressure_events().is_empty());
+    }
+
+    #[test]
+    fn backoff_reaches_the_ceiling_and_burst_resets_it() {
+        let options = WatchOptions::with_idle_seconds(1);
+        assert_eq!(options.idle, Duration::from_secs(1));
+        assert!(options.max_idle >= options.idle);
+        assert!(options.burst <= options.idle);
+    }
+
+    #[test]
+    fn disk_and_memory_cleanup_offers_are_populated() {
+        let temp = tempfile::tempdir().unwrap();
+        let big_cache = temp.path().join(".cache/pip");
+        std::fs::create_dir_all(&big_cache).unwrap();
+        std::fs::write(big_cache.join("wheel.bin"), vec![0_u8; 70 * 1024 * 1024]).unwrap();
+
+        let cap = VolumeCapacity {
+            total_bytes: 100 * 1024 * 1024 * 1024,
+            free_bytes: 10 * 1024 * 1024 * 1024,
+            available_bytes: 10 * 1024 * 1024 * 1024,
+            available_for_important_usage_bytes: 10 * 1024 * 1024 * 1024,
+            used_bytes: 90 * 1024 * 1024 * 1024,
+            purgeable_estimate_bytes: 0,
+            block_size: 4096,
+        };
+        let (advice, offer) = build_disk_offer(90, &cap, temp.path());
+        assert!(
+            advice.contains("pip"),
+            "expected cache candidate in {advice}"
+        );
+        assert!(matches!(offer, CleanupOffer::Disk { .. }));
+        if let CleanupOffer::Disk {
+            candidates,
+            estimated_reclaimable_bytes,
+        } = offer
+        {
+            assert!(!candidates.is_empty());
+            assert!(estimated_reclaimable_bytes >= 64 * 1024 * 1024);
+        }
+
+        let (mem_advice, mem_offer) = build_memory_offer(92, 512 * 1024 * 1024);
+        assert!(mem_advice.contains("Memory usage is high"));
+        assert!(matches!(mem_offer, CleanupOffer::Memory { .. }));
+    }
+
+    #[test]
+    fn identity_is_read_from_the_manifest_not_the_directory_name() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join("weird-dir-name");
+        write(
+            &dir.join("package.json"),
+            r#"{ "name": "real-name", "version": "1.2.3" }"#,
+        );
+        let (ecosystem, name, version) =
+            package_identity(SecurityTargetKind::NodeGlobal, &dir).unwrap();
+        assert_eq!(ecosystem, Ecosystem::Npm);
+        assert_eq!(name, "real-name");
+        assert_eq!(version.as_deref(), Some("1.2.3"));
+    }
+}

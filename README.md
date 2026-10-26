@@ -164,7 +164,7 @@ Rust workspace, edition 2024, resolver 3, pinned to **Rust 1.99.1**.
 | `cleanton-antivirus` | Vendored static malware + supply-chain scanner (multi-engine; pure/static, zero network calls). Backs the Security tab and `cleanton security`. |
 | `cleanton-common` | Shared config, plan, result, and error types. |
 | `cleanton-scanner` | Filesystem scanner and the audited macOS capacity FFI (`statfs`/`pathconf`). |
-| `cleanton-recipes` | TOML recipe registry (over 130 built-in recipes for Rust, Node, Swift, Python, JVM, Docker, AI/ML, and more). |
+| `cleanton-recipes` | TOML recipe registry (over 138 built-in recipes for Rust, Node, Swift, Python, JVM, Docker, AI/ML, and more). |
 | `cleanton-engine` | Orchestration: `analyze_full`, the planner, the trash-based executor, Docker, the suggestions engine, and the read-only `security` supply-chain scan. |
 | `cleanton-packages` | Package-manager facade: Homebrew, npm, pip, MacPorts. Keep-set removal, codebase-usage scan. |
 | `cleanton-services` | `launchd` and Homebrew service inventory and gated enable/disable. |
@@ -193,6 +193,13 @@ cargo test --workspace --all-features
 
 # Run RustSec dependency audit
 ./scripts/audit.sh
+
+# Validate the recipe registry offline (no Rust toolchain needed)
+python3 scripts/validate-recipes.py
+
+# Use GitHub Actions as the build machine (lint/test/build/audit):
+#   trigger -> watch -> report -> logs
+./scripts/dev-ci.sh all
 
 # Build release package locally (unsigned)
 ./packaging/build-macos.sh

@@ -1,0 +1,33 @@
+[recipe]
+id = "php-tool-caches"
+name = "PHP Static Analysis & Test Caches"
+description = "PHPUnit .phpunit.cache, PHPStan and Psalm analysis caches"
+category = "php"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+directory_name = ".phpunit.cache"
+parent_must_contain = ["composer.json"]
+min_age_days = 7
+
+[[match.any_of]]
+path_glob = "~/.cache/phpstan/**"
+min_age_days = 14
+
+[[match.any_of]]
+path_glob = "~/.cache/psalm/**"
+min_age_days = 14
+
+[action]
+type = "trash"
+prompt = "Move {size} of PHP analysis and test caches to Trash?"
+
+[test]
+should_match = [
+    "projects/laravel-api/.phpunit.cache",
+    "~/.cache/phpstan/resultCache.php",
+    "~/.cache/psalm/abc123",
+]
+should_not_match = ["projects/laravel-api/app", "loose/.phpunit.cache"]

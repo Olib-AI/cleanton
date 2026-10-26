@@ -1,0 +1,32 @@
+[recipe]
+id = "go-module-cache"
+name = "Go Module Cache (extracted)"
+description = "Extracted Go modules under ~/go/pkg/mod; re-downloaded on demand (the download cache is covered separately)"
+category = "go"
+icon = "fa-golang"
+safety_level = "cautious"
+enabled = true
+priority = 52
+
+# `go mod download` extracts modules into `~/go/pkg/mod/<module>@<version>/`.
+# The raw download cache (`~/go/pkg/mod/cache`) is owned by `go-mod-cache`; this
+# recipe excludes it so the two recipes never propose the same path. Extracted
+# modules are regenerable, but a build may be running against them, hence
+# `cautious` and an age gate.
+[match]
+path_glob = "~/go/pkg/mod/**"
+min_age_days = 30
+
+[match.exclude]
+paths = ["~/go/pkg/mod/cache/**"]
+
+[action]
+type = "trash"
+prompt = "Move {size} of extracted Go modules to Trash? Go re-downloads them on demand."
+
+[test]
+should_match = ["~/go/pkg/mod/github.com/foo/bar@v1.2.3/bar.go"]
+should_not_match = [
+    "~/go/pkg/mod/cache/download/github.com/foo/bar/@v/v1.2.3.zip",
+    "~/go/src/github.com/foo/bar/bar.go",
+]

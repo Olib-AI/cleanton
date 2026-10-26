@@ -1,0 +1,28 @@
+[recipe]
+id = "haskell-cabal-build-dirs"
+name = "Haskell Cabal dist-newstyle & Package Cache"
+description = "Cabal dist-newstyle project build outputs and downloaded Hackage tarballs"
+category = "haskell"
+safety_level = "safe"
+enabled = true
+priority = 52
+
+[match]
+directory_name = "dist-newstyle"
+parent_must_contain_any = ["cabal.project", "Setup.hs", "package.yaml"]
+min_age_days = 14
+
+[[match.any_of]]
+path_glob = "~/.cabal/packages/**"
+min_age_days = 30
+
+[action]
+type = "trash"
+prompt = "Move {size} of Haskell Cabal build artifacts to Trash?"
+
+[test]
+should_match = [
+    "projects/hs-service/dist-newstyle",
+    "~/.cabal/packages/hackage.haskell.org/aeson/2.2.1.0/aeson-2.2.1.0.tar.gz",
+]
+should_not_match = ["projects/hs-service/src", "loose/dist-newstyle", "~/.cabal/config"]

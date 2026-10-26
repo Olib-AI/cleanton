@@ -11,10 +11,21 @@ priority = 50
 path_glob = "~/Library/Caches/node-gyp/**"
 min_age_days = 30
 
+# Linux (XDG): node-gyp's downloaded headers.
+[[match.any_of]]
+min_age_days = 30
+path_glob = "~/.cache/node-gyp/**"
+
 [action]
 type = "trash"
 prompt = "Move {size} of node-gyp cache to Trash?"
 
 [test]
-should_match = ["~/Library/Caches/node-gyp/22.5.0/include/node/node_api.h"]
-should_not_match = ["~/Library/Caches/Yarn"]
+should_match = [
+    "~/Library/Caches/node-gyp/22.5.0/include/node/node_api.h",
+    "~/.cache/node-gyp/18.0.0/include/node/node.h",
+]
+should_not_match = [
+    "~/Library/Caches/Yarn",
+    "~/.cache/other/foo",
+]

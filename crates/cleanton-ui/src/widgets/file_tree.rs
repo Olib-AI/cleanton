@@ -43,7 +43,10 @@ impl TreeItem {
             label,
             path,
             bytes,
-            selected: true,
+            // Nothing is selected after a scan. Cleanton is a deleter: every
+            // item must be ticked explicitly, so a scan can never end in a
+            // "press clean and everything is gone" state.
+            selected: false,
             expanded: true,
             action_index,
             badge: String::new(),

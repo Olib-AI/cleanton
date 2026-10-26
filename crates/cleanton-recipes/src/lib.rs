@@ -5,7 +5,8 @@ mod registry;
 mod validator;
 
 pub use matcher::{
-    DirectoryGate, action_for_entry, action_for_entry_with_subtree_mtime, directory_gate,
+    CompiledRecipeMatcher, DirectoryGate, action_for_entry, action_for_entry_with_context,
+    action_for_entry_with_subtree_mtime, directory_gate, directory_gate_with_context,
     recipe_has_gates, recipe_matches_entry,
 };
 pub use parser::{

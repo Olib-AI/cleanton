@@ -12,10 +12,22 @@ path_glob = "~/Library/Caches/ms-playwright/**"
 min_age_days = 30
 min_size_mb = 50
 
+# Linux (XDG): PLAYWRIGHT_BROWSERS_PATH default.
+[[match.any_of]]
+min_age_days = 30
+min_size_mb = 50
+path_glob = "~/.cache/ms-playwright/**"
+
 [action]
 type = "trash"
 prompt = "Move {size} of Playwright browsers to Trash?"
 
 [test]
-should_match = ["~/Library/Caches/ms-playwright/chromium-1155/chrome-mac/Chromium.app-payload"]
-should_not_match = ["~/Library/Caches/Yarn"]
+should_match = [
+    "~/Library/Caches/ms-playwright/chromium-1155/chrome-mac/Chromium.app-payload",
+    "~/.cache/ms-playwright/chromium-1234/chrome-linux/chrome",
+]
+should_not_match = [
+    "~/Library/Caches/Yarn",
+    "~/.cache/other/foo",
+]

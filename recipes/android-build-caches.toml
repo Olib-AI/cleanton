@@ -1,0 +1,33 @@
+[recipe]
+id = "android-build-caches"
+name = "Android NDK .cxx & Global Build Caches"
+description = "Android NDK .cxx native build intermediates and ~/.android build caches"
+category = "android"
+safety_level = "safe"
+enabled = true
+priority = 52
+
+[match]
+directory_name = ".cxx"
+parent_must_contain_any = ["build.gradle", "build.gradle.kts"]
+min_age_days = 14
+
+[[match.any_of]]
+path_glob = "~/.android/build-cache/**"
+min_age_days = 30
+
+[[match.any_of]]
+path_glob = "~/.android/cache/**"
+min_age_days = 30
+
+[action]
+type = "trash"
+prompt = "Move {size} of Android native and build caches to Trash?"
+
+[test]
+should_match = [
+    "projects/mobile/app/.cxx",
+    "~/.android/build-cache/abc123/output",
+    "~/.android/cache/sdkbin-1.xml",
+]
+should_not_match = ["~/.android/debug.keystore", "~/.android/avd/Pixel.avd/userdata.img", "loose/.cxx"]

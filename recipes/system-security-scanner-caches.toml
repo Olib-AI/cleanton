@@ -1,0 +1,51 @@
+[recipe]
+id = "system-security-scanner-caches"
+name = "Security Scanner Caches"
+# These are the local copies of the vulnerability feeds. They are hundreds of
+# megabytes and every scanner re-downloads them, so they are the cheapest
+# thing on a security workstation to reclaim.
+description = "Trivy, Grype and Snyk vulnerability databases (re-downloaded on the next scan)"
+category = "system"
+safety_level = "safe"
+enabled = true
+priority = 50
+
+[match]
+path_glob = "~/.cache/trivy/**"
+min_age_days = 14
+
+# macOS: Trivy's cache directory.
+[[match.any_of]]
+path_glob = "~/Library/Caches/trivy/**"
+min_age_days = 14
+
+# Grype: the Anchore vulnerability database.
+[[match.any_of]]
+path_glob = "~/.cache/grype/**"
+min_age_days = 14
+
+# macOS: Grype's cache directory.
+[[match.any_of]]
+path_glob = "~/Library/Caches/grype/**"
+min_age_days = 14
+
+# Snyk: the CLI's cached dependency graphs.
+[[match.any_of]]
+path_glob = "~/.cache/snyk/**"
+min_age_days = 14
+
+[action]
+type = "trash"
+prompt = "Move {size} of security scanner caches to Trash?"
+
+[test]
+should_match = [
+    "~/.cache/trivy/db/trivy.db",
+    "~/.cache/grype/db/5/vulnerability.db",
+    "~/.cache/snyk/foo",
+    "~/Library/Caches/trivy/db/trivy.db",
+]
+should_not_match = [
+    "~/.cache/other/foo",
+    "~/Library/Caches/other/foo",
+]

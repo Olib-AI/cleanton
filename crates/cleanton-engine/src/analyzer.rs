@@ -1,14 +1,16 @@
-use std::{cmp::Reverse, path::Path, time::Instant};
+use std::{
+    cell::{Cell, RefCell},
+    cmp::Reverse,
+    path::{Path, PathBuf},
+    time::Instant,
+};
 
 use std::collections::{HashMap, HashSet};
 use std::time::SystemTime;
 
 use cleanton_common::{CleantonConfig, CleanupAction, CleanupPlan, FileKind, ScanResult};
 use cleanton_ml::MlEngine;
-use cleanton_recipes::{
-    DirectoryGate, RecipeDocument, RecipeSet, action_for_entry_with_subtree_mtime, directory_gate,
-    recipe_has_gates,
-};
+use cleanton_recipes::{CompiledRecipeMatcher, RecipeDocument, RecipeSet};
 
 use crate::ml::{
     ActionAnnotation, AnnotatedAction, DEFAULT_ML_CONFIDENCE_THRESHOLD, FileClassifier,
@@ -137,80 +139,196 @@ fn match_recipes(scan: &ScanResult, recipes: &RecipeSet) -> Vec<CleanupAction> {
         .filter(|recipe| recipe.recipe.enabled)
         .collect::<Vec<_>>();
     ordered.sort_by_key(|recipe| Reverse(recipe.recipe.priority));
+    let compiled = CompiledRecipeMatcher::new(&ordered);
 
     // Precompute, from the scan we already performed, the newest modification
-    // time within each scanned directory's subtree. `min_age_days` directory
-    // recipes need this; without it the matcher re-walks every matched
-    // directory's subtree from disk (an O(n²) `stat` storm on trees full of
-    // `node_modules` / `target`). One O(entries × depth) pass over in-memory
-    // data replaces all of it.
+    // time within each scanned directory's subtree.
     let newest = newest_subtree_mtimes(scan);
 
-    // Per recipe, the directory roots it must not reach inside of (see
-    // `suppressed_roots`).
-    let suppressed = suppressed_roots(scan, &ordered, &newest);
+    // Memoized "does this directory contain <marker>?" probe.
+    let markers = MarkerCache::new(ordered.iter().copied());
 
-    // Matching stays single-threaded on purpose: the per-match work is dominated
-    // by a process-wide compiled-glob cache, and fanning this loop across the CPU
-    // pool turned that cache's lock into a contention hot spot that ran *slower*
-    // than serial. First matching recipe wins per entry.
-    scan.entries
+    // Per recipe, the directory roots it must not reach inside of (built in a
+    // single pass over scanned directories using the indexed matcher).
+    let suppressed = suppressed_roots(scan, &compiled, &newest, &markers);
+
+    let mut candidates_buf = Vec::with_capacity(16);
+    let mut matched: Vec<(CleanupAction, bool)> = scan
+        .entries
         .iter()
         .filter_map(|entry| {
-            ordered
-                .iter()
-                .copied()
-                .enumerate()
-                .find_map(|(index, recipe)| {
-                    // Suppression is per recipe, not global: another recipe with
-                    // its own intent (say a stray model file) may still legitimately
-                    // match inside this directory, so we fall through rather than
-                    // skipping the entry outright.
-                    if suppressed
-                        .get(index)
-                        .is_some_and(|roots| is_under_suppressed_root(&entry.path, roots))
-                    {
-                        return None;
-                    }
-                    action_for_entry_with_subtree_mtime(recipe, entry, |dir| {
-                        newest.get(dir).copied()
-                    })
+            compiled
+                .first_matching_action(
+                    entry,
+                    &mut candidates_buf,
+                    |index| {
+                        suppressed
+                            .get(index)
+                            .is_some_and(|roots| is_under_suppressed_root(&entry.path, roots))
+                    },
+                    |dir, marker| markers.contains(dir, marker),
+                    |dir| newest.get(dir).copied(),
+                )
+                .map(|action| {
+                    let needs_size =
+                        entry.kind == FileKind::Directory && entry.allocated_bytes == 0;
+                    (action, needs_size)
                 })
         })
-        .collect()
+        .collect();
+
+    // When a matched directory sat right at the walker's `max_depth` ceiling,
+    // its children were not walked so `entry.allocated_bytes` is 0. Backfill
+    // those via targeted sizing so reclaimable-byte totals remain accurate.
+    let unmeasured: Vec<PathBuf> = matched
+        .iter()
+        .filter(|(_, needs_size)| *needs_size)
+        .filter(|(action, _)| action.target.is_dir())
+        .map(|(action, _)| action.target.clone())
+        .collect();
+    if !unmeasured.is_empty() {
+        let sized: HashMap<PathBuf, (u64, u64)> = cleanton_scanner::size_targets(&unmeasured)
+            .targets
+            .into_iter()
+            .map(|ts| (ts.path, (ts.logical_bytes, ts.allocated_bytes)))
+            .collect();
+        for (action, needs_size) in &mut matched {
+            if *needs_size
+                && let Some(&(logical, allocated)) = sized.get(&action.target)
+                && (logical > 0 || allocated > 0)
+            {
+                action.logical_bytes = logical;
+                action.reclaimable_bytes = allocated;
+                action.fingerprint.logical_bytes = logical;
+                action.fingerprint.allocated_bytes = allocated;
+            }
+        }
+    }
+
+    matched.into_iter().map(|(action, _)| action).collect()
 }
 
-/// For each recipe (parallel to `ordered`), the directories whose gate it failed.
+/// Marker bitmaps per directory, memoized for one analysis pass.
 ///
-/// A recipe whose glob selects a directory *and* everything beneath it means
-/// "this directory, as a unit". When its size/age gate rejects the directory,
-/// the recipe must not then act on the directory's contents individually: that
-/// inverts the gate's intent (shredding an actively-used cache the gate was
-/// protecting) and replaces one folder action with thousands of per-file ones.
-/// Only gated recipes can fail a gate, so the rest are skipped without touching
-/// a single directory.
+/// Uses `u128` bitmaps so up to 128 distinct context markers across built-in and
+/// user recipes stay completely heap-free per directory.
+#[derive(Debug, Default, Clone, Copy)]
+struct DirProbe {
+    probed: u128,
+    exists: u128,
+}
+
+#[derive(Debug)]
+struct MarkerCache<'a> {
+    markers: HashMap<&'a str, usize>,
+    probes: RefCell<HashMap<PathBuf, DirProbe>>,
+    /// Most recently probed directory (scan entries arrive per directory, so
+    /// this hit rate is high and it skips the map lookup entirely).
+    last_dir: RefCell<Option<PathBuf>>,
+    last_probe: Cell<DirProbe>,
+    overflow: bool,
+}
+
+impl<'a> MarkerCache<'a> {
+    fn new<'r>(recipes: impl Iterator<Item = &'r RecipeDocument>) -> Self
+    where
+        'r: 'a,
+    {
+        let mut markers: HashMap<&'a str, usize> = HashMap::new();
+        let mut overflow = false;
+        for recipe in recipes {
+            for spec in std::iter::once(&recipe.matcher).chain(recipe.matcher.any_of.iter()) {
+                for marker in spec
+                    .parent_must_contain
+                    .iter()
+                    .flatten()
+                    .chain(spec.parent_must_contain_any.iter().flatten())
+                    .chain(spec.self_must_contain.iter().flatten())
+                {
+                    if markers.contains_key(marker.as_str()) {
+                        continue;
+                    }
+                    if markers.len() >= u128::BITS as usize {
+                        overflow = true;
+                        continue;
+                    }
+                    let bit = markers.len();
+                    markers.insert(marker.as_str(), bit);
+                }
+            }
+        }
+        Self {
+            markers,
+            probes: RefCell::new(HashMap::new()),
+            last_dir: RefCell::new(None),
+            last_probe: Cell::new(DirProbe::default()),
+            overflow,
+        }
+    }
+
+    /// True when `dir` contains `marker`. Falls back to a direct `stat` for
+    /// markers outside the bit budget.
+    fn contains(&self, dir: &Path, marker: &str) -> bool {
+        let Some(&bit) = self.markers.get(marker) else {
+            return dir.join(marker).exists();
+        };
+        if self.overflow {
+            return dir.join(marker).exists();
+        }
+
+        let mask = 1_u128 << bit;
+        let is_last = {
+            let last = self.last_dir.borrow();
+            last.as_deref() == Some(dir)
+        };
+        let cached = if is_last {
+            self.last_probe.get()
+        } else {
+            let known = self.probes.borrow().get(dir).copied().unwrap_or_default();
+            *self.last_dir.borrow_mut() = Some(dir.to_path_buf());
+            known
+        };
+
+        let mut probe = cached;
+        if probe.probed & mask == 0 {
+            probe.probed |= mask;
+            if dir.join(marker).exists() {
+                probe.exists |= mask;
+            }
+            self.probes.borrow_mut().insert(dir.to_path_buf(), probe);
+        }
+        self.last_probe.set(probe);
+        probe.exists & mask != 0
+    }
+}
+
+/// For each recipe (parallel to `compiled`), the directories whose gate it failed.
 fn suppressed_roots<'a>(
     scan: &'a ScanResult,
-    ordered: &[&RecipeDocument],
+    compiled: &CompiledRecipeMatcher<'_>,
     newest: &HashMap<&Path, SystemTime>,
+    markers: &MarkerCache<'_>,
 ) -> Vec<HashSet<&'a Path>> {
-    ordered
+    let mut suppressed = vec![HashSet::new(); compiled.len()];
+    let mut candidates_buf = Vec::with_capacity(16);
+    for entry in scan
+        .entries
         .iter()
-        .map(|recipe| {
-            if !recipe_has_gates(recipe) {
-                return HashSet::new();
+        .filter(|entry| entry.kind == FileKind::Directory)
+    {
+        let failed = compiled.gate_failed_recipe_indices(
+            entry,
+            &mut candidates_buf,
+            |dir, marker| markers.contains(dir, marker),
+            |dir| newest.get(dir).copied(),
+        );
+        for recipe_idx in failed {
+            if let Some(roots) = suppressed.get_mut(recipe_idx) {
+                roots.insert(entry.path.as_path());
             }
-            scan.entries
-                .iter()
-                .filter(|entry| entry.kind == FileKind::Directory)
-                .filter(|entry| {
-                    directory_gate(recipe, entry, |dir| newest.get(dir).copied())
-                        == DirectoryGate::GateFailed
-                })
-                .map(|entry| entry.path.as_path())
-                .collect()
-        })
-        .collect()
+        }
+    }
+    suppressed
 }
 
 /// True when `path` is a suppressed root or lives beneath one. The root itself is
@@ -235,17 +353,19 @@ fn newest_subtree_mtimes(scan: &ScanResult) -> HashMap<&Path, SystemTime> {
         .map(|entry| entry.path.as_path())
         .collect();
 
+    // One lookup per entry: each entry's mtime is folded into its direct parent
+    // (and into itself when it IS a scanned directory), then the directories are
+    // reduced deepest-first. The previous version walked every ancestor of every
+    // entry, hashing the full path at each level — O(entries x depth) hash
+    // lookups on the analysis hot path for the same result.
     let mut newest: HashMap<&Path, SystemTime> = HashMap::with_capacity(dirs.len());
     for entry in &scan.entries {
         let Some(modified) = entry.modified else {
             continue;
         };
-        for ancestor in entry.path.ancestors() {
-            if !dirs.contains(ancestor) {
-                continue;
-            }
+        if entry.kind == FileKind::Directory && dirs.contains(entry.path.as_path()) {
             newest
-                .entry(ancestor)
+                .entry(entry.path.as_path())
                 .and_modify(|current| {
                     if modified > *current {
                         *current = modified;
@@ -253,6 +373,41 @@ fn newest_subtree_mtimes(scan: &ScanResult) -> HashMap<&Path, SystemTime> {
                 })
                 .or_insert(modified);
         }
+        if let Some(parent) = entry.path.parent()
+            && dirs.contains(parent)
+        {
+            newest
+                .entry(parent)
+                .and_modify(|current| {
+                    if modified > *current {
+                        *current = modified;
+                    }
+                })
+                .or_insert(modified);
+        }
+    }
+
+    // Reduce bottom-up: a directory's subtree newest must reach its ancestors.
+    let mut order: Vec<&Path> = dirs.iter().copied().collect();
+    order.sort_unstable_by_key(|dir| Reverse(dir.components().count()));
+    for dir in order {
+        let Some(modified) = newest.get(dir).copied() else {
+            continue;
+        };
+        let Some(parent) = dir.parent() else {
+            continue;
+        };
+        if !dirs.contains(parent) {
+            continue;
+        }
+        newest
+            .entry(parent)
+            .and_modify(|current| {
+                if modified > *current {
+                    *current = modified;
+                }
+            })
+            .or_insert(modified);
     }
     newest
 }

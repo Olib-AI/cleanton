@@ -513,7 +513,12 @@ mod tests {
     fn builtin_recipe_self_tests_are_valid() {
         let recipes = RecipeSet::load_builtin().expect("built-in recipes should validate");
 
-        assert_eq!(recipes.len(), 130);
+        // Every recipe file must be registered in builtin.rs (checked offline by
+        // scripts/validate-recipes.py too) and must self-validate. The count is
+        // pinned deliberately: adding a recipe without registering it (or the
+        // reverse) is exactly the mistake this assertion catches, so it must be
+        // bumped by hand.
+        assert_eq!(recipes.len(), 171);
     }
 
     #[test]

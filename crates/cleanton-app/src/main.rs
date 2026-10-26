@@ -15,7 +15,7 @@ use std::{
     rc::Rc,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
 };
 
@@ -28,10 +28,11 @@ use cleanton_common::{
     ExecutionStatus, SafetyLevel, display,
 };
 use cleanton_engine::{
-    AnalyzedFull, AnalyzedPlan, AnnotatedAction, DockerAnalysis, DockerCleaner, DockerCleanupPlan,
-    DuplicateSet, EngineEvent, InstalledApp, LargeItem, Orchestrator, SnapshotAnalysis,
-    SnapshotConfirmState, Suggestions, UninstallPlan, cask_token_for, delete_local_snapshots,
-    find_leftovers, format_snapshot_date, list_installed_apps,
+    AnalyzedFull, AnalyzedPlan, AnnotatedAction, CleanupOffer, DockerAnalysis, DockerCleaner,
+    DockerCleanupPlan, DuplicateSet, EngineEvent, InstalledApp, LargeItem, Orchestrator,
+    ResourceStatus, SecurityRemoval, SnapshotAnalysis, SnapshotConfirmState, Suggestions,
+    UninstallPlan, cask_token_for, delete_local_snapshots, find_leftovers, format_snapshot_date,
+    list_installed_apps, snapshot_resource_status,
 };
 use cleanton_packages::{Inventory, ManagerKind, PackageManagers, plan_removal, scan_usage};
 use cleanton_scanner::ScanOptions;
@@ -82,8 +83,21 @@ static APPS_LOADING: AtomicBool = AtomicBool::new(false);
 /// is ever in flight, its completion closure can never be stale.
 static SECURITY_SCAN_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 
+/// One security removal at a time. Removal is the one destructive action on the
+/// Security screen, so a double-click must never fire two uninstalls.
+static SECURITY_REMOVE_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
+
 /// One uninstall at a time.
 static UNINSTALL_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
+
+/// Monotonic generation counter for package-tab loads so stale responses from
+/// an earlier manager tab never overwrite the newly selected tab.
+static PACKAGE_LOAD_ID: AtomicU64 = AtomicU64::new(0);
+
+/// User-dismissed resource pressure banners; automatically re-armed once usage
+/// falls 5% below threshold so genuine new pressure spikes surface again.
+static DISK_OFFER_DISMISSED: AtomicBool = AtomicBool::new(false);
+static MEMORY_OFFER_DISMISSED: AtomicBool = AtomicBool::new(false);
 
 /// App-bundle paths Cleanton itself just moved to the Trash. The background
 /// app-removal watcher consults this so it does not re-trigger the "an app was
@@ -189,21 +203,16 @@ fn main() -> Result<(), slint::PlatformError> {
     slint::BackendSelector::new().select()?;
     register_embedded_fonts();
 
-    // Create the Slint window.
+    // Create the Slint window and populate immediate in-memory state so the
+    // first frame renders without waiting on subprocesses (`tmutil`, `brew`,
+    // `npm`, `pip`, `port`) or disk/memory probes.
     let ui = AppWindow::new()?;
     initialise_app_state(&ui, &config);
-    // Read real disk capacity + usage history once at startup (no mock data).
-    apply_capacity_state(
-        &ui.global::<AppState>(),
-        &capacity::read(&capacity_root(&config)),
-    );
-    // Probe Full Disk Access once at startup. A single filesystem open is cheap
-    // and infallible (denial is a normal result), so it stays on the UI thread
-    // without affecting the background-thread scan/clean model.
     apply_fda_state(&ui.global::<AppState>());
     // The config becomes shared + mutable so the Settings screen can edit it and
     // subsequent scans/cleans observe the updated values.
     let shared_config: SharedConfig = Arc::new(Mutex::new(config));
+    spawn_startup_probes(ui.as_weak(), shared_config.clone());
     let latest_plan = Arc::new(Mutex::new(None::<CleanupPlan>));
     let current_operation = Arc::new(Mutex::new(None::<CancellationToken>));
 
@@ -280,8 +289,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 .await;
                 progress_handle.abort();
 
-                // Refresh real disk capacity + record a usage sample (off the UI thread).
+                // Refresh real disk capacity + resource status (off the UI thread).
                 let capacity_view = capacity::read(&capacity_root(&config));
+                let resource_status = read_resource_status(&config);
 
                 let _ = ui_weak.upgrade_in_event_loop(move |ui| {
                     if cancel_token.load(Ordering::Relaxed) {
@@ -292,6 +302,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     let state = ui.global::<AppState>();
                     state.set_scanning(false);
                     apply_capacity_state(&state, &capacity_view);
+                    apply_resource_status(&state, &resource_status);
                     match result {
                         Ok((scan, full)) => {
                             store_latest_plan(&latest_plan, Some(full.analyzed.plan.clone()));
@@ -416,11 +427,19 @@ fn main() -> Result<(), slint::PlatformError> {
                     state.set_result_mode("Empty plan".into());
                 }
                 Some(plan) => {
+                    let selected = selected_action_indices();
+                    let selected_bytes: u64 = selected
+                        .iter()
+                        .filter_map(|&i| plan.actions.get(i).map(|a| a.reclaimable_bytes))
+                        .fold(0u64, u64::saturating_add);
                     state.set_confirmation_pending(true);
                     state.set_clean_status(
                         format!(
-                            "Confirm cleanup to execute {} reviewed actions.",
-                            plan.actions.len()
+                            "Confirm cleanup: {} of {} action(s) ({}) selected; \
+                             they will move to Trash.",
+                            selected.len(),
+                            plan.actions.len(),
+                            display::human_bytes(selected_bytes)
                         )
                         .into(),
                     );
@@ -555,8 +574,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 .await;
 
-                // Refresh capacity so the dashboard reflects any bytes actually freed.
+                // Refresh capacity + resource status so the dashboard reflects freed space.
                 let capacity_view = capacity::read(&capacity_root(&config));
+                let resource_status = read_resource_status(&config);
 
                 let _ = ui_weak.upgrade_in_event_loop(move |ui| {
                     // Superseded by a newer operation: drop this result. A user
@@ -572,6 +592,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     let state = ui.global::<AppState>();
                     state.set_cleaning(false);
                     apply_capacity_state(&state, &capacity_view);
+                    apply_resource_status(&state, &resource_status);
                     match result {
                         Ok(result) => {
                             apply_execution_result(&state, &result);
@@ -651,11 +672,14 @@ fn main() -> Result<(), slint::PlatformError> {
         let config = config_snapshot(&config_clone);
         std::thread::spawn(move || {
             let result = trash_ops::empty_trash();
-            // Re-read capacity so the dashboard reflects reclaimed space.
+            // Re-read capacity + resource status so the dashboard reflects reclaimed space.
             let capacity_view = capacity::read(&capacity_root(&config));
+            let resource_status = read_resource_status(&config);
             let _ = ui_weak.upgrade_in_event_loop(move |ui| {
                 let state = ui.global::<AppState>();
                 apply_capacity_state(&state, &capacity_view);
+                apply_resource_status(&state, &resource_status);
+                refresh_trash_state(&state);
                 match result {
                     Ok(()) => state.set_trash_status(
                         "Trash emptied. Disk capacity refreshed with reclaimed space.".into(),
@@ -667,6 +691,69 @@ fn main() -> Result<(), slint::PlatformError> {
             });
         });
     });
+
+    // ── Wire: Memory reclaim + resource pressure callbacks ─────────────────
+    let ui_weak = ui.as_weak();
+    let config_clone = shared_config.clone();
+    ui.global::<AppCallbacks>().on_reclaim_memory(move || {
+        let Some(ui) = ui_weak.upgrade() else {
+            return;
+        };
+        let state = ui.global::<AppState>();
+        state.set_memory_status(
+            "Reclaiming unused allocator pages and refreshing memory...".into(),
+        );
+
+        let ui_weak = ui.as_weak();
+        let config = config_snapshot(&config_clone);
+        std::thread::spawn(move || {
+            let reclaimed = cleanton_scanner::reclaim_process_memory();
+            let status = read_resource_status(&config);
+            let _ = ui_weak.upgrade_in_event_loop(move |ui| {
+                let state = ui.global::<AppState>();
+                apply_resource_status(&state, &status);
+                let note = if reclaimed {
+                    "Reclaimed idle allocator pages. Review heavy processes or background services if memory stays elevated."
+                } else {
+                    "Memory snapshot refreshed. Review heavy processes or background services to free more RAM."
+                };
+                state.set_memory_status(note.into());
+            });
+        });
+    });
+
+    let ui_weak = ui.as_weak();
+    let config_clone = shared_config.clone();
+    ui.global::<AppCallbacks>().on_refresh_memory(move || {
+        let ui_weak = ui_weak.clone();
+        let config = config_snapshot(&config_clone);
+        std::thread::spawn(move || {
+            let capacity_view = capacity::read(&capacity_root(&config));
+            let status = read_resource_status(&config);
+            let _ = ui_weak.upgrade_in_event_loop(move |ui| {
+                let state = ui.global::<AppState>();
+                apply_capacity_state(&state, &capacity_view);
+                apply_resource_status(&state, &status);
+            });
+        });
+    });
+
+    let ui_weak = ui.as_weak();
+    ui.global::<AppCallbacks>().on_dismiss_disk_offer(move || {
+        DISK_OFFER_DISMISSED.store(true, Ordering::Relaxed);
+        if let Some(ui) = ui_weak.upgrade() {
+            ui.global::<AppState>().set_disk_offer_active(false);
+        }
+    });
+
+    let ui_weak = ui.as_weak();
+    ui.global::<AppCallbacks>()
+        .on_dismiss_memory_offer(move || {
+            MEMORY_OFFER_DISMISSED.store(true, Ordering::Relaxed);
+            if let Some(ui) = ui_weak.upgrade() {
+                ui.global::<AppState>().set_memory_offer_active(false);
+            }
+        });
 
     // ── Wire: Services refresh callback ────────────────────────────────────
     let ui_weak = ui.as_weak();
@@ -856,11 +943,67 @@ fn main() -> Result<(), slint::PlatformError> {
                     if let Ok(services) = relisted {
                         ALL_SERVICES.with(|cell| *cell.borrow_mut() = services);
                     }
+                    if remove_result.is_ok() {
+                        drop_service_locally(&id);
+                    }
                     rebuild_services_model(&state);
                     match remove_result {
                         Ok(()) => state.set_services_status(format!("Removed {id}.").into()),
                         Err(err) => state
                             .set_services_status(format!("Could not remove {id}: {err}").into()),
+                    }
+                });
+            });
+        });
+    });
+
+    // ── Wire: Delete a disabled service callback ───────────────────────────
+    // Two-step armed in the UI. The backend re-checks protection and refuses
+    // anything that is still running, Homebrew-managed services, and services
+    // whose startup item is already gone. A root-owned plist retries once with
+    // the targeted administrator prompt the services adapter already uses.
+    let ui_weak = ui.as_weak();
+    let config_clone = shared_config.clone();
+    ui.global::<AppCallbacks>().on_delete_service(move |id| {
+        let ui = ui_weak.unwrap();
+        let state = ui.global::<AppState>();
+        let id = id.to_string();
+        if SERVICE_ACTION_IN_FLIGHT.swap(true, Ordering::SeqCst) {
+            state.set_services_status("Another service action is still running.".into());
+            return;
+        }
+        state.set_services_status(format!("Deleting startup item for {id}...").into());
+
+        let ui_weak = ui.as_weak();
+        let config = config_snapshot(&config_clone);
+        std::thread::spawn(move || {
+            worker_runtime().block_on(async move {
+                let manager = ServiceManager::new(config.clone());
+                let mut delete_result = manager.delete_disabled_plist(&id).await;
+                if matches!(
+                    delete_result,
+                    Err(cleanton_common::CleantonError::RootPrivilegesRequired(_))
+                ) {
+                    // Root-owned startup item: ask for admin once, then retry.
+                    delete_result = manager.delete_disabled_plist_elevated(&id).await;
+                }
+                // Re-list so the row disappears without a manual refresh.
+                let relisted = ServiceManager::new(config).list_services().await;
+                let _ = ui_weak.upgrade_in_event_loop(move |ui| {
+                    SERVICE_ACTION_IN_FLIGHT.store(false, Ordering::SeqCst);
+                    let state = ui.global::<AppState>();
+                    state.set_service_pending_delete_id(SharedString::new());
+                    if let Ok(services) = relisted {
+                        ALL_SERVICES.with(|cell| *cell.borrow_mut() = services);
+                    }
+                    if delete_result.is_ok() {
+                        drop_service_locally(&id);
+                    }
+                    rebuild_services_model(&state);
+                    match delete_result {
+                        Ok(()) => state.set_services_status(format!("Deleted {id}.").into()),
+                        Err(err) => state
+                            .set_services_status(format!("Could not delete {id}: {err}").into()),
                     }
                 });
             });
@@ -897,6 +1040,33 @@ fn main() -> Result<(), slint::PlatformError> {
             security_trust(&ui, None);
         }
     });
+
+    let ui_weak = ui.as_weak();
+    ui.global::<AppCallbacks>()
+        .on_security_request_remove(move |index| {
+            if let Some(ui) = ui_weak.upgrade() {
+                arm_security_removal(&ui, index);
+            }
+        });
+
+    let config_clone = shared_config.clone();
+    let ui_weak = ui.as_weak();
+    ui.global::<AppCallbacks>()
+        .on_security_confirm_remove(move |index| {
+            if let Some(ui) = ui_weak.upgrade() {
+                run_security_removal(&ui, index, &config_clone);
+            }
+        });
+
+    let ui_weak = ui.as_weak();
+    ui.global::<AppCallbacks>()
+        .on_security_cancel_remove(move || {
+            if let Some(ui) = ui_weak.upgrade() {
+                let state = ui.global::<AppState>();
+                state.set_security_pending_remove_index(-1);
+                state.set_security_remove_status(SharedString::new());
+            }
+        });
 
     // ── Wire: Applications tab ─────────────────────────────────────────────
     let ui_weak = ui.as_weak();
@@ -955,11 +1125,14 @@ fn main() -> Result<(), slint::PlatformError> {
             return;
         }
 
-        // Selected, non-admin paths in review order.
+        // Selected paths in review order. Admin-owned items are included: the
+        // executor asks for administrator rights once per run and still moves
+        // them into the user's Trash, which is the only way an App Store bundle
+        // (root-owned in /Applications) can actually be uninstalled here.
         let rows = state.get_leftover_rows();
         let selected_paths: HashSet<String> = rows
             .iter()
-            .filter(|row| row.selected && !row.admin)
+            .filter(|row| row.selected)
             .map(|row| row.path.to_string())
             .collect();
         let (paths, agent_labels) = APP_PLAN.with(|cell| {
@@ -973,6 +1146,8 @@ fn main() -> Result<(), slint::PlatformError> {
                 .filter(|item| selected_paths.contains(&item.path.display().to_string()))
                 .map(|item| item.path.clone())
                 .collect();
+            // Only the app's user launch agents are stopped; a LaunchDaemon
+            // needs administrator rights and dies when the uninstall removes it.
             let labels: Vec<String> = plan
                 .items
                 .iter()
@@ -1059,29 +1234,61 @@ fn main() -> Result<(), slint::PlatformError> {
                                 .iter()
                                 .filter(|a| a.status == ExecutionStatus::MovedToTrash)
                                 .count();
-                            state.set_apps_status(
-                                format!(
-                                    "Moved {moved} item(s) ({}) of {app_name} to the Trash{}{}.",
-                                    display::human_bytes(result.moved_to_trash_bytes),
-                                    if result.skipped_actions > 0 {
-                                        format!("; {} skipped", result.skipped_actions)
-                                    } else {
-                                        String::new()
-                                    },
-                                    brew_note
-                                )
-                                .into(),
+                            let failed = result
+                                .actions
+                                .iter()
+                                .filter(|a| a.status == ExecutionStatus::Failed)
+                                .count();
+                            let remaining = result
+                                .actions
+                                .iter()
+                                .filter(|a| a.status == ExecutionStatus::Skipped)
+                                .count();
+                            // The first failure reason is the actionable part; the
+                            // rest are usually the same cause (admin rights).
+                            let first_failure = result
+                                .actions
+                                .iter()
+                                .find(|a| a.status == ExecutionStatus::Failed)
+                                .map(|a| a.message.clone())
+                                .unwrap_or_default();
+
+                            let mut status = format!(
+                                "Moved {moved} item(s) of {app_name} to the Trash ({}){brew_note}.",
+                                display::human_bytes(result.moved_to_trash_bytes),
                             );
-                            // Clear the review panel and reload the inventory.
-                            state.set_selected_app_path(SharedString::new());
-                            state.set_selected_app_name(SharedString::new());
-                            state.set_leftover_count(0);
-                            state.set_leftover_rows(ModelRc::from(Rc::new(VecModel::from(Vec::<
-                                LeftoverRow,
-                            >::new(
-                            )))));
-                            APP_PLAN.with(|cell| *cell.borrow_mut() = None);
-                            start_apps_load(&ui);
+                            if failed > 0 {
+                                status.push_str(&format!(
+                                    " {failed} item(s) could not be removed: {first_failure}"
+                                ));
+                            }
+                            if remaining > 0 {
+                                status.push_str(&format!(" {remaining} skipped."));
+                            }
+                            state.set_apps_status(status.as_str().into());
+
+                            if moved == 0 || failed > 0 {
+                                // Something is still on disk: keep the review
+                                // panel (an empty panel looked like "nothing
+                                // happened") and refresh the leftover list so the
+                                // user sees exactly what remains.
+                                start_apps_load(&ui);
+                                let path = state.get_selected_app_path().to_string();
+                                if !path.is_empty() {
+                                    start_leftover_scan(&ui, path.as_str());
+                                }
+                            } else {
+                                // Everything selected is gone: clear the review
+                                // panel and reload the inventory.
+                                state.set_selected_app_path(SharedString::new());
+                                state.set_selected_app_name(SharedString::new());
+                                state.set_leftover_count(0);
+                                state.set_leftover_rows(ModelRc::from(Rc::new(VecModel::from(
+                                    Vec::<LeftoverRow>::new(),
+                                ))));
+                                APP_PLAN.with(|cell| *cell.borrow_mut() = None);
+                                start_apps_load(&ui);
+                            }
                         }
                         Err(err) => {
                             state.set_apps_status(
@@ -1138,6 +1345,17 @@ fn main() -> Result<(), slint::PlatformError> {
                 state.set_setting_save_status(format!("Save failed: {err}").into());
             }
         }
+
+        // Re-evaluate pressure offers immediately against the updated thresholds.
+        DISK_OFFER_DISMISSED.store(false, Ordering::Relaxed);
+        MEMORY_OFFER_DISMISSED.store(false, Ordering::Relaxed);
+        let ui_weak = ui.as_weak();
+        std::thread::spawn(move || {
+            let status = read_resource_status(&updated);
+            let _ = ui_weak.upgrade_in_event_loop(move |ui| {
+                apply_resource_status(&ui.global::<AppState>(), &status);
+            });
+        });
     });
 
     // ── Wire: Reset settings callback ──────────────────────────────────────
@@ -1355,6 +1573,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                 remove_suggestion_row(&state, &path);
                                 state
                                     .set_trash_status(format!("Moved {path} to the Trash.").into());
+                                state.set_trash_has_items(true);
                             }
                             Err(err) => state
                                 .set_trash_status(format!("Could not trash {path}: {err}").into()),
@@ -1454,14 +1673,161 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
 
-    // ── Watch for apps removed outside Cleanton ────────────────────────────
-    // A light background poll of the Applications folders. When the user drags
-    // an app to the Trash (or another uninstaller removes it), we deep-link to
-    // the Applications tab and load its leftovers so they can be cleaned up.
+    // ── Watch for apps removed outside Cleanton + resource pressure ───────
+    // Light background polls for externally-removed apps and high disk/memory
+    // usage so cleanup offers surface automatically even while idle.
     spawn_app_removal_watcher(ui.as_weak());
+    spawn_resource_pressure_watcher(ui.as_weak(), shared_config.clone());
 
     // ── Run the event loop ─────────────────────────────────────────────────
     ui.run()
+}
+
+/// Offload startup probes (`PackageManagers::detect`, `capacity::read`,
+/// `snapshot_resource_status`, and Trash check) from `main()` so the window
+/// paints immediately.
+fn spawn_startup_probes(ui_weak: slint::Weak<AppWindow>, shared_config: SharedConfig) {
+    std::thread::spawn(move || {
+        let config = config_snapshot(&shared_config);
+        let has_trash = trash_ops::trash_has_items();
+        let detected = PackageManagers::detect();
+        let capacity_view = capacity::read(&capacity_root(&config));
+        let resource_status = read_resource_status(&config);
+        let _ = ui_weak.upgrade_in_event_loop(move |ui| {
+            let state = ui.global::<AppState>();
+            state.set_trash_has_items(has_trash);
+            if !has_trash && !state.get_empty_trash_pending() {
+                state.set_trash_status("Trash is empty: nothing to reclaim there.".into());
+            }
+            apply_detected_package_tabs(&state, &detected);
+            apply_capacity_state(&state, &capacity_view);
+            apply_resource_status(&state, &resource_status);
+        });
+    });
+}
+
+/// Periodic background monitor for high disk or memory usage.
+fn spawn_resource_pressure_watcher(ui_weak: slint::Weak<AppWindow>, shared_config: SharedConfig) {
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(Duration::from_secs(30));
+            let config = config_snapshot(&shared_config);
+            let status = read_resource_status(&config);
+            if ui_weak
+                .upgrade_in_event_loop(move |ui| {
+                    apply_resource_status(&ui.global::<AppState>(), &status);
+                })
+                .is_err()
+            {
+                break;
+            }
+        }
+    });
+}
+
+fn read_resource_status(config: &CleantonConfig) -> ResourceStatus {
+    let (disk_pct, mem_pct) = if config.background.enabled {
+        (
+            config.background.disk_pressure_percent,
+            config.background.memory_pressure_percent,
+        )
+    } else {
+        (0, 0)
+    };
+    snapshot_resource_status(disk_pct, mem_pct)
+}
+
+fn apply_resource_status(state: &AppState, status: &ResourceStatus) {
+    if status.memory_total_bytes > 0 {
+        let total = status.memory_total_bytes;
+        let available = status.memory_available_bytes;
+        let pct = status.memory_used_percent;
+        let used = total.saturating_sub(available);
+        let ratio = (used as f64 / total as f64) as f32;
+        state.set_memory_ready(true);
+        state.set_memory_total(display::human_bytes(total).into());
+        state.set_memory_used(format!("{} ({pct}%)", display::human_bytes(used)).into());
+        state.set_memory_available(display::human_bytes(available).into());
+        state.set_memory_used_ratio(ratio.clamp(0.0, 1.0));
+    } else {
+        state.set_memory_ready(false);
+        state.set_memory_total("--".into());
+        state.set_memory_used("Unavailable".into());
+        state.set_memory_available("--".into());
+        state.set_memory_used_ratio(0.0);
+    }
+
+    // Re-arm dismissed banners once usage drops comfortably below threshold.
+    if status.disk_offer.is_none() {
+        DISK_OFFER_DISMISSED.store(false, Ordering::Relaxed);
+    }
+    if status.memory_offer.is_none() {
+        MEMORY_OFFER_DISMISSED.store(false, Ordering::Relaxed);
+    }
+
+    if let Some((advice, offer)) = &status.disk_offer
+        && !DISK_OFFER_DISMISSED.load(Ordering::Relaxed)
+    {
+        let pct = status.disk_used_percent;
+        let avail = display::human_bytes(status.disk_available_bytes);
+        state.set_disk_offer_headline(
+            format!("Disk usage is high ({pct}% used, {avail} free) - disk cleanup recommended")
+                .into(),
+        );
+        let detail = match offer {
+            CleanupOffer::Disk {
+                estimated_reclaimable_bytes,
+                candidates,
+            } if *estimated_reclaimable_bytes > 0 => {
+                let top = candidates
+                    .iter()
+                    .take(3)
+                    .map(|c| format!("{} ({})", c.label, display::human_bytes(c.bytes)))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "Detected ~{} in quick-relief targets ({top}). Run Scan & Review to move safe caches and build artifacts to the Trash.",
+                    display::human_bytes(*estimated_reclaimable_bytes),
+                )
+            }
+            _ => advice.clone(),
+        };
+        state.set_disk_offer_detail(detail.into());
+        state.set_disk_offer_active(true);
+    } else {
+        state.set_disk_offer_active(false);
+    }
+
+    if let Some((advice, offer)) = &status.memory_offer
+        && !MEMORY_OFFER_DISMISSED.load(Ordering::Relaxed)
+    {
+        let pct = status.memory_used_percent;
+        let avail = display::human_bytes(status.memory_available_bytes);
+        state.set_memory_offer_headline(
+            format!(
+                "Memory usage is high ({pct}% used, {avail} available) - memory cleanup recommended"
+            )
+            .into(),
+        );
+        let detail = match offer {
+            CleanupOffer::Memory { top_processes, .. } if !top_processes.is_empty() => {
+                let top = top_processes
+                    .iter()
+                    .take(4)
+                    .map(|p| format!("{} ({})", p.name, display::human_bytes(p.rss_bytes)))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "Top resident processes: {top}. Reclaim idle allocator pages or review running background services."
+                )
+            }
+            _ => advice.clone(),
+        };
+        state.set_memory_offer_detail(detail.into());
+        state.set_memory_offer_active(true);
+    } else {
+        state.set_memory_offer_active(false);
+    }
 }
 
 /// Background thread that polls for externally-removed apps and, on detection,
@@ -1565,6 +1931,7 @@ fn start_package_load(ui: &AppWindow, idx: i32, config: &SharedConfig) {
     PKG_INVENTORY.with(|cell| *cell.borrow_mut() = None);
     PKG_KEEP.with(|cell| cell.borrow_mut().clear());
 
+    let load_id = PACKAGE_LOAD_ID.fetch_add(1, Ordering::SeqCst) + 1;
     let ui_weak = ui.as_weak();
     let roots = package_scan_roots(&config_snapshot(config));
     std::thread::spawn(move || {
@@ -1572,6 +1939,9 @@ fn start_package_load(ui: &AppWindow, idx: i32, config: &SharedConfig) {
             // Phase 1 — read the inventory and SHOW it immediately. The slow,
             // network-bound update check runs separately in phase 2.
             let inventory = PackageManagers::inventory(kind).await;
+            if PACKAGE_LOAD_ID.load(Ordering::SeqCst) != load_id {
+                return;
+            }
             let any = !inventory.packages.is_empty();
             let do_usage = matches!(kind, ManagerKind::Homebrew) && any;
             let names: Vec<String> = if do_usage {
@@ -1580,6 +1950,9 @@ fn start_package_load(ui: &AppWindow, idx: i32, config: &SharedConfig) {
                 Vec::new()
             };
             let _ = ui_weak.upgrade_in_event_loop(move |ui| {
+                if PACKAGE_LOAD_ID.load(Ordering::SeqCst) != load_id {
+                    return;
+                }
                 let state = ui.global::<AppState>();
                 state.set_package_loading(false);
                 apply_inventory(&state, inventory);
@@ -1605,12 +1978,18 @@ fn start_package_load(ui: &AppWindow, idx: i32, config: &SharedConfig) {
             // Phase 2 — slow probes: update check (every manager) plus the
             // codebase-usage scan (Homebrew only). Fill the list in progressively.
             let outdated = PackageManagers::outdated(kind).await;
+            if PACKAGE_LOAD_ID.load(Ordering::SeqCst) != load_id {
+                return;
+            }
             let usage = if do_usage {
                 scan_usage(&names, &roots)
             } else {
                 HashMap::new()
             };
             let _ = ui_weak.upgrade_in_event_loop(move |ui| {
+                if PACKAGE_LOAD_ID.load(Ordering::SeqCst) != load_id {
+                    return;
+                }
                 let state = ui.global::<AppState>();
                 let update_count = apply_outdated(&state, &outdated);
                 if do_usage {
@@ -2166,9 +2545,22 @@ fn request_snapshot_delete(state: &AppState) {
     );
 }
 
+/// Refresh `trash-has-items` from the real Trash folders. Called at startup
+/// and after anything that moves items into, or empties, the Trash so the
+/// "Empty Trash now" button is never active against an empty Trash.
+fn refresh_trash_state(state: &AppState) {
+    let has_items = trash_ops::trash_has_items();
+    state.set_trash_has_items(has_items);
+    if !has_items && !state.get_empty_trash_pending() {
+        state.set_trash_status("Trash is empty: nothing to reclaim there.".into());
+    }
+}
+
 fn initialise_app_state(ui: &AppWindow, config: &CleantonConfig) {
     let state = ui.global::<AppState>();
 
+    // Version of the build actually running (Settings > About).
+    state.set_app_version(SharedString::from(env!("CARGO_PKG_VERSION")));
     state.set_scan_root(config.general.default_root.display().to_string().into());
     populate_settings(&state, config);
     state.set_result_mode("Not scanned".into());
@@ -2176,8 +2568,21 @@ fn initialise_app_state(ui: &AppWindow, config: &CleantonConfig) {
         Vec::<ServiceRow>::new(),
     ))));
 
-    // Populate the package-manager selector (all five, greyed when not installed).
-    let detected = PackageManagers::detect();
+    // Populate initial package-manager tabs synchronously without spawning
+    // subprocesses; `spawn_startup_probes` updates availability off the UI thread.
+    let tabs: Vec<PkgManagerTab> = PKG_MANAGER_ORDER
+        .iter()
+        .map(|kind| PkgManagerTab {
+            id: SharedString::from(kind.id()),
+            label: SharedString::from(kind.label()),
+            available: true,
+        })
+        .collect();
+    state.set_active_package_tab(0);
+    state.set_package_tabs(ModelRc::from(Rc::new(VecModel::from(tabs))));
+}
+
+fn apply_detected_package_tabs(state: &AppState, detected: &[ManagerKind]) {
     let tabs: Vec<PkgManagerTab> = PKG_MANAGER_ORDER
         .iter()
         .map(|kind| PkgManagerTab {
@@ -2186,13 +2591,14 @@ fn initialise_app_state(ui: &AppWindow, config: &CleantonConfig) {
             available: detected.contains(kind),
         })
         .collect();
-    // Default the active tab to the first available manager.
-    let first_available = PKG_MANAGER_ORDER
-        .iter()
-        .position(|kind| detected.contains(kind))
-        .unwrap_or(0);
-    state.set_active_package_tab(clamp_to_i32(first_available));
     state.set_package_tabs(ModelRc::from(Rc::new(VecModel::from(tabs))));
+    if state.get_package_count() == 0 && !state.get_package_loading() {
+        let first_available = PKG_MANAGER_ORDER
+            .iter()
+            .position(|kind| detected.contains(kind))
+            .unwrap_or(0);
+        state.set_active_package_tab(clamp_to_i32(first_available));
+    }
 }
 
 /// Read the current config snapshot, recovering the inner value if the lock was
@@ -2233,6 +2639,8 @@ fn populate_settings(state: &AppState, config: &CleantonConfig) {
     state.set_setting_max_action_gb(
         i32::try_from(config.safety.max_single_action_gb).unwrap_or(i32::MAX),
     );
+    state.set_setting_disk_pressure_percent(i32::from(config.background.disk_pressure_percent));
+    state.set_setting_memory_pressure_percent(i32::from(config.background.memory_pressure_percent));
 }
 
 /// Read the edited Settings controls back into `config`.
@@ -2255,6 +2663,10 @@ fn read_settings_into_config(state: &AppState, config: &mut CleantonConfig) {
         .unwrap_or(config.safety.max_single_run_gb);
     config.safety.max_single_action_gb = u64::try_from(state.get_setting_max_action_gb().max(1))
         .unwrap_or(config.safety.max_single_action_gb);
+    let disk_pct = state.get_setting_disk_pressure_percent().clamp(0, 99);
+    config.background.disk_pressure_percent = u8::try_from(disk_pct).unwrap_or(0);
+    let mem_pct = state.get_setting_memory_pressure_percent().clamp(0, 99);
+    config.background.memory_pressure_percent = u8::try_from(mem_pct).unwrap_or(0);
 }
 
 fn clamp_to_i32(value: usize) -> i32 {
@@ -2332,7 +2744,7 @@ fn clear_plan_state(state: &AppState) {
     PLAN_ACTION_BYTES.with(|cell| cell.borrow_mut().clear());
     state.set_plan_selected_count(0);
     state.set_plan_selected_reclaimable("0 B".into());
-    state.set_plan_all_selected(true);
+    state.set_plan_all_selected(false);
     state.set_plan_ready(false);
     state.set_confirmation_pending(false);
     state.set_plan_review_status("Scan or refresh a plan to review cleanup actions.".into());
@@ -2569,15 +2981,16 @@ fn selected_docker_plan(_state: &AppState) -> Option<DockerCleanupPlan> {
 
 /// Maximum suggestion rows rendered per subsection.
 const MAX_SUGGESTION_ROWS: usize = 50;
+/// Maximum duplicate sets rendered (each set also renders one row per copy).
+const MAX_DUPLICATE_SETS: usize = 25;
+/// Maximum copies rendered under a single duplicate set. `DuplicateSet.paths`
+/// is already capped by the engine; this keeps one pathological set from
+/// flooding the Results list.
+const MAX_DUPLICATE_COPIES: usize = 12;
 
 /// Populate the review-only Suggestions section (duplicate sets + large items).
 fn apply_suggestions_state(state: &AppState, suggestions: &Suggestions) {
-    let dup_rows = suggestions
-        .duplicates
-        .iter()
-        .take(MAX_SUGGESTION_ROWS)
-        .map(duplicate_row)
-        .collect::<Vec<_>>();
+    let dup_rows = duplicate_rows(&suggestions.duplicates);
     state.set_duplicate_count(clamp_to_i32(suggestions.duplicates.len()));
     state.set_duplicate_reclaimable(display::human_bytes(suggestions.duplicate_reclaimable).into());
     state.set_duplicate_rows(ModelRc::from(Rc::new(VecModel::from(dup_rows))));
@@ -2614,29 +3027,114 @@ fn apply_suggestions_state(state: &AppState, suggestions: &Suggestions) {
     state.set_installer_rows(ModelRc::from(Rc::new(VecModel::from(installer_rows))));
 }
 
-fn duplicate_row(set: &DuplicateSet) -> SuggestionRow {
-    let first = set.paths.first();
-    let path = first.map(|p| p.display().to_string()).unwrap_or_default();
-    let name = first
-        .and_then(|p| p.file_name())
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "duplicate".to_owned());
-    SuggestionRow {
-        title: SharedString::from(format!(
-            "{} copies of {} ({} each)",
-            set.count,
-            name,
-            display::human_bytes(set.file_bytes)
-        )),
-        detail: SharedString::from(path.clone()),
-        size: SharedString::from(display::human_bytes(set.reclaimable_bytes)),
-        icon: SharedString::from("\u{f0c5}"),
-        path: SharedString::from(path),
-        // Reveal-only: a duplicate *set* has no single unambiguous copy to
-        // trash (deleting the first-sorted copy is rarely what the user means).
-        // The user reveals each copy in Finder and removes the right one.
-        deletable: false,
+/// One duplicate set renders as a header row plus one row per copy, so the
+/// user can see (and trash) every file in the set instead of only the first.
+///
+/// Layout kinds match `SuggestionListRow.kind` in `widgets.slint`:
+/// `1` = set header, `0` = an individual copy, `2` = a muted "+N more" note.
+/// Every row carries the set index in `group`, which is what lets
+/// [`prune_duplicate_row`] collapse a set once it drops below two copies.
+fn duplicate_rows(sets: &[DuplicateSet]) -> Vec<SuggestionRow> {
+    let mut rows: Vec<SuggestionRow> = Vec::new();
+    for (index, set) in sets.iter().take(MAX_DUPLICATE_SETS).enumerate() {
+        let group = i32::try_from(index).unwrap_or(0);
+        let listed = set.paths.len().min(MAX_DUPLICATE_COPIES);
+        let name = set
+            .paths
+            .first()
+            .and_then(|path| path.file_name())
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "duplicate".to_owned());
+
+        rows.push(SuggestionRow {
+            kind: 1,
+            group,
+            title: SharedString::from(format!(
+                "{} identical copies of {} ({} each)",
+                set.count,
+                name,
+                display::human_bytes(set.file_bytes)
+            )),
+            detail: SharedString::new(),
+            size: SharedString::from(display::human_bytes(set.reclaimable_bytes)),
+            icon: SharedString::from("\u{f0c5}"),
+            // A set is a label, not a target: nothing to reveal or trash here.
+            path: SharedString::new(),
+            deletable: false,
+        });
+
+        for copy in set.paths.iter().take(listed) {
+            let path = copy.display().to_string();
+            rows.push(SuggestionRow {
+                kind: 0,
+                group,
+                title: SharedString::from(
+                    copy.file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| path.clone()),
+                ),
+                detail: SharedString::from(path.clone()),
+                size: SharedString::from(display::human_bytes(set.file_bytes)),
+                icon: SharedString::from("\u{f15b}"),
+                path: SharedString::from(path),
+                // Each copy is one concrete file, so it can go to the Trash
+                // after the row's own two-step confirmation.
+                deletable: true,
+            });
+        }
+
+        if set.count > listed {
+            rows.push(SuggestionRow {
+                kind: 2,
+                group,
+                title: SharedString::from(format!(
+                    "+{} more {} not listed",
+                    set.count.saturating_sub(listed),
+                    if set.count.saturating_sub(listed) == 1 {
+                        "copy"
+                    } else {
+                        "copies"
+                    }
+                )),
+                detail: SharedString::new(),
+                size: SharedString::new(),
+                icon: SharedString::new(),
+                path: SharedString::new(),
+                deletable: false,
+            });
+        }
     }
+    rows
+}
+
+/// Drop a trashed duplicate copy from the rendered model. When its set falls
+/// below two remaining copies it is no longer a duplicate, so the whole group
+/// (header, surviving copy, note) is removed and the set count goes down.
+///
+/// Returns the surviving rows and the new number of duplicate sets.
+fn prune_duplicate_row(rows: Vec<SuggestionRow>, trashed: &str) -> (Vec<SuggestionRow>, usize) {
+    let Some(group) = rows
+        .iter()
+        .find(|row| row.kind == 0 && row.path.as_str() == trashed)
+        .map(|row| row.group)
+    else {
+        let sets = rows.iter().filter(|row| row.kind == 1).count();
+        return (rows, sets);
+    };
+
+    let mut kept: Vec<SuggestionRow> = rows
+        .into_iter()
+        .filter(|row| !(row.kind == 0 && row.path.as_str() == trashed))
+        .collect();
+    let survivors = kept
+        .iter()
+        .filter(|row| row.group == group && row.kind == 0)
+        .count();
+    if survivors < 2 {
+        kept.retain(|row| row.group != group);
+    }
+    let sets = kept.iter().filter(|row| row.kind == 1).count();
+    (kept, sets)
 }
 
 fn large_item_row(item: &LargeItem) -> SuggestionRow {
@@ -2663,6 +3161,8 @@ fn large_item_row(item: &LargeItem) -> SuggestionRow {
         "\u{f15b}" // file
     };
     SuggestionRow {
+        kind: 0,
+        group: -1,
         title: SharedString::from(name),
         detail: SharedString::from(detail),
         size: SharedString::from(display::human_bytes(item.bytes)),
@@ -2675,9 +3175,15 @@ fn large_item_row(item: &LargeItem) -> SuggestionRow {
 }
 
 /// Drop a just-trashed suggestion from the displayed models so it disappears
-/// immediately without a full rescan. Only the deletable lists (large items and
-/// screenshots) carry a Trash affordance, so only those are pruned.
+/// immediately without a full rescan. Duplicate copies, large items,
+/// screenshots and installers all carry a Trash affordance, so all four are
+/// pruned; a duplicate set that falls below two copies is dropped with it.
 fn remove_suggestion_row(state: &AppState, path: &str) {
+    let current: Vec<SuggestionRow> = state.get_duplicate_rows().iter().collect();
+    let (duplicates, sets) = prune_duplicate_row(current, path);
+    state.set_duplicate_count(clamp_to_i32(sets));
+    state.set_duplicate_rows(ModelRc::from(Rc::new(VecModel::from(duplicates))));
+
     let large: Vec<SuggestionRow> = state
         .get_large_item_rows()
         .iter()
@@ -2721,6 +3227,8 @@ fn installer_row(item: &LargeItem) -> SuggestionRow {
         format!("{} · {}", item.ml_note, path)
     };
     SuggestionRow {
+        kind: 0,
+        group: -1,
         title: SharedString::from(name),
         detail: SharedString::from(detail),
         size: SharedString::from(display::human_bytes(item.bytes)),
@@ -2750,6 +3258,8 @@ fn screenshot_row(item: &LargeItem) -> SuggestionRow {
         format!("{} · {}", item.ml_note, path)
     };
     SuggestionRow {
+        kind: 0,
+        group: -1,
         title: SharedString::from(name),
         detail: SharedString::from(detail),
         size: SharedString::from(display::human_bytes(item.bytes)),
@@ -2792,7 +3302,8 @@ fn plan_review_status(plan: &CleanupPlan) -> String {
         "No cleanup actions were found in the latest plan.".to_owned()
     } else {
         format!(
-            "Review {} actions, then request cleanup confirmation.",
+            "{} actions found. Nothing is selected yet: tick the items or groups you want to \
+             clean, then press \"Clean selected\".",
             plan.actions.len()
         )
     }
@@ -2824,6 +3335,7 @@ fn apply_execution_result(state: &AppState, result: &ExecutionResult) {
     );
     state.set_result_mode("Cleanup complete".into());
 
+    refresh_trash_state(state);
     // Distinguish Moved-to-Trash (not yet freed) from Freed (reclaimed).
     if result.moved_to_trash_bytes > 0 {
         let moved_actions = result
@@ -2926,7 +3438,7 @@ fn clear_plan_list_only(state: &AppState) {
     PLAN_ACTION_BYTES.with(|cell| cell.borrow_mut().clear());
     state.set_plan_selected_count(0);
     state.set_plan_selected_reclaimable("0 B".into());
-    state.set_plan_all_selected(true);
+    state.set_plan_all_selected(false);
     state.set_plan_ready(false);
 }
 
@@ -2972,7 +3484,10 @@ fn group_row(group: &ActionGroup, safety: SafetyLevel) -> PlanActionRow {
         action_type: SharedString::from(action_type_label(group.action_type)),
         action_icon: SharedString::from(action_type_icon(group.action_type)),
         recipe_id: SharedString::from(group.recipe_id.clone()),
-        selected: matches!(safety, SafetyLevel::Safe),
+        // Nothing is pre-selected, even "safe" groups: Cleanton is a deleter
+        // and a scan must never end in a state where one click removes every
+        // target. The user opts in by ticking rows or the master checkbox.
+        selected: false,
         count: clamp_to_i32(group.action_count),
         detail: SharedString::from(detail),
     }
@@ -3048,16 +3563,15 @@ fn build_plan_model(
     // Bucket action indices by recipe, and record per-action bytes for totals.
     let mut idx_by_recipe: HashMap<&str, Vec<usize>> = HashMap::new();
     let mut action_bytes: Vec<u64> = Vec::with_capacity(plan.actions.len());
-    let mut selected: HashSet<usize> = HashSet::new();
+    // Selection is empty after a fresh scan: every action must be ticked
+    // explicitly. (`selected` is only ever populated by the user's toggles.)
+    let selected: HashSet<usize> = HashSet::new();
     for (i, action) in plan.actions.iter().enumerate() {
         idx_by_recipe
             .entry(action.recipe_id.0.as_str())
             .or_default()
             .push(i);
         action_bytes.push(action.reclaimable_bytes);
-        if matches!(action.safety_level, SafetyLevel::Safe) {
-            selected.insert(i);
-        }
     }
 
     let home = home_string();
@@ -3402,6 +3916,13 @@ fn clear_discovered_services(state: &AppState) {
     state.set_service_running_count(0);
 }
 
+/// Drop a deleted/removed service from the retained set. A successful
+/// delete is ground truth; the follow-up re-list can be stale (or fail),
+/// and previously the row stayed on screen until a manual Refresh.
+fn drop_service_locally(id: &str) {
+    ALL_SERVICES.with(|cell| cell.borrow_mut().retain(|service| service.id != id));
+}
+
 /// Rebuild the displayed model from the retained full set and set the status
 /// line to a "Showing N of M" summary. Shared by refresh and filter.
 fn refresh_services_view(state: &AppState) {
@@ -3529,6 +4050,7 @@ fn service_type_label(service_type: ServiceType) -> &'static str {
         ServiceType::SystemLaunchAgent => "System agent",
         ServiceType::SystemLaunchDaemon => "Daemon",
         ServiceType::BrewService => "Brew",
+        ServiceType::SystemdUserService => "systemd",
     }
 }
 
@@ -3660,7 +4182,163 @@ fn security_row(package: &cleanton_engine::PackageReport) -> SecurityRow {
         actions: SharedString::from(package.action_lines().join("\n")),
         tamper: package.is_tampered(),
         critical: package.is_critical_alert(),
+        // A persistence file is the user's own file (a `.zshrc`, a LaunchAgent
+        // they installed), and the fix is to edit one line, not to delete it.
+        // Only installed packages get the Remove button.
+        removable: package.is_removable(),
+        remove_label: SharedString::from(package.removal().verb()),
     }
+}
+
+/// Package managers detected once per process. Probing `PATH` for every row
+/// would spawn a process per package, so the result is cached.
+fn security_managers() -> &'static [ManagerKind] {
+    static MANAGERS: std::sync::OnceLock<Vec<ManagerKind>> = std::sync::OnceLock::new();
+    MANAGERS.get_or_init(PackageManagers::detect).as_slice()
+}
+
+/// The `cleanton-packages` manager that will perform a removal, when one can.
+///
+/// The POLICY (which packages are removable at all, and how) lives in
+/// `PackageReport::removal()` so the TUI and this app cannot disagree. This only
+/// maps that decision onto the facade that runs it, and returns `None` when the
+/// required manager is not installed on this machine.
+fn removal_manager(removal: SecurityRemoval) -> Option<ManagerKind> {
+    let wanted = match removal {
+        SecurityRemoval::Npm => ManagerKind::Npm,
+        SecurityRemoval::Pip => ManagerKind::Pip,
+        SecurityRemoval::Trash | SecurityRemoval::NotRemovable => return None,
+    };
+    security_managers()
+        .iter()
+        .find(|kind| **kind == wanted)
+        .copied()
+}
+
+/// Arm (or re-arm) the two-step removal for one flagged package row. Nothing
+/// runs here: the panel describes the action and the user confirms.
+fn arm_security_removal(ui: &AppWindow, index: i32) {
+    let state = ui.global::<AppState>();
+    if state.get_security_acting() {
+        return;
+    }
+    let Ok(slot) = usize::try_from(index) else {
+        return;
+    };
+    let explanation = SECURITY_REPORT.with(|cell| {
+        cell.borrow()
+            .as_ref()
+            .and_then(|report| report.flagged.get(slot))
+            .map(cleanton_engine::PackageReport::removal_explanation)
+    });
+    let Some(explanation) = explanation else {
+        return;
+    };
+    state.set_security_remove_status(explanation.into());
+    state.set_security_pending_remove_index(index);
+}
+
+/// Run the confirmed removal for one flagged package row.
+///
+/// Two shapes, both user-confirmed and both safe-by-default: a package manager
+/// uninstall (npm / pip, which keeps the manager's metadata consistent) or a
+/// Trash move of the package directory through the engine executor, which
+/// re-checks protected paths before anything is touched. The Security report is
+/// refreshed afterwards so the row does not linger as a stale finding.
+fn run_security_removal(ui: &AppWindow, index: i32, config: &SharedConfig) {
+    if SECURITY_REMOVE_IN_FLIGHT.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let state = ui.global::<AppState>();
+    let Ok(slot) = usize::try_from(index) else {
+        SECURITY_REMOVE_IN_FLIGHT.store(false, Ordering::SeqCst);
+        return;
+    };
+    let plan = SECURITY_REPORT.with(|cell| {
+        cell.borrow()
+            .as_ref()
+            .and_then(|report| report.flagged.get(slot))
+            .map(|package| {
+                (
+                    package.name.clone(),
+                    package.path.clone(),
+                    package.removal(),
+                )
+            })
+    });
+    // Defence in depth: a row Cleanton must not remove (a host persistence
+    // file) has no Remove button, so reaching here means the index came from
+    // somewhere other than the UI. Refuse rather than trash a user's own file.
+    if let Some((_, _, SecurityRemoval::NotRemovable)) = plan {
+        SECURITY_REMOVE_IN_FLIGHT.store(false, Ordering::SeqCst);
+        return;
+    }
+    let plan = plan.map(|(name, path, removal)| (name, path, removal_manager(removal)));
+    let Some((name, path, manager)) = plan else {
+        SECURITY_REMOVE_IN_FLIGHT.store(false, Ordering::SeqCst);
+        return;
+    };
+
+    state.set_security_pending_remove_index(-1);
+    state.set_security_acting(true);
+    state.set_security_remove_status(format!("Removing {name}...").into());
+
+    let ui_weak = ui.as_weak();
+    let config = config_snapshot(config);
+    std::thread::spawn(move || {
+        // The manager's own uninstaller when one owns the package; the
+        // executor's single-path Trash move otherwise. Both are reviewed,
+        // timeout-bounded paths that already back the Packages tab.
+        let outcome: Result<String, String> = worker_runtime().block_on(async move {
+            match manager {
+                Some(kind) => {
+                    let outcome =
+                        PackageManagers::uninstall(kind, std::slice::from_ref(&name)).await;
+                    if outcome.ok {
+                        Ok(match kind {
+                            ManagerKind::Npm => format!("`npm uninstall -g {name}` finished."),
+                            ManagerKind::Pip => format!("`pip uninstall -y {name}` finished."),
+                            _ => format!("Uninstalled {name}."),
+                        })
+                    } else {
+                        Err(outcome.message)
+                    }
+                }
+                None => {
+                    let orchestrator = match Orchestrator::new(config) {
+                        Ok(orchestrator) => orchestrator,
+                        Err(err) => return Err(err.to_string()),
+                    };
+                    let (event_tx, _event_rx) = mpsc::channel::<EngineEvent>(16);
+                    let execution = match orchestrator.trash_suggestion(&path, &event_tx) {
+                        Ok(execution) => execution,
+                        Err(err) => return Err(err.to_string()),
+                    };
+                    if execution_failed_count(&execution) > 0 {
+                        return Err("the item could not be moved to the Trash".to_owned());
+                    }
+                    Ok(format!("Moved {} to the Trash.", path.display()))
+                }
+            }
+        });
+
+        let _ = ui_weak.upgrade_in_event_loop(move |ui| {
+            SECURITY_REMOVE_IN_FLIGHT.store(false, Ordering::SeqCst);
+            let state = ui.global::<AppState>();
+            state.set_security_acting(false);
+            match outcome {
+                Ok(detail) => {
+                    state.set_security_remove_status(detail.into());
+                    // Refresh so the removed package stops showing as a
+                    // finding, and the baseline diff reflects the new set.
+                    start_security_scan(&ui, false);
+                }
+                Err(err) => {
+                    state.set_security_remove_status(format!("Could not remove: {err}").into());
+                }
+            }
+        });
+    });
 }
 
 /// Load (or reload) the installed-application inventory on a background
@@ -3736,6 +4414,7 @@ fn app_list_row(app: &InstalledApp, cask_tokens: &[String]) -> AppListRow {
         size: SharedString::from(display::human_bytes(app.bytes)),
         protected: app.protected,
         brew: cask_token_for(app, cask_tokens).is_some(),
+        app_store: app.app_store,
     }
 }
 
@@ -3751,8 +4430,11 @@ fn leftover_row(item: &cleanton_engine::LeftoverItem) -> LeftoverRow {
         kind: SharedString::from(item.kind.label()),
         size: SharedString::from(display::human_bytes(item.bytes)),
         admin: item.admin_required,
-        // Everything trashable starts selected; admin items are review-only.
-        selected: !item.admin_required,
+        // Everything starts selected. Admin-owned items are included too: the
+        // executor asks for the administrator password once per run and still
+        // moves them into the Trash, so an App Store bundle can actually be
+        // uninstalled instead of being review-only.
+        selected: true,
     }
 }
 

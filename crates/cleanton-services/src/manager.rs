@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::types::{Service, ServiceStatus, ServiceType};
-use crate::{brew, launchd, reviewed_plist_delete, safety};
+use crate::{brew, launchd, reviewed_plist_delete, safety, systemd};
 use cleanton_common::{CleantonConfig, CleantonError};
 
 #[derive(Debug)]
@@ -73,6 +73,7 @@ impl ServiceManager {
     pub async fn list_services(&self) -> Result<Vec<Service>, CleantonError> {
         let mut services = Vec::new();
         let proc_stats = launchd::get_all_processes_stats();
+        let launchctl_snapshot = launchd::get_launchctl_snapshot();
 
         // 1. Get Brew services first
         let brew_list = brew::list_brew_services().unwrap_or_default();
@@ -149,8 +150,13 @@ impl ServiceManager {
                     parsed.label.clone()
                 };
 
-                // Get status
-                let status = launchd::get_launchd_status(&parsed.label, final_type, &proc_stats);
+                // Get status from pre-fetched launchctl snapshot (O(1), zero per-plist subprocesses)
+                let status = launchd::get_launchd_status_from_snapshot(
+                    &parsed.label,
+                    final_type,
+                    &launchctl_snapshot,
+                    &proc_stats,
+                );
 
                 services.push(Service {
                     id: parsed.label.clone(),
@@ -209,7 +215,12 @@ impl ServiceManager {
                 None
             };
 
-            let status = launchd::get_launchd_status(&label, ServiceType::BrewService, &proc_stats);
+            let status = launchd::get_launchd_status_from_snapshot(
+                &label,
+                ServiceType::BrewService,
+                &launchctl_snapshot,
+                &proc_stats,
+            );
 
             services.push(Service {
                 id: label.clone(),
@@ -224,6 +235,9 @@ impl ServiceManager {
                 user_id,
             });
         }
+
+        // 3. Discover systemd user services on Linux (~/.config/systemd/user/*.service)
+        services.extend(systemd::list_user_services(&proc_stats));
 
         services.sort_by(|a, b| a.id.cmp(&b.id));
         Ok(services)
@@ -362,6 +376,28 @@ impl ServiceManager {
         let requires_elevation = should_run_as_root(service);
         let use_elevation = requires_elevation && options.requests_elevation();
 
+        if service.service_type == ServiceType::SystemdUserService {
+            let verb = match action {
+                ServiceAction::Start => "start",
+                ServiceAction::Stop => "stop",
+                ServiceAction::Restart => "restart",
+                ServiceAction::Enable => {
+                    systemd::run_systemctl_user_action(&service.id, "enable", &service.plist_path)?;
+                    "start"
+                }
+                ServiceAction::Disable => {
+                    systemd::run_systemctl_user_action(
+                        &service.id,
+                        "disable",
+                        &service.plist_path,
+                    )?;
+                    "stop"
+                }
+            };
+            systemd::run_systemctl_user_action(&service.id, verb, &service.plist_path)?;
+            return Ok(());
+        }
+
         if service.service_type == ServiceType::BrewService {
             if use_elevation {
                 return Err(CleantonError::ExecutionRefused(format!(
@@ -441,13 +477,109 @@ impl ServiceManager {
 
         backup_service_plist(&service.plist_path)?;
 
-        if use_elevation {
+        if service.service_type == ServiceType::SystemdUserService {
+            let _ = systemd::run_systemctl_user_action(&service.id, "disable", &service.plist_path);
+            let _ = systemd::run_systemctl_user_action(&service.id, "stop", &service.plist_path);
+            reviewed_plist_delete::remove_service_plist(&service.plist_path)
+                .map_err(|e| CleantonError::io(&service.plist_path, e))?;
+        } else if use_elevation {
             let _ = launchd::bootout_service_elevated(&service.plist_path, service.service_type);
             reviewed_plist_delete::remove_service_plist_elevated(&service.plist_path)
                 .map_err(|e| CleantonError::io(&service.plist_path, e))?;
         } else {
             let _ = launchd::bootout_service(&service.plist_path, service.service_type);
 
+            reviewed_plist_delete::remove_service_plist(&service.plist_path)
+                .map_err(|e| CleantonError::io(&service.plist_path, e))?;
+        }
+
+        Ok(())
+    }
+
+    /// Delete the startup item of a service that is **not running**.
+    ///
+    /// This is the way to get rid of a disabled/stopped third-party service for
+    /// good instead of just toggling it off. Refused for:
+    ///
+    /// - system/protected services (`check_service_mutation_safety`),
+    /// - anything currently running — stop or disable it first,
+    /// - Homebrew-managed services, whose lifecycle belongs to `brew services`,
+    /// - a service whose startup item file no longer exists.
+    ///
+    /// The plist is backed up under the Cleanton config directory before
+    /// removal, exactly like the orphaned-leftover path, so a deleted startup
+    /// item can always be restored by hand.
+    pub async fn delete_disabled_plist(&self, service_id: &str) -> Result<(), CleantonError> {
+        self.delete_disabled_plist_with_options(service_id, ServiceMutationOptions::default())
+            .await
+    }
+
+    pub async fn delete_disabled_plist_elevated(
+        &self,
+        service_id: &str,
+    ) -> Result<(), CleantonError> {
+        self.delete_disabled_plist_with_options(service_id, ServiceMutationOptions::elevated())
+            .await
+    }
+
+    pub async fn delete_disabled_plist_with_options(
+        &self,
+        service_id: &str,
+        options: ServiceMutationOptions,
+    ) -> Result<(), CleantonError> {
+        let services = self.list_services().await?;
+        let service = services
+            .iter()
+            .find(|s| s.id == service_id)
+            .ok_or_else(|| service_not_found(service_id))?;
+
+        safety::check_service_mutation_safety_with_elevation(
+            &service.id,
+            &service.plist_path,
+            service.service_type,
+            service.user_id,
+            options.requests_elevation(),
+        )?;
+
+        if service.service_type == ServiceType::BrewService {
+            return Err(CleantonError::ExecutionRefused(format!(
+                "Service '{service_id}' is managed by Homebrew; stop it with `brew services stop {}` and uninstall the formula instead.",
+                service.name
+            )));
+        }
+
+        if matches!(service.status, ServiceStatus::Running { .. }) {
+            return Err(CleantonError::ExecutionRefused(format!(
+                "Service '{service_id}' is still running. Disable it first, then delete the startup item."
+            )));
+        }
+
+        if !service.plist_path.exists() {
+            return Err(CleantonError::ExecutionRefused(format!(
+                "Service '{service_id}' has no startup item file left to delete ({}).",
+                service.plist_path.display()
+            )));
+        }
+
+        let requires_elevation = should_run_as_root(service);
+        let use_elevation = requires_elevation && options.requests_elevation();
+
+        if !use_elevation {
+            launchd::check_write_privileges(&service.plist_path)?;
+        }
+
+        backup_service_plist(&service.plist_path)?;
+
+        if service.service_type == ServiceType::SystemdUserService {
+            let _ = systemd::run_systemctl_user_action(&service.id, "disable", &service.plist_path);
+            reviewed_plist_delete::remove_service_plist(&service.plist_path)
+                .map_err(|e| CleantonError::io(&service.plist_path, e))?;
+        } else if use_elevation {
+            let _ = launchd::bootout_service_elevated(&service.plist_path, service.service_type);
+            reviewed_plist_delete::remove_service_plist_elevated(&service.plist_path)
+                .map_err(|e| CleantonError::io(&service.plist_path, e))?;
+        } else {
+            let _ = launchd::bootout_service(&service.plist_path, service.service_type);
             reviewed_plist_delete::remove_service_plist(&service.plist_path)
                 .map_err(|e| CleantonError::io(&service.plist_path, e))?;
         }

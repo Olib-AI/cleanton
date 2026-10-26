@@ -13,7 +13,7 @@ priority = 50
 [match]
 path_glob = "~/.gradle/caches/**"
 min_age_days = 30
-min_size_mb = 50
+min_size_mb = 10
 
 [action]
 type = "trash"

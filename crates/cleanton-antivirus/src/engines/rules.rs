@@ -10,7 +10,7 @@
 
 use std::sync::OnceLock;
 
-use regex::Regex;
+use regex::{Regex, RegexSet, RegexSetBuilder};
 use tracing::warn;
 
 use crate::{
@@ -51,53 +51,6 @@ struct Rule {
     desc: &'static str,
     patterns: &'static [Pattern],
     condition: Condition,
-}
-
-// ── Compiled regex cache ─────────────────────────────────────────────────────
-//
-// Each regex-pattern string is used as the key into ONE global per-pattern
-// OnceLock. Because rules are 'static and pattern strings are 'static literals
-// we can keep this tidy with a macro that builds a function returning the
-// compiled regex or None if compilation fails (it never will for our literals,
-// but we don't panic on that path).
-
-/// Compile (once) and return a reference to the regex for `src`.
-/// Returns `None` only if the regex is invalid — which cannot happen for our
-/// bundled literals; the None path prevents a panic should the regex crate
-/// change its syntax semantics.
-fn compiled(src: &'static str) -> Option<&'static Regex> {
-    use std::collections::HashMap;
-    use std::sync::Mutex;
-
-    // Key: the &'static str itself (which is Send + Sync).
-    // Value: a `&'static Regex` obtained by leaking a Box on first compile.
-    // Both &'static str and &'static Regex are Send + Sync, so this static is
-    // safe in a multi-threaded context.
-    static CACHE: OnceLock<Mutex<HashMap<&'static str, &'static Regex>>> = OnceLock::new();
-    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-
-    // Fast path: already compiled.
-    {
-        let guard = cache.lock().unwrap_or_else(|p| p.into_inner());
-        if let Some(&r) = guard.get(src) {
-            return Some(r);
-        }
-    }
-
-    // Slow path: compile, leak, insert.
-    match Regex::new(src) {
-        Ok(r) => {
-            let leaked: &'static Regex = Box::leak(Box::new(r));
-            let mut guard = cache.lock().unwrap_or_else(|p| p.into_inner());
-            // Use entry to avoid a double-insert if two threads race here.
-            let stored = guard.entry(src).or_insert(leaked);
-            Some(*stored)
-        }
-        Err(e) => {
-            warn!(pattern = src, error = %e, "rules engine: failed to compile regex");
-            None
-        }
-    }
 }
 
 // ── Bundled rule patterns (static data) ──────────────────────────────────────
@@ -201,7 +154,7 @@ static RULE_EVAL_ATOB_NET: Rule = Rule {
     confidence: Confidence::High,
     title: "eval(atob(…)) combined with network access",
     desc: "Decodes a base64 payload at runtime and immediately eval()s it alongside \
-           a network call — characteristic of stealthy JS loaders and npm supply-chain backdoors.",
+           a network call: characteristic of stealthy JS loaders and npm supply-chain backdoors.",
     patterns: &[
         Pattern::Regex(r"\beval\s*\(\s*atob\s*\("),
         Pattern::Regex(r#"\beval\s*\(\s*Buffer\.from\s*\(.*["']base64["']"#),
@@ -271,7 +224,7 @@ static RULE_EXFIL_WEBHOOK: Rule = Rule {
     confidence: Confidence::High,
     title: "Data exfiltration to webhook / paste service",
     desc: "Sends data to a Discord webhook, Telegram bot API, Pastebin, RequestBin, \
-           webhook.site, or similar paste/hook service — common npm supply-chain exfil channel.",
+           webhook.site, or similar paste/hook service: common npm supply-chain exfil channel.",
     patterns: &[
         Pattern::Regex(r"https://discord(?:app)?\.com/api/webhooks/\d+/[A-Za-z0-9_-]+"),
         Pattern::Regex(r"https://api\.telegram\.org/bot[A-Za-z0-9_-]+:[A-Za-z0-9_-]+/"),
@@ -382,7 +335,7 @@ static RULE_REVSHELL_PYTHON: Rule = Rule {
     confidence: Confidence::High,
     title: "Python reverse shell (socket + subprocess/exec)",
     desc: "Python code combining socket connection to an attacker-controlled IP with \
-           subprocess.call/os.execl/exec() — classic Python reverse shell pattern.",
+           subprocess.call/os.execl/exec(): classic Python reverse shell pattern.",
     patterns: &[
         Pattern::Regex(r"import\s+socket"),
         Pattern::Regex(r"\.connect\s*\(\s*\("),
@@ -399,7 +352,7 @@ static RULE_NPM_WORM: Rule = Rule {
     confidence: Confidence::High,
     title: "npm worm: token theft + self-propagating publish",
     desc: "Combines npm authentication token access with npm publish or registry \
-           API calls — hallmark of self-propagating npm supply-chain worms.",
+           API calls: hallmark of self-propagating npm supply-chain worms.",
     patterns: &[
         Pattern::Regex(r"(?:NPM_TOKEN|NPM_AUTH_TOKEN|_authToken|npm\s+login)"),
         Pattern::Regex(r"npm\s+publish"),
@@ -506,7 +459,7 @@ static RULE_B64_EXEC: Rule = Rule {
     confidence: Confidence::Medium,
     title: "Base64 decode followed by exec/eval/spawn",
     desc: "Decodes a base64 string and immediately executes it via eval, exec, spawn, \
-           or shell — used to conceal payloads from static analysis.",
+           or shell: used to conceal payloads from static analysis.",
     patterns: &[
         Pattern::Regex(r"(?:atob|Buffer\.from|base64\.b64decode|base64_decode)\s*\("),
         Pattern::Regex(
@@ -560,7 +513,7 @@ static RULE_NPM_LIFECYCLE_DOWNLOADER: Rule = Rule {
     confidence: Confidence::High,
     title: "npm lifecycle script downloads remote payload",
     desc: "An npm preinstall/postinstall/install script fetches a remote binary or \
-           script — used to bypass npm registry scanning by fetching the payload at install time.",
+           script: used to bypass npm registry scanning by fetching the payload at install time.",
     patterns: &[
         Pattern::Regex(
             r#""(?:pre|post)?install"\s*:\s*"[^"]*(?:curl|wget|fetch|http|https)[^"]*""#,
@@ -626,7 +579,7 @@ static RULE_CLIPBOARD_HIJACK: Rule = Rule {
     category: ThreatCategory::CryptoStealer,
     severity: Severity::Critical,
     confidence: Confidence::High,
-    title: "Clipboard hijack — crypto address substitution",
+    title: "Clipboard hijack: crypto address substitution",
     desc: "Reads clipboard content and replaces cryptocurrency wallet addresses \
            (Bitcoin/Ethereum/Monero patterns), a classic crypto-stealer technique.",
     patterns: &[
@@ -647,7 +600,7 @@ static RULE_PERSISTENCE: Rule = Rule {
     confidence: Confidence::Medium,
     title: "Persistence via crontab or Windows Registry Run key",
     desc: "Modifies crontab or Windows HKCU/HKLM Run keys to achieve persistence \
-           across reboots — common in dropper and RAT payloads.",
+           across reboots: common in dropper and RAT payloads.",
     patterns: &[
         Pattern::Regex(r"crontab\s+-[leu]"),
         Pattern::Regex(r#"(?:echo|printf)\s+["'][^"']*\*[^"']*["']\s*>+\s*/etc/cron"#),
@@ -665,7 +618,7 @@ static RULE_EVAL_DYNAMIC: Rule = Rule {
     severity: Severity::High,
     confidence: Confidence::Medium,
     title: "eval() / exec() on dynamic/external input",
-    desc: "eval() or exec() called on a variable, HTTP response, or socket data — \
+    desc: "eval() or exec() called on a variable, HTTP response, or socket data: \
            enables remote code execution if the input source is attacker-controlled.",
     patterns: &[
         Pattern::Regex(
@@ -693,7 +646,7 @@ static RULE_CRYPTO_WALLET_FILES: Rule = Rule {
     title: "Cryptocurrency wallet store / seed-phrase file access",
     desc: "References local wallet stores (Solana id.json, Exodus wallet, MetaMask \
            extension LevelDB, Ethereum keystore, Bitcoin wallet.dat) or seed-phrase \
-           files — the harvest targets of BeaverTail/W4SP-class crypto stealers.",
+           files: the harvest targets of BeaverTail/W4SP-class crypto stealers.",
     patterns: &[
         Pattern::Regex(r"\.config[/\\]solana[/\\]id\.json"),
         Pattern::Literal("exodus.wallet"),
@@ -718,13 +671,77 @@ static RULE_CRED_RUBYGEMS: Rule = Rule {
     severity: Severity::High,
     confidence: Confidence::Medium,
     title: "RubyGems publish credential access",
-    desc: "References ~/.gem/credentials or RubyGems API-key material — the \
+    desc: "References ~/.gem/credentials or RubyGems API-key material: the \
            RubyGems analogue of .npmrc token theft, used by cross-ecosystem \
            supply-chain worms to republish trojanized gems.",
     patterns: &[
         Pattern::Regex(r"\.gem[/\\]credentials"),
         Pattern::Literal("GEM_HOST_API_KEY"),
         Pattern::Regex(r"(?i)rubygems_api_key"),
+    ],
+    condition: Condition::AnyOf,
+};
+
+// Rule 33 – macOS Keychain secret dump (`security dump-keychain` / `-w`).
+//
+// Atomic macOS Stealer (AMOS), Poseidon, and Cthulhu harvest macOS Keychain
+// items via `security dump-keychain` or `security find-generic-password -w`.
+static RULE_MACOS_KEYCHAIN_DUMP: Rule = Rule {
+    id: "CRED_MACOS_KEYCHAIN_DUMP",
+    category: ThreatCategory::CredentialAccess,
+    severity: Severity::Critical,
+    confidence: Confidence::High,
+    title: "macOS Keychain credential extraction command",
+    desc: "Invokes the macOS `security` CLI to dump a keychain or print stored \
+           plaintext passwords (`dump-keychain`, `find-generic-password -w`, or \
+           `find-internet-password -w`), a signature technique of AMOS/Poseidon stealers.",
+    patterns: &[
+        Pattern::Regex(r"\bsecurity\s+dump-keychain\b"),
+        Pattern::Regex(
+            r"\bsecurity\s+find-(?:generic|internet)-password\b[^\n]{0,120}\s-(?:[a-zA-Z]*w|g)\b",
+        ),
+    ],
+    condition: Condition::AnyOf,
+};
+
+// Rule 34 – macOS AppleScript credential phishing dialog (`osascript` + hidden answer).
+//
+// Commodity macOS stealers pop a fake system password dialog via
+// `osascript -e 'display dialog ... with hidden answer'` to capture the user's
+// login password in cleartext.
+static RULE_MACOS_OSASCRIPT_CRED_PHISH: Rule = Rule {
+    id: "CRED_OSASCRIPT_PASSWORD_PROMPT",
+    category: ThreatCategory::CredentialAccess,
+    severity: Severity::High,
+    confidence: Confidence::High,
+    title: "AppleScript hidden-answer password prompt",
+    desc: "Combines `osascript`, `display dialog`, and `hidden answer` to prompt \
+           the user for a password in a spoofed macOS modal dialog.",
+    patterns: &[
+        Pattern::Regex(r"\bosascript\b"),
+        Pattern::Regex(r"(?i)\bdisplay\s+dialog\b"),
+        Pattern::Regex(r"(?i)\bwith\s+hidden\s+answer\b"),
+    ],
+    condition: Condition::AllOf,
+};
+
+// Rule 35 – Linux Secret Service / GNOME Keyring / KWallet credential access.
+//
+// Linux supply-chain payloads and cross-platform stealers read GNOME Keyring
+// (`~/.local/share/keyrings/login.keyring`) or dump secrets via `secret-tool` /
+// `kwallet-query`.
+static RULE_LINUX_SECRET_SERVICE: Rule = Rule {
+    id: "CRED_LINUX_SECRET_SERVICE",
+    category: ThreatCategory::CredentialAccess,
+    severity: Severity::High,
+    confidence: Confidence::High,
+    title: "Linux keyring / Secret Service credential access",
+    desc: "References GNOME Keyring files (`~/.local/share/keyrings/*.keyring`) \
+           or invokes `secret-tool` / `kwallet-query` to extract stored credentials.",
+    patterns: &[
+        Pattern::Regex(r"\.local/share/keyrings/[A-Za-z0-9_.-]+\.keyring"),
+        Pattern::Regex(r"\bsecret-tool\s+search\b[^\n]{0,80}--(?:all|unlock)\b"),
+        Pattern::Regex(r"\bkwallet-query\b[^\n]{0,80}\s-r\b"),
     ],
     condition: Condition::AnyOf,
 };
@@ -763,20 +780,86 @@ static ALL_RULES: &[&Rule] = &[
     &RULE_EVAL_DYNAMIC,
     &RULE_CRYPTO_WALLET_FILES,
     &RULE_CRED_RUBYGEMS,
+    &RULE_MACOS_KEYCHAIN_DUMP,
+    &RULE_MACOS_OSASCRIPT_CRED_PHISH,
+    &RULE_LINUX_SECRET_SERVICE,
 ];
 
-// ── Pattern evaluation helpers ───────────────────────────────────────────────
+// ── Lock-free precompiled ruleset + RegexSet prefilter ───────────────────────
 
-/// Returns `true` if `text` contains the pattern's literal/regex match.
-/// Also returns the byte-offset of the first match (for line resolution).
-fn pattern_matches(pat: &Pattern, text: &str) -> Option<usize> {
-    match pat {
-        Pattern::Literal(lit) => text.find(lit),
-        Pattern::Regex(src) => {
-            let re = compiled(src)?;
-            re.find(text).map(|m| m.start())
+enum CompiledPat {
+    Literal(&'static str),
+    Regex(Option<Regex>),
+}
+
+impl CompiledPat {
+    fn find_offset(&self, text: &str) -> Option<usize> {
+        match self {
+            Self::Literal(lit) => text.find(lit),
+            Self::Regex(Some(re)) => re.find(text).map(|m| m.start()),
+            Self::Regex(None) => None,
         }
     }
+}
+
+struct CompiledRuleEntry {
+    rule: &'static Rule,
+    set_start: usize,
+    patterns: Vec<CompiledPat>,
+}
+
+struct CompiledRuleset {
+    regex_set: Option<RegexSet>,
+    entries: Vec<CompiledRuleEntry>,
+}
+
+fn compiled_ruleset() -> &'static CompiledRuleset {
+    static RULESET: OnceLock<CompiledRuleset> = OnceLock::new();
+    RULESET.get_or_init(|| {
+        let mut set_exprs: Vec<String> = Vec::new();
+        let mut entries: Vec<CompiledRuleEntry> = Vec::with_capacity(ALL_RULES.len());
+
+        for &rule in ALL_RULES {
+            let set_start = set_exprs.len();
+            let mut patterns = Vec::with_capacity(rule.patterns.len());
+            for pat in rule.patterns {
+                match pat {
+                    Pattern::Literal(lit) => {
+                        set_exprs.push(regex::escape(lit));
+                        patterns.push(CompiledPat::Literal(lit));
+                    }
+                    Pattern::Regex(src) => match Regex::new(src) {
+                        Ok(re) => {
+                            set_exprs.push((*src).to_owned());
+                            patterns.push(CompiledPat::Regex(Some(re)));
+                        }
+                        Err(e) => {
+                            warn!(pattern = src, error = %e, "rules engine: failed to compile regex");
+                            set_exprs.push(r"[^\s\S]".to_owned());
+                            patterns.push(CompiledPat::Regex(None));
+                        }
+                    },
+                }
+            }
+            entries.push(CompiledRuleEntry {
+                rule,
+                set_start,
+                patterns,
+            });
+        }
+
+        let regex_set = RegexSetBuilder::new(&set_exprs)
+            .size_limit(64 * 1024 * 1024)
+            .dfa_size_limit(64 * 1024 * 1024)
+            .build()
+            .map_err(|e| {
+                warn!(error = %e, "rules engine: RegexSet prefilter fallback to per-rule scan");
+                e
+            })
+            .ok();
+
+        CompiledRuleset { regex_set, entries }
+    })
 }
 
 /// For a given byte offset in `text`, return the 1-based line number.
@@ -801,47 +884,51 @@ fn evidence_snippet(text: &str, offset: usize) -> String {
 
 // ── Rule evaluation ───────────────────────────────────────────────────────────
 
-/// Evaluate one rule against `text`. Returns `Some((first_match_offset,
-/// matched_pattern_index))` if the condition is satisfied.
-fn evaluate_rule(rule: &Rule, text: &str) -> Option<usize> {
-    // Pre-filter: for AnyOf/AllOf/NOfThem we do a quick cheap literal check
-    // first — if the rule has no literals this is a no-op. This avoids running
-    // the heavier regex machinery on obviously-irrelevant files.
-    let has_literal_pre_filter = rule
-        .patterns
-        .iter()
-        .any(|p| matches!(p, Pattern::Literal(_)));
-    if has_literal_pre_filter {
-        let any_literal_hit = rule.patterns.iter().any(|p| {
-            if let Pattern::Literal(lit) = p {
-                text.contains(lit)
-            } else {
-                false
+/// Evaluate one compiled rule against `text`, optionally guided by a `RegexSet`
+/// match bitmap so non-matching rules exit in O(1) without scanning `text`.
+fn evaluate_compiled_rule(
+    entry: &CompiledRuleEntry,
+    set_matches: Option<&regex::SetMatches>,
+    text: &str,
+) -> Option<usize> {
+    if let Some(matches) = set_matches {
+        let hit_count = (0..entry.patterns.len())
+            .filter(|&i| matches.matched(entry.set_start + i))
+            .count();
+        let satisfied = match &entry.rule.condition {
+            Condition::AnyOf => hit_count >= 1,
+            Condition::AllOf => hit_count == entry.patterns.len(),
+            Condition::NOfThem(n) => hit_count >= *n,
+        };
+        if !satisfied {
+            return None;
+        }
+        let mut first_offset: Option<usize> = None;
+        for (i, pat) in entry.patterns.iter().enumerate() {
+            if matches.matched(entry.set_start + i)
+                && let Some(off) = pat.find_offset(text)
+                && first_offset.is_none_or(|cur| off < cur)
+            {
+                first_offset = Some(off);
             }
-        });
-        // For AnyOf/NOfThem we skip if no literal matched AND there are only
-        // literals in the pattern list — handled below naturally. No early-exit
-        // here; we still let the regex patterns run.
-        let _ = any_literal_hit; // used as optimisation hint below
+        }
+        return first_offset;
     }
 
     let mut first_offset: Option<usize> = None;
     let mut match_count: usize = 0;
-    let mut matched_indices: Vec<usize> = Vec::with_capacity(rule.patterns.len());
-
-    for (i, pat) in rule.patterns.iter().enumerate() {
-        if let Some(off) = pattern_matches(pat, text) {
+    for pat in &entry.patterns {
+        if let Some(off) = pat.find_offset(text) {
             match_count += 1;
-            matched_indices.push(i);
-            if first_offset.is_none() || off < first_offset.unwrap_or(usize::MAX) {
+            if first_offset.is_none_or(|cur| off < cur) {
                 first_offset = Some(off);
             }
         }
     }
 
-    let fires = match &rule.condition {
+    let fires = match &entry.rule.condition {
         Condition::AnyOf => match_count >= 1,
-        Condition::AllOf => match_count == rule.patterns.len(),
+        Condition::AllOf => match_count == entry.patterns.len(),
         Condition::NOfThem(n) => match_count >= *n,
     };
 
@@ -882,6 +969,7 @@ impl DetectionEngine for RuleEngine {
 
     fn scan(&self, ctx: &ScanContext<'_>) -> Vec<Finding> {
         let mut findings: Vec<Finding> = Vec::new();
+        let ruleset = compiled_ruleset();
 
         // Cap text fed to regex evaluation to guard against adversarially huge
         // files causing slow NFA traversal.  Mirrors ioc.rs's MAX_SCAN_BYTES.
@@ -893,13 +981,21 @@ impl DetectionEngine for RuleEngine {
             let window = crate::engine::scan_window(file.text_lossy(), MAX_SCAN_BYTES);
             let text: &str = &window;
 
-            for rule in ALL_RULES.iter() {
+            let set_matches = ruleset.regex_set.as_ref().map(|set| set.matches(text));
+            if let Some(ref matches) = set_matches
+                && !matches.matched_any()
+            {
+                continue;
+            }
+
+            for entry in &ruleset.entries {
+                let rule = entry.rule;
                 // Check operator allowlist.
                 if ctx.config.is_allowlisted(rule.id) {
                     continue;
                 }
 
-                if let Some(offset) = evaluate_rule(rule, text) {
+                if let Some(offset) = evaluate_compiled_rule(entry, set_matches.as_ref(), text) {
                     let line = byte_offset_to_line(text, offset);
                     let snippet = evidence_snippet(text, offset);
 
@@ -1852,5 +1948,36 @@ mod tests {
             !has_rule(&findings, "CRED_RUBYGEMS_TOKEN"),
             "benign gem manifest must not fire; findings: {findings:?}"
         );
+    }
+
+    // ── CRED_MACOS_KEYCHAIN_DUMP / OSASCRIPT / LINUX_SECRET_SERVICE ──────────
+
+    #[test]
+    fn test_macos_keychain_dump_positive_and_negative() {
+        let pos = scan_text("execSync('security find-generic-password -s github.com -w')");
+        assert!(has_rule(&pos, "CRED_MACOS_KEYCHAIN_DUMP"));
+
+        let neg = scan_text("execSync('security verify-cert -c cert.pem')");
+        assert!(!has_rule(&neg, "CRED_MACOS_KEYCHAIN_DUMP"));
+    }
+
+    #[test]
+    fn test_macos_osascript_phish_positive_and_negative() {
+        let pos = scan_text(
+            r#"osascript -e 'display dialog "System Preferences requires your password" default answer "" with hidden answer'"#,
+        );
+        assert!(has_rule(&pos, "CRED_OSASCRIPT_PASSWORD_PROMPT"));
+
+        let neg = scan_text(r#"osascript -e 'display notification "Build complete"'"#);
+        assert!(!has_rule(&neg, "CRED_OSASCRIPT_PASSWORD_PROMPT"));
+    }
+
+    #[test]
+    fn test_linux_secret_service_positive_and_negative() {
+        let pos = scan_text("fs.readFileSync(home + '/.local/share/keyrings/login.keyring')");
+        assert!(has_rule(&pos, "CRED_LINUX_SECRET_SERVICE"));
+
+        let neg = scan_text("fs.readFileSync(home + '/.local/share/applications/app.desktop')");
+        assert!(!has_rule(&neg, "CRED_LINUX_SECRET_SERVICE"));
     }
 }

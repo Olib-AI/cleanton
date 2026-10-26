@@ -13,7 +13,7 @@ priority = 50
 # their largest ancestor.
 [match]
 path_glob = "~/Library/Developer/Xcode/DerivedData/**"
-min_size_mb = 50
+min_size_mb = 10
 
 [action]
 type = "trash"

@@ -9,12 +9,16 @@ priority = 50
 
 [match]
 path_glob = "~/.cache/rattler/**"
-min_size_mb = 100
+min_size_mb = 50
+
+[[match.any_of]]
+path_glob = "~/Library/Caches/rattler/**"
+min_size_mb = 50
 
 [action]
 type = "trash"
 prompt = "Move {size} of Pixi/rattler package cache to Trash?"
 
 [test]
-should_match = ["~/.cache/rattler/pkgs/foo"]
+should_match = ["~/.cache/rattler/pkgs/foo", "~/Library/Caches/rattler/pkgs/foo"]
 should_not_match = ["~/.cache/other"]

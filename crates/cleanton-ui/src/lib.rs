@@ -52,8 +52,8 @@ use std::sync::{
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
-use cleanton_common::{ActionType, CleantonConfig, CleanupPlan, ExecutionResult, ScanResult};
-use cleanton_engine::{AnalyzedFull, EngineEvent};
+use cleanton_common::{ActionType, CleantonConfig, CleanupPlan, ExecutionResult};
+use cleanton_engine::{AnalyzedFull, EngineEvent, ScanSummary, SecurityRemoval};
 use cleanton_packages::{
     ActionOutcome, Inventory, ManagerKind, PackageManagers, plan_removal, scan_usage,
 };
@@ -165,6 +165,12 @@ pub enum TuiEvent {
     SecurityFinished {
         scan_id: u64,
         report: Box<cleanton_engine::SecurityReport>,
+    },
+    /// A user-confirmed security removal finished. `outcome` carries the
+    /// human-readable result on success and the reason on failure.
+    SecurityRemoveFinished {
+        name: String,
+        outcome: Result<String, String>,
     },
 }
 
@@ -701,6 +707,20 @@ async fn run_tui_async<B: ratatui::backend::Backend>(
                         app.security_report = Some(*report);
                     }
                 }
+                TuiEvent::SecurityRemoveFinished { name, outcome } => {
+                    app.security_removing = false;
+                    match outcome {
+                        Ok(detail) => {
+                            app.set_status(&format!("{name}: {detail}"));
+                            // Refresh so the removed package stops showing as a
+                            // finding and the baseline reflects the new set.
+                            app.security_pending_remove = None;
+                            app.security_report = None;
+                            trigger_security_scan(&mut app, &tui_tx, false);
+                        }
+                        Err(err) => app.set_status(&format!("Could not remove {name}: {err}")),
+                    }
+                }
             }
         }
     }
@@ -867,6 +887,12 @@ async fn handle_key_event(
                     || key.code == crossterm::event::KeyCode::Char(' ')
                 {
                     trigger_scan(app, tui_tx);
+                } else if key.code == crossterm::event::KeyCode::Char('m') {
+                    app.reclaim_memory();
+                    app.active_screen = ActiveScreen::Services;
+                    if app.services.is_empty() && !app.is_loading_services {
+                        load_services(app, service_tx);
+                    }
                 }
             }
             ActiveScreen::Packages => handle_packages_key(key, app, tui_tx),
@@ -1112,9 +1138,25 @@ async fn handle_key_event(
                 crossterm::event::KeyCode::Char('T') if !app.security_scanning => {
                     trust_all_security_packages(app);
                 }
+                // Two-step removal, mirroring the Slint Security tab: [r] arms,
+                // [y] runs, [n] cancels. Nothing destructive happens on [r].
+                crossterm::event::KeyCode::Char('r')
+                    if !app.security_scanning && !app.security_removing =>
+                {
+                    arm_security_removal(app);
+                }
+                crossterm::event::KeyCode::Char('y') if app.security_pending_remove.is_some() => {
+                    confirm_security_removal(app, tui_tx);
+                }
+                crossterm::event::KeyCode::Char('n') if app.security_pending_remove.is_some() => {
+                    cancel_security_removal(app);
+                }
                 crossterm::event::KeyCode::Up => {
                     if app.security_selected > 0 {
                         app.security_selected -= 1;
+                        // Moving the cursor disarms: only the row you are
+                        // looking at can be removed.
+                        app.security_pending_remove = None;
                     }
                 }
                 crossterm::event::KeyCode::Down => {
@@ -1124,6 +1166,7 @@ async fn handle_key_event(
                         .map_or(0, |report| report.flagged.len());
                     if app.security_selected + 1 < count {
                         app.security_selected += 1;
+                        app.security_pending_remove = None;
                     }
                 }
                 crossterm::event::KeyCode::Char('x') if app.security_scanning => {
@@ -1247,8 +1290,8 @@ fn handle_engine_event(event: EngineEvent, app: &mut App) {
         } => {
             app.scan_progress = Some((files_scanned, dirs_entered, bytes_seen));
         }
-        EngineEvent::ScanCompleted { result } => {
-            app.scan_result = Some(result);
+        EngineEvent::ScanCompleted { summary } => {
+            app.scan_result = Some(summary);
         }
         EngineEvent::AnalysisStarted => {
             app.set_status("Analyzing scan results against cleanup recipes...");
@@ -1328,7 +1371,7 @@ fn handle_engine_event(event: EngineEvent, app: &mut App) {
 /// stored separately and never enter the file tree, so they can only ever be
 /// executed by explicit user action against the plan.
 fn apply_analyzed_full(app: &mut App, full: AnalyzedFull) {
-    let status = app.scan_result.as_ref().map_or_else(
+    let scan_status = app.scan_result.as_ref().map_or_else(
         || "Analysis complete! Switch to the Results tab (2) to review.".to_owned(),
         scan_status,
     );
@@ -1338,6 +1381,18 @@ fn apply_analyzed_full(app: &mut App, full: AnalyzedFull) {
         docker,
         suggestions,
     } = full;
+
+    // Nothing is pre-selected: tell the user explicitly, so the empty state is
+    // never mistaken for "clean everything".
+    let target_count = analyzed.plan.actions.len();
+    let status = if target_count == 0 {
+        format!("{scan_status} No cleanable items found.")
+    } else {
+        format!(
+            "{scan_status} {target_count} targets found; none selected. \
+             Tick items with Space, then press c to review and y to confirm."
+        )
+    };
 
     app.is_scanning = false;
     app.file_tree_state = Some(FileTreeState::new(&analyzed.plan, &analyzed.annotations));
@@ -1353,7 +1408,7 @@ fn apply_analyzed_full(app: &mut App, full: AnalyzedFull) {
     app.set_status(&status);
 }
 
-fn scan_status(scan: &ScanResult) -> String {
+fn scan_status(scan: &ScanSummary) -> String {
     match (scan.incomplete, scan.errors.len()) {
         (true, 0) => "Analysis complete, but scan coverage is incomplete.".to_owned(),
         (true, 1) => {
@@ -1450,7 +1505,7 @@ fn trigger_scan(app: &mut App, tx: &mpsc::Sender<TuiEvent>) {
                     .send(TuiEvent::Engine {
                         operation_id,
                         event: EngineEvent::ScanCompleted {
-                            result: scan_res.clone(),
+                            summary: ScanSummary::from_scan(&scan_res),
                         },
                     })
                     .await;
@@ -1596,6 +1651,131 @@ fn trust_selected_security_package(app: &mut App) {
         }
         Err(err) => app.set_status(&format!("Could not update the baseline: {err}")),
     }
+}
+
+/// Arm the two-step removal for the selected flagged package. NOTHING runs
+/// here: the status bar spells out what `[y]` would do and `[n]` disarms.
+/// Mirrors the Slint Security tab's arm/confirm pair.
+fn arm_security_removal(app: &mut App) {
+    if app.security_scanning || app.security_removing {
+        return;
+    }
+    let Some(report) = app.security_report.as_ref() else {
+        app.set_status("Nothing to remove: run a scan first.");
+        return;
+    };
+    let Some(package) = report.flagged.get(app.security_selected) else {
+        app.set_status("Nothing selected to remove.");
+        return;
+    };
+    if !package.is_removable() {
+        // A host persistence file is the user's own file. The remedy is to
+        // delete one line, not to delete the file, so Cleanton refuses.
+        app.set_status(
+            "This is your own startup file, not a package: open it and delete the flagged line. \
+             Cleanton will not remove it.",
+        );
+        return;
+    }
+    let display = package.display_name();
+    let verb = package.removal().verb();
+    let explanation = package.removal_explanation();
+    app.security_pending_remove = Some(app.security_selected);
+    app.set_status(&format!(
+        "Confirm: {verb} {display}? {explanation} Press y to proceed, n to cancel."
+    ));
+}
+
+/// Disarm an armed removal; nothing has run.
+fn cancel_security_removal(app: &mut App) {
+    app.security_pending_remove = None;
+    app.set_status("Removal cancelled. Nothing was changed.");
+}
+
+/// Run the armed removal: the package manager's own uninstaller when one owns
+/// the package (so the manager's metadata stays consistent), otherwise the
+/// executor's reviewed single-path Trash move. Same two paths the Slint app
+/// uses, and never a bare `std::fs::remove_*`.
+fn confirm_security_removal(app: &mut App, tx: &mpsc::Sender<TuiEvent>) {
+    let Some(armed) = app.security_pending_remove.take() else {
+        return;
+    };
+    if app.security_removing {
+        return;
+    }
+    // The armed row must still be the selected one; a moved cursor disarms.
+    if armed != app.security_selected {
+        app.set_status("Selection changed; removal cancelled. Press r on the row you want.");
+        return;
+    }
+    let Some(package) = app
+        .security_report
+        .as_ref()
+        .and_then(|report| report.flagged.get(armed))
+    else {
+        return;
+    };
+    if !package.is_removable() {
+        app.set_status("This package cannot be removed by Cleanton.");
+        return;
+    }
+    let removal = package.removal();
+    let name = package.display_name();
+    let package_name = package.name.clone();
+    let path = package.path.clone();
+
+    app.security_removing = true;
+    app.set_status(&format!("{} {name}...", removal.verb()));
+
+    let orchestrator = app.orchestrator.clone();
+    let tx = tx.clone();
+    tokio::spawn(async move {
+        let outcome: Result<String, String> = match removal {
+            SecurityRemoval::Npm | SecurityRemoval::Pip => {
+                let kind = if removal == SecurityRemoval::Npm {
+                    ManagerKind::Npm
+                } else {
+                    ManagerKind::Pip
+                };
+                let outcome =
+                    PackageManagers::uninstall(kind, std::slice::from_ref(&package_name)).await;
+                if outcome.ok {
+                    Ok(outcome.message)
+                } else {
+                    Err(outcome.message)
+                }
+            }
+            SecurityRemoval::Trash | SecurityRemoval::NotRemovable => {
+                let shown = path.display().to_string();
+                let path_for_task = path.clone();
+                tokio::task::spawn_blocking(move || {
+                    let (event_tx, _event_rx) = mpsc::channel(64);
+                    orchestrator.trash_suggestion(&path_for_task, &event_tx)
+                })
+                .await
+                .unwrap_or_else(|join_err| {
+                    Err(cleanton_common::CleantonError::Scan(format!(
+                        "trash task failed: {join_err}"
+                    )))
+                })
+                .map(|execution| {
+                    if execution
+                        .actions
+                        .iter()
+                        .any(|action| action.status == cleanton_common::ExecutionStatus::Failed)
+                    {
+                        Err("the item could not be moved to the Trash".to_owned())
+                    } else {
+                        Ok(format!("Moved {shown} to the Trash."))
+                    }
+                })
+                .unwrap_or_else(|err| Err(err.to_string()))
+            }
+        };
+        let _ = tx
+            .send(TuiEvent::SecurityRemoveFinished { name, outcome })
+            .await;
+    });
 }
 
 /// Mark every flagged package as reviewed/trusted (one baseline write).

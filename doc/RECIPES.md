@@ -212,6 +212,15 @@ regardless of how broad a recipe's glob is.
 | **Action** | Trash |
 | **Notes** | Downloaded dependencies and compilation cache for Deno. |
 
+### `node-bundler-caches`
+| Field | Value |
+|---|---|
+| **Name** | Node Bundler Caches |
+| **Safety** | `safe` |
+| **Match** | `**/node_modules/.cache/{babel-loader,swc,nx,storybook}/**` inside a directory containing `package.json` |
+| **Action** | Trash |
+| **Notes** | Each tool rebuilds its own subdirectory on the next run. |
+
 ---
 
 ## Category: `python`
@@ -502,6 +511,46 @@ not propose fake `docker-dummy-*` path actions.
 | **Min Age** | 60 days |
 | **Action** | Trash |
 
+### `browser-edge-http-cache`
+| Field | Value |
+|---|---|
+| **Name** | Edge HTTP Cache |
+| **Safety** | `cautious` |
+| **Match** | `~/Library/Application Support/Microsoft Edge/*/Cache/Cache_Data/**`, `~/.config/microsoft-edge/*/Cache/Cache_Data/**` |
+| **Min Age** | 7 days |
+| **Action** | Trash |
+| **Notes** | Profile databases (History, Bookmarks, Login Data) are siblings and never match. |
+
+### `browser-brave-http-cache`
+| Field | Value |
+|---|---|
+| **Name** | Brave HTTP Cache |
+| **Safety** | `cautious` |
+| **Match** | `~/Library/Application Support/BraveSoftware/Brave-Browser/*/Cache/Cache_Data/**`, `~/.config/BraveSoftware/Brave-Browser/*/Cache/Cache_Data/**` |
+| **Min Age** | 7 days |
+| **Action** | Trash |
+| **Notes** | Profile databases (History, Bookmarks, Login Data) are siblings and never match. |
+
+### `browser-vivaldi-http-cache`
+| Field | Value |
+|---|---|
+| **Name** | Vivaldi HTTP Cache |
+| **Safety** | `cautious` |
+| **Match** | `~/Library/Application Support/Vivaldi/*/Cache/Cache_Data/**`, `~/.config/vivaldi/*/Cache/Cache_Data/**` |
+| **Min Age** | 7 days |
+| **Action** | Trash |
+| **Notes** | Profile databases (History, Bookmarks, Login Data) are siblings and never match. |
+
+### `apps-discord-cache`
+| Field | Value |
+|---|---|
+| **Name** | Discord Cache |
+| **Safety** | `cautious` |
+| **Match** | `~/Library/Application Support/discord/Cache/**`, `~/.config/discord/Cache/**` |
+| **Min Age** | 14 days |
+| **Action** | Trash |
+| **Notes** | Only the Cache subtree; Local Storage, IndexedDB and settings hold your session and never match. |
+
 ---
 
 ## Category: `system`
@@ -561,6 +610,76 @@ not propose fake `docker-dummy-*` path actions.
 | **Min Age** | 14 days |
 | **Action** | Trash |
 | **Notes** | Crash reports may be needed for symbolication, bug reports, and app support. |
+
+### `system-thumbnail-cache`
+| Field | Value |
+|---|---|
+| **Name** | Thumbnail Caches |
+| **Safety** | `safe` |
+| **Match** | `~/.cache/thumbnails/**`, `~/Library/Caches/com.apple.iconservices/**` |
+| **Min Age** | 14 days |
+| **Action** | Trash |
+| **Notes** | Derived image stores the desktop regenerates on demand; originals are untouched. |
+
+### `system-security-scanner-caches`
+| Field | Value |
+|---|---|
+| **Name** | Security Scanner Caches |
+| **Safety** | `safe` |
+| **Match** | `~/.cache/{trivy,grype,snyk}/**`, `~/Library/Caches/{trivy,grype}/**` |
+| **Min Age** | 14 days |
+| **Action** | Trash |
+| **Notes** | Local copies of the vulnerability feeds; every scanner re-downloads them. |
+
+### `system-package-manager-caches`
+| Field | Value |
+|---|---|
+| **Name** | System Package Manager Caches |
+| **Safety** | `safe` |
+| **Match** | `~/.cache/{snapcraft,flatpak,packagekit}/**` |
+| **Min Age** | 30 days |
+| **Action** | Trash |
+| **Notes** | `/var/cache/apt` is deliberately not matched because only root may clear it. |
+
+### `helm-kubernetes-caches`
+| Field | Value |
+|---|---|
+| **Name** | Helm Caches |
+| **Safety** | `safe` |
+| **Match** | `~/.cache/helm/**`, `~/Library/Caches/helm/**` |
+| **Min Age** | 30 days |
+| **Action** | Trash |
+| **Notes** | Cached chart archives and repository indexes; `~/.kube` is never touched. |
+
+### `firebase-emulator-cache`
+| Field | Value |
+|---|---|
+| **Name** | Firebase Emulator Caches |
+| **Safety** | `cautious` |
+| **Match** | `~/.cache/firebase/emulators/**`, `~/Library/Caches/firebase/emulators/**` |
+| **Min Age** | 30 days |
+| **Action** | Trash |
+| **Notes** | Downloaded emulator jars only; credentials and exported data are siblings. |
+
+### `nim-cache`
+| Field | Value |
+|---|---|
+| **Name** | Nim Cache |
+| **Safety** | `safe` |
+| **Match** | `~/.cache/nim/**`, `~/Library/Caches/nim/**` |
+| **Min Age** | 30 days |
+| **Action** | Trash |
+| **Notes** | Generated C sources the compiler rewrites on every build. |
+
+### `ocaml-dune-cache`
+| Field | Value |
+|---|---|
+| **Name** | Dune Cache |
+| **Safety** | `safe` |
+| **Match** | `~/.cache/dune/**`, `~/Library/Caches/dune/**` |
+| **Min Age** | 30 days |
+| **Action** | Trash |
+| **Notes** | Dune's shared build artefacts. |
 
 ---
 
@@ -668,6 +787,26 @@ not shrink until the runtime compacts it. Full details and per-runtime paths: [P
 
 ---
 
+### Recently added (maintenance pass)
+
+A set of caches added after the original registry, each scoped to a tool-owned
+subtree so a generic dotfolder (`~/.sbt/global.sbt`, `~/.conan/profiles`, …)
+is never matched.
+
+| Recipe | Safety | Match | Age/Size | Notes |
+|---|---|---|---|---|
+| `c-cpp-ccache` | `safe` | `~/Library/Caches/ccache/**` or `~/.cache/ccache/**` | min size 50 MB, min age 30d | ccache object-file cache; rebuilt on the next compile. |
+| `c-cpp-conan-cache` | `cautious` | `~/.conan/data/**` (Conan 1) or `~/.conan2/p/**` (Conan 2) | min size 50 MB, min age 30d | Downloaded packages; re-download on demand. Scopes away profiles/settings. |
+| `go-module-cache` | `cautious` | `~/go/pkg/mod/**` excluding `~/go/pkg/mod/cache/**` | min age 30d | Extracted modules; the download cache is `go-mod-cache`. |
+| `rust-cargo-registry-index` | `safe` | `~/.cargo/registry/index/**` | min age 30d | Sparse-index metadata; Cargo re-fetches on demand. |
+| `jvm-sbt-cache` | `cautious` | `~/.sbt/boot/**` | min age 30d | sbt launcher boot jars; re-resolved on demand. Never `~/.sbt/global.sbt`/`plugins`. |
+| `ai-opencode-cache` | `cautious` | `~/.cache/opencode/**` | min age 14d | OpenCode model/log cache; regenerable. |
+| `apps-slack-cache` | `cautious` | `~/Library/Caches/com.tinyspeck.slackmacgap/**` | min age 14d | Slack desktop HTTP/media cache; re-fetched on demand. |
+| `browser-safari-cache` | `cautious` | `~/Library/Caches/com.apple.Safari/**` | min age 7d | Safari WebKit content cache; re-fetched from the origin. |
+
+> Docker recipes remain API-driven (`bollard`) and are intentionally not
+> filesystem globs; the `docker-*` TOML entries are disabled placeholders.
+
 ## Recipe Priority Order
 
 When multiple recipes match the same path, priority determines which recipe "owns" it:
@@ -693,3 +832,61 @@ Every built-in recipe must satisfy these checks before it can ship:
 6. It documents what command regenerates the data when claiming `safe`.
 7. It has a minimum age unless the target is provably pure build output.
 8. It treats cloud-provider, File Provider, and external-volume paths as opt-in.
+
+### `python-ruff-cache`
+| Field | Value |
+|---|---|
+| **Name** | Ruff Cache |
+| **Safety** | `safe` |
+| **Match** | `~/.cache/ruff/**` or a project `.ruff_cache` beside a Python project marker |
+| **Min Age** | 14 days |
+| **Action** | Trash |
+| **Notes** | Rebuilt automatically on the next ruff run. |
+
+### `python-precommit-cache`
+| Field | Value |
+|---|---|
+| **Name** | pre-commit Cache |
+| **Safety** | `safe` |
+| **Match** | `~/.cache/pre-commit/**` |
+| **Min Age** | 30 days |
+| **Action** | Trash |
+| **Notes** | Hook environments are re-cloned and rebuilt on the next run. |
+
+### `node-corepack-cache`
+| Field | Value |
+|---|---|
+| **Name** | Corepack Cache |
+| **Safety** | `safe` |
+| **Match** | `~/.cache/node/corepack/**` or `~/Library/Caches/node/corepack/**` |
+| **Min Age** | 30 days |
+| **Action** | Trash |
+| **Notes** | Downloaded pnpm/yarn shims are re-downloaded on demand. |
+
+### `dotnet-obj-dirs`, `dotnet-http-cache`
+| Field | Value |
+|---|---|
+| **Safety** | `safe` |
+| **Match** | `obj/` containing `project.assets.json`; NuGet HTTP/v3 feed caches |
+| **Action** | Trash |
+
+### `jvm-maven-target-dirs`, `jvm-project-gradle-dirs`, `jvm-scala-build-dirs`, `clojure-build-caches`
+| Field | Value |
+|---|---|
+| **Safety** | `safe` |
+| **Match** | Maven `target/`, Gradle `.gradle/`, Scala `target`/`.bloop`/`.scala-build`, Clojure `.cpcache`/Leiningen `target` |
+| **Action** | Trash |
+
+### `node-modern-framework-dirs`, `node-nx-cache-dirs`
+| Field | Value |
+|---|---|
+| **Safety** | `safe` |
+| **Match** | `.svelte-kit`, `.nuxt`, `.output`, `.astro`, `.angular`, `.docusaurus`, `.expo`, `.wrangler`, `.nx/cache`, `.nx/workspace-data` |
+| **Action** | Trash |
+
+### `c-cpp-build-variants`, `c-cpp-vcpkg-cache`, `dart-tool-build-dirs`, `haskell-cabal-build-dirs`, `ocaml-dune-build-dirs`, `android-build-caches`, `godot-import-cache`, `php-tool-caches`, `ide-vscode-extension-vsixs`, `ide-editor-caches`
+| Field | Value |
+|---|---|
+| **Safety** | `safe` / `cautious` |
+| **Match** | CLion `cmake-build-*` & Meson build dirs, vcpkg archives, `.dart_tool`, Cabal `dist-newstyle`, Dune `_build`, Android `.cxx`, Godot `.godot`, PHPUnit/PHPStan/Psalm caches, VSIX installers, Neovim/JetBrains/Fleet/Eclipse/Sublime caches |
+| **Action** | Trash |

@@ -7,7 +7,7 @@ use std::{
 
 use cleanton_common::{
     CleantonError, FileEntry, FileKind, ProtectedPaths, Result, ScanError, ScanResult, Severity,
-    paths::{expand_tilde, is_same_or_descendant},
+    paths::expand_tilde,
 };
 use glob::Pattern;
 use serde::{Deserialize, Serialize};
@@ -188,13 +188,83 @@ fn child_ignored(
     parent_ignored
 }
 
+#[derive(Clone)]
+struct CompiledExclude {
+    pattern: Pattern,
+    basename_only: bool,
+}
+
 struct ReadDirContext {
     root: PathBuf,
-    options: ScanOptions,
     protected: ProtectedPaths,
-    excluded_roots: Vec<PathBuf>,
-    excludes: Vec<Pattern>,
+    protected_scan_root: bool,
+    user_data_roots: ProtectedPaths,
+    active_excluded_roots: ProtectedPaths,
+    active_external_roots: ProtectedPaths,
+    excludes: Vec<CompiledExclude>,
     respect_gitignore: bool,
+}
+
+impl ReadDirContext {
+    fn new(
+        root: PathBuf,
+        options: &ScanOptions,
+        protected: ProtectedPaths,
+        excluded_roots: &[PathBuf],
+        excludes: &[CompiledExclude],
+    ) -> Self {
+        let protected_scan_root = protected.is_protected_fast(&root);
+        let user_data_roots = ProtectedPaths::configured_only(home_user_data_roots());
+
+        let active_excluded = excluded_roots
+            .iter()
+            .filter(|excluded| {
+                !ProtectedPaths::configured_only([(*excluded).clone()]).is_protected_fast(&root)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let active_excluded_roots = ProtectedPaths::configured_only(active_excluded);
+
+        let active_external = if options.exclude_external_volumes {
+            external_volume_roots()
+                .into_iter()
+                .filter(|ext| {
+                    !ProtectedPaths::configured_only([ext.clone()]).is_protected_fast(&root)
+                })
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        let active_external_roots = ProtectedPaths::configured_only(active_external);
+
+        Self {
+            root,
+            protected,
+            protected_scan_root,
+            user_data_roots,
+            active_excluded_roots,
+            active_external_roots,
+            excludes: excludes.to_vec(),
+            respect_gitignore: options.respect_gitignore,
+        }
+    }
+
+    #[inline]
+    fn should_prune_dir(&self, path: &Path) -> bool {
+        if path == self.root {
+            return false;
+        }
+        if !self.protected_scan_root
+            && self.protected.is_protected_fast(path)
+            && !self.user_data_roots.is_protected_fast(path)
+        {
+            return true;
+        }
+        if self.active_excluded_roots.is_protected_fast(path) {
+            return true;
+        }
+        self.active_external_roots.is_protected_fast(path)
+    }
 }
 
 fn scan_blocking(
@@ -232,7 +302,7 @@ fn scan_blocking(
 fn scan_root(
     root: &Path,
     options: &ScanOptions,
-    excludes: &[Pattern],
+    excludes: &[CompiledExclude],
     progress_tx: &mpsc::Sender<ScanProgress>,
     result: &mut ScanResult,
     cancel: Option<&std::sync::atomic::AtomicBool>,
@@ -251,14 +321,8 @@ fn scan_root(
     let protected = ProtectedPaths::new(options.protected_paths.clone());
     let excluded_roots = excluded_roots(options);
     let respect_gitignore = options.respect_gitignore;
-    let read_dir_context = ReadDirContext {
-        root: root.clone(),
-        options: options.clone(),
-        protected: protected.clone(),
-        excluded_roots: excluded_roots.clone(),
-        excludes: excludes.to_vec(),
-        respect_gitignore,
-    };
+    let read_dir_context =
+        ReadDirContext::new(root.clone(), options, protected, &excluded_roots, excludes);
 
     let walker = jwalk::WalkDirGeneric::<WalkClientState>::new(&root)
         .max_depth(options.max_depth)
@@ -287,14 +351,22 @@ fn scan_root(
     }
 }
 
+/// Worker-pool sizing.
+///
+/// `parallel_threads == 0` means "automatic". Automatic is deliberately NOT
+/// "one worker per core": a scanning tool that saturates every core makes the
+/// machine unpleasant to use while it runs, and every in-flight worker also
+/// holds its own read-dir batch, so the memory high-water mark grows with the
+/// pool size. Half the cores, clamped to 2..=8, keeps a full home scan fast
+/// while leaving headroom for the rest of the machine. An explicit
+/// `parallel_threads` value from the config is honoured exactly.
 fn scan_parallelism(options: &ScanOptions) -> jwalk::Parallelism {
     if options.parallel_threads == 0 {
-        jwalk::Parallelism::RayonDefaultPool {
-            busy_timeout: Duration::from_secs(1),
-        }
-    } else {
-        jwalk::Parallelism::RayonNewPool(options.parallel_threads)
+        let cores = std::thread::available_parallelism().map_or(4, std::num::NonZeroUsize::get);
+        let workers = (cores / 2).clamp(2, 8).min(cores.max(1));
+        return jwalk::Parallelism::RayonNewPool(workers);
     }
+    jwalk::Parallelism::RayonNewPool(options.parallel_threads)
 }
 
 fn process_scan_dir(
@@ -304,46 +376,72 @@ fn process_scan_dir(
     children: &mut Vec<WalkItem>,
     context: &ReadDirContext,
 ) {
-    if context.respect_gitignore
+    // Never descend into `.git` internals: object stores are huge, no recipe
+    // may ever target them (deleting inside a repository would corrupt it),
+    // and project detection only needs the `.git` entry itself — which the
+    // parent directory's pass has already yielded by the time we get here.
+    if path.file_name().and_then(|name| name.to_str()) == Some(".git") {
+        children.clear();
+        return;
+    }
+
+    // Check already-listed children for `.gitignore` in memory before touching
+    // disk, eliminating hundreds of thousands of `stat(".gitignore")` syscalls.
+    let has_local_gitignore = context.respect_gitignore
         && depth.unwrap_or(0) > 0
-        && let Some(gi) = load_gitignore(path)
-    {
+        && children
+            .iter()
+            .flatten()
+            .any(|child| child.file_name == ".gitignore");
+    if has_local_gitignore && let Some(gi) = load_gitignore(path) {
         read_dir_state.push(gi);
     }
 
-    // Resolve the directory's own ignored state once (the O(depth) parent walk),
-    // then reuse it for every child via the cheap single-level check. Without
-    // this, every entry re-walked all of its ancestors through the regex engine.
-    let parent_ignored = context.respect_gitignore && dir_ignored(read_dir_state, path);
-
-    for child in children.iter_mut().flatten() {
-        let child_path = child.path();
-        let is_dir = child.file_type.is_dir();
-        child.client_state.ignored = context.respect_gitignore
-            && child_ignored(read_dir_state, parent_ignored, &child_path, is_dir);
+    // Prune excluded/protected subtrees FIRST so we never allocate paths,
+    // evaluate gitignore regexes, or stat children we are about to drop.
+    let has_path_excludes = context.excludes.iter().any(|item| !item.basename_only);
+    if !context.excludes.is_empty() || children.iter().flatten().any(|c| c.file_type.is_dir()) {
+        children.retain(|child_result| match child_result {
+            Ok(child) => {
+                if matches_basename_exclude(&child.file_name, &context.excludes) {
+                    return false;
+                }
+                let is_dir = child.file_type.is_dir();
+                if !is_dir && !has_path_excludes {
+                    return true;
+                }
+                let child_path = child.path();
+                if is_dir && context.should_prune_dir(&child_path) {
+                    return false;
+                }
+                !has_path_excludes || !matches_path_exclude(&child_path, &context.excludes)
+            }
+            Err(_) => true,
+        });
     }
 
-    children.retain(|child_result| match child_result {
-        Ok(child) => {
-            let child_path = child.path();
-            // Pruning (protected roots + cloud/volume/excluded roots) only matters
-            // for directories — descending is what we avoid. File leaves are just
-            // recorded, and the matcher/executor re-check protection before any
-            // cleanup. Restricting the expensive path normalization to directories
-            // (a small fraction of entries) keeps large scans fast.
-            let prune = child.file_type.is_dir()
-                && should_skip_path(
-                    &child_path,
-                    &context.root,
-                    &context.options,
-                    &context.protected,
-                    &context.excluded_roots,
-                );
-            let skip = prune || matches_exclude_pattern(&child_path, &context.excludes);
-            !skip
+    // Resolve the directory's own ignored state once, then short-circuit
+    // per-child regex matching whenever either:
+    // - the stack is empty (nothing is ignored), or
+    // - the parent directory is already ignored and no `.gitignore` on the
+    //   stack contains whitelist (`!pattern`) rules (e.g. inside `node_modules`
+    //   or `target`, every descendant is guaranteed ignored without regex runs).
+    if context.respect_gitignore && !read_dir_state.is_empty() {
+        let parent_ignored = dir_ignored(read_dir_state, path);
+        let any_whitelists = read_dir_state.iter().any(|gi| gi.num_whitelists() > 0);
+        if parent_ignored && !any_whitelists {
+            for child in children.iter_mut().flatten() {
+                child.client_state.ignored = true;
+            }
+        } else {
+            for child in children.iter_mut().flatten() {
+                let child_path = child.path();
+                let is_dir = child.file_type.is_dir();
+                child.client_state.ignored =
+                    child_ignored(read_dir_state, parent_ignored, &child_path, is_dir);
+            }
         }
-        Err(_) => true,
-    });
+    }
 
     // Read metadata here, on the worker thread, for the entries that survived
     // pruning — keeping every `stat(2)` off the single-threaded consumer loop.
@@ -454,26 +552,40 @@ fn push_scan_error_message(
     });
 }
 
-fn compile_excludes(patterns: &[String]) -> Result<Vec<Pattern>> {
+fn compile_excludes(patterns: &[String]) -> Result<Vec<CompiledExclude>> {
     patterns
         .iter()
         .map(|pattern| {
-            Pattern::new(pattern).map_err(|err| {
+            let compiled = Pattern::new(pattern).map_err(|err| {
                 CleantonError::Config(format!("invalid exclude pattern {pattern:?}: {err}"))
+            })?;
+            let basename_only = !pattern.contains('/') && !pattern.contains('\\');
+            Ok(CompiledExclude {
+                pattern: compiled,
+                basename_only,
             })
         })
         .collect()
 }
 
-fn matches_exclude_pattern(path: &Path, patterns: &[Pattern]) -> bool {
-    patterns.iter().any(|pattern| {
-        pattern.matches_path(path)
-            || path
-                .file_name()
-                .is_some_and(|name| pattern.matches(&name.to_string_lossy()))
-    })
+fn matches_basename_exclude(name: &std::ffi::OsStr, excludes: &[CompiledExclude]) -> bool {
+    if excludes.is_empty() {
+        return false;
+    }
+    let lossy = name.to_string_lossy();
+    excludes
+        .iter()
+        .any(|item| item.pattern.matches(lossy.as_ref()))
 }
 
+fn matches_path_exclude(path: &Path, excludes: &[CompiledExclude]) -> bool {
+    excludes
+        .iter()
+        .filter(|item| !item.basename_only)
+        .any(|item| item.pattern.matches_path(path))
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
 fn should_skip_path(
     path: &Path,
     scan_root: &Path,
@@ -485,15 +597,6 @@ fn should_skip_path(
         return false;
     }
 
-    // Bulk hot path: `is_protected_fast` does no filesystem syscalls (entries are
-    // already real walked paths), so pruning stays cheap across huge trees.
-    //
-    // User-data content roots (~/Desktop, ~/Documents, ~/Downloads, ~/Pictures,
-    // ~/Music, ~/Movies) are protected but are the one exception we still
-    // *descend* into: the read-only Suggestions pass (duplicates, large files,
-    // screenshots) needs their contents. Every destructive path (recipe matcher
-    // safety floor + executor) independently re-checks protection, so inventory
-    // here never widens what can be removed.
     if protected.is_protected_fast(path)
         && !protected.is_protected_fast(scan_root)
         && !cleanton_common::is_user_data_content_path(path)
@@ -501,15 +604,51 @@ fn should_skip_path(
         return true;
     }
 
-    if excluded_roots.iter().any(|excluded| {
-        is_same_or_descendant(path, excluded) && !is_same_or_descendant(scan_root, excluded)
-    }) {
-        return true;
+    if !excluded_roots.is_empty() {
+        let excluded_set = ProtectedPaths::configured_only(
+            excluded_roots
+                .iter()
+                .filter(|excluded| {
+                    !ProtectedPaths::configured_only([(*excluded).clone()])
+                        .is_protected_fast(scan_root)
+                })
+                .cloned(),
+        );
+        if excluded_set.is_protected_fast(path) {
+            return true;
+        }
     }
 
-    options.exclude_external_volumes
-        && is_same_or_descendant(path, Path::new("/Volumes"))
-        && !is_same_or_descendant(scan_root, Path::new("/Volumes"))
+    if options.exclude_external_volumes {
+        let ext_set =
+            ProtectedPaths::configured_only(external_volume_roots().into_iter().filter(|ext| {
+                !ProtectedPaths::configured_only([ext.clone()]).is_protected_fast(scan_root)
+            }));
+        if ext_set.is_protected_fast(path) {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn home_user_data_roots() -> Vec<PathBuf> {
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+        return Vec::new();
+    };
+    cleanton_common::USER_DATA_CONTENT_ROOTS
+        .iter()
+        .map(|rel| home.join(rel))
+        .collect()
+}
+
+fn external_volume_roots() -> Vec<PathBuf> {
+    vec![
+        PathBuf::from("/Volumes"),
+        PathBuf::from("/media"),
+        PathBuf::from("/mnt"),
+        PathBuf::from("/run/media"),
+    ]
 }
 
 fn excluded_roots(options: &ScanOptions) -> Vec<PathBuf> {
@@ -531,22 +670,19 @@ fn excluded_roots(options: &ScanOptions) -> Vec<PathBuf> {
     .collect()
 }
 
+/// Roll per-file sizes up into their ancestor directories.
+///
+/// Both phases are O(entries): every file is folded into its DIRECT parent once,
+/// then the per-directory totals are propagated bottom-up (deepest directory
+/// first) in a single ordered pass.
 fn aggregate_directory_sizes(result: &mut ScanResult) {
-    let dir_paths = result
-        .entries
-        .iter()
-        .filter(|entry| entry.kind == FileKind::Directory)
-        .map(|entry| entry.path.clone())
-        .collect::<HashSet<_>>();
+    let approx_files = usize::try_from(result.total_files).unwrap_or(0);
+    let approx_dirs = usize::try_from(result.total_dirs).unwrap_or(0);
+    let mut inode_seen = HashSet::<(u64, u64)>::with_capacity(approx_files / 2);
+    let mut total_logical = 0_u64;
+    let mut total_allocated = 0_u64;
 
-    let mut totals = dir_paths
-        .iter()
-        .map(|path| (path.clone(), (0_u64, 0_u64)))
-        .collect::<HashMap<_, _>>();
-
-    let mut inode_seen = HashSet::<(u64, u64)>::new();
-
-    // 1. De-duplicate entry sizes for hardlinked inodes first
+    // 1. De-duplicate entry sizes for hardlinked inodes first and accumulate scan totals
     for entry in &mut result.entries {
         if entry.kind != FileKind::File {
             continue;
@@ -557,47 +693,100 @@ fn aggregate_directory_sizes(result: &mut ScanResult) {
             entry.logical_bytes = 0;
             entry.allocated_bytes = 0;
         }
+        total_logical = total_logical.saturating_add(entry.logical_bytes);
+        total_allocated = total_allocated.saturating_add(entry.allocated_bytes);
     }
 
-    // 2. Accumulate sizes into parent directories
-    for entry in &result.entries {
-        if entry.kind != FileKind::File {
-            continue;
+    // 2. Per-directory subtree totals. Borrowed path keys keep this allocation
+    //    free beyond the accumulator vectors themselves.
+    let (dir_entry_indices, totals) = {
+        let entries = &result.entries;
+        let mut slot_of: HashMap<&Path, usize> = HashMap::with_capacity(approx_dirs);
+        let mut dir_paths: Vec<&Path> = Vec::with_capacity(approx_dirs);
+        let mut dir_depths: Vec<usize> = Vec::with_capacity(approx_dirs);
+        let mut dir_entry_indices: Vec<usize> = Vec::with_capacity(approx_dirs);
+        for (index, entry) in entries.iter().enumerate() {
+            if entry.kind != FileKind::Directory || slot_of.contains_key(entry.path.as_path()) {
+                continue;
+            }
+            slot_of.insert(entry.path.as_path(), dir_paths.len());
+            dir_paths.push(entry.path.as_path());
+            dir_depths.push(entry.depth);
+            dir_entry_indices.push(index);
         }
 
-        for ancestor in ancestors(&entry.path) {
-            if let Some((logical, allocated)) = totals.get_mut(ancestor) {
-                *logical = logical.saturating_add(entry.logical_bytes);
-                *allocated = allocated.saturating_add(entry.allocated_bytes);
+        let mut totals = vec![(0_u64, 0_u64); dir_paths.len()];
+
+        // Direct children only: one lookup per file instead of one per ancestor.
+        for entry in entries {
+            if entry.kind != FileKind::File {
+                continue;
+            }
+            let Some(parent) = entry.path.parent() else {
+                continue;
+            };
+            let Some(slot) = slot_of.get(parent).copied() else {
+                continue;
+            };
+            if let Some(total) = totals.get_mut(slot) {
+                total.0 = total.0.saturating_add(entry.logical_bytes);
+                total.1 = total.1.saturating_add(entry.allocated_bytes);
             }
         }
-    }
+
+        // Bottom-up: sort by recorded depth (falling back to component count if equal)
+        // so child directory subtree totals land in their parent before the parent folds up.
+        let mut order: Vec<usize> = (0..dir_paths.len()).collect();
+        order.sort_unstable_by_key(|slot| {
+            let depth = dir_depths.get(*slot).copied().unwrap_or(0);
+            let comp = if depth == 0 {
+                dir_paths
+                    .get(*slot)
+                    .map_or(0, |path| path.components().count())
+            } else {
+                depth
+            };
+            std::cmp::Reverse(comp)
+        });
+        for slot in order {
+            let Some(path) = dir_paths.get(slot) else {
+                continue;
+            };
+            let Some(parent) = path.parent() else {
+                continue;
+            };
+            let Some(parent_slot) = slot_of.get(parent).copied() else {
+                continue;
+            };
+            if parent_slot == slot {
+                continue;
+            }
+            let Some((logical, allocated)) = totals.get(slot).copied() else {
+                continue;
+            };
+            if let Some(total) = totals.get_mut(parent_slot) {
+                total.0 = total.0.saturating_add(logical);
+                total.1 = total.1.saturating_add(allocated);
+            }
+        }
+
+        (dir_entry_indices, totals)
+    };
 
     // 3. Update directory entries with their subtree sizes
-    for entry in &mut result.entries {
-        if let Some((logical, allocated)) = totals.get(&entry.path).copied() {
+    for (slot, index) in dir_entry_indices.iter().enumerate() {
+        let Some(entry) = result.entries.get_mut(*index) else {
+            continue;
+        };
+        if let Some((logical, allocated)) = totals.get(slot).copied() {
             entry.logical_bytes = logical;
             entry.allocated_bytes = allocated;
         }
     }
 
-    // 4. Calculate total scan results sizes
-    result.logical_bytes = result
-        .entries
-        .iter()
-        .filter(|entry| entry.kind == FileKind::File)
-        .map(|entry| entry.logical_bytes)
-        .sum();
-    result.allocated_bytes = result
-        .entries
-        .iter()
-        .filter(|entry| entry.kind == FileKind::File)
-        .map(|entry| entry.allocated_bytes)
-        .sum();
-}
-
-fn ancestors(path: &Path) -> impl Iterator<Item = &Path> {
-    path.ancestors().skip(1)
+    // 4. Commit total scan results sizes
+    result.logical_bytes = total_logical;
+    result.allocated_bytes = total_allocated;
 }
 
 #[cfg(test)]
@@ -980,6 +1169,54 @@ mod tests {
         assert_eq!(result.errors.len(), 1);
         assert_eq!(result.errors[0].path, unreadable);
         assert_eq!(result.errors[0].message, "permission denied");
+    }
+
+    #[tokio::test]
+    async fn git_internals_are_not_walked_but_project_is_detected() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let git = temp.path().join(".git");
+        fs::create_dir_all(git.join("objects/pack")).expect("create .git");
+        fs::write(git.join("objects/pack/blob.bin"), [1_u8; 8192]).expect("write blob");
+        fs::write(temp.path().join("Cargo.toml"), "[package]\nname=\"test\"")
+            .expect("write cargo.toml");
+
+        let (progress_tx, _progress_rx) = mpsc::channel(1);
+        let result = scan(
+            ScanOptions {
+                roots: vec![temp.path().to_path_buf()],
+                max_depth: 10,
+                ..ScanOptions::default()
+            },
+            progress_tx,
+        )
+        .await
+        .expect("scan");
+
+        // The `.git` directory entry itself may be yielded, but nothing
+        // beneath it is ever inventoried.
+        assert!(
+            result
+                .entries
+                .iter()
+                .all(|entry| entry.path == git || !entry.path.starts_with(&git)),
+            ".git internals must not be walked: {:?}",
+            result
+                .entries
+                .iter()
+                .filter(|entry| entry.path != git && entry.path.starts_with(&git))
+                .map(|entry| &entry.path)
+                .collect::<Vec<_>>()
+        );
+        // Marker-file detection still works: the Rust project at the root
+        // is found (the `.git` entry adds a second, Git-ecosystem root for
+        // the same path, as before this change).
+        assert!(
+            result.project_roots.iter().any(|project| {
+                project.path == temp.path() && project.ecosystem == cleanton_common::Ecosystem::Rust
+            }),
+            "expected the Rust project root, got {:?}",
+            result.project_roots
+        );
     }
 
     #[tokio::test]

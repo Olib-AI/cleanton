@@ -2,7 +2,8 @@ use crate::animation::{AnimatedValue, EasingFunction};
 use crate::capacity::{self, CapacityView};
 use crate::theme::{DARK_THEME, Theme};
 use crate::widgets::FileTreeState;
-use cleanton_common::{CleantonConfig, CleanupPlan, ExecutionResult, ScanResult};
+use cleanton_common::{CleantonConfig, CleanupPlan, ExecutionResult};
+use cleanton_engine::ScanSummary;
 use cleanton_engine::{
     AnnotatedAction, DockerAnalysis, InstalledApp, Orchestrator, SnapshotAnalysis,
     SnapshotConfirmState, Suggestions, UninstallPlan,
@@ -79,7 +80,7 @@ pub struct App {
     // Scanner state (scan is launched from the Dashboard; there is no separate
     // Scanner screen, matching the Slint app).
     pub scan_progress: Option<(u64, u64, u64)>, // (files, dirs, bytes)
-    pub scan_result: Option<ScanResult>,
+    pub scan_result: Option<ScanSummary>,
 
     // Review-only Results analysis surfaced alongside the cleanup plan: Docker
     // reclaimable accounting (independent of the scan root) and large-item /
@@ -119,8 +120,9 @@ pub struct App {
     pub file_tree_state: Option<FileTreeState>,
     pub pending_cleanup_confirmation: Option<Vec<usize>>,
 
-    // Disk capacity + real usage history (no mock data)
+    // Disk capacity + real usage history + background helper resource snapshot
     pub capacity_view: CapacityView,
+    pub resource_status: cleanton_engine::ResourceStatus,
     pub pending_empty_trash_confirmation: bool,
 
     // Services state
@@ -195,6 +197,13 @@ pub struct App {
     pub security_progress: (usize, usize),
     /// Cursor into `security_report.flagged`.
     pub security_selected: usize,
+    /// Two-step removal armed for one flagged row: `[r]` arms, `[y]` runs,
+    /// `[n]` cancels. Holds the armed row's index so moving the cursor disarms.
+    /// Mirrors the Slint Security tab's arm/confirm pair; the policy itself
+    /// lives in `PackageReport::removal()` so the two UIs cannot disagree.
+    pub security_pending_remove: Option<usize>,
+    /// A removal is in flight; the row controls are disabled until it returns.
+    pub security_removing: bool,
     /// Monotonic scan generation; stale background results are discarded.
     pub security_scan_id: u64,
     /// Cooperative cancellation for the in-flight security scan.
@@ -257,6 +266,7 @@ impl App {
             file_tree_state: None,
             pending_cleanup_confirmation: None,
             capacity_view: CapacityView::default(),
+            resource_status: cleanton_engine::ResourceStatus::default(),
             pending_empty_trash_confirmation: false,
             services: Vec::new(),
             selected_service_idx: 0,
@@ -290,6 +300,8 @@ impl App {
             security_scanning: false,
             security_progress: (0, 0),
             security_selected: 0,
+            security_pending_remove: None,
+            security_removing: false,
             security_scan_id: 0,
             security_cancel: Arc::new(AtomicBool::new(false)),
             execution_progress: 0.0,
@@ -314,7 +326,23 @@ impl App {
     pub fn refresh_capacity(&mut self) {
         let root = cleanton_common::paths::expand_tilde(&self.config.general.default_root);
         self.capacity_view = capacity::read(&root);
+        self.resource_status = cleanton_engine::snapshot_resource_status(
+            self.config.background.disk_pressure_percent,
+            self.config.background.memory_pressure_percent,
+        );
         self.rebuild_snapshot_review();
+    }
+
+    /// Reclaims unused Cleanton allocator pages and refreshes live memory status.
+    pub fn reclaim_memory(&mut self) {
+        let _ = cleanton_scanner::reclaim_process_memory();
+        self.resource_status = cleanton_engine::snapshot_resource_status(
+            self.config.background.disk_pressure_percent,
+            self.config.background.memory_pressure_percent,
+        );
+        self.set_status(
+            "Memory cleanup: reclaimed unused allocator pages. Review idle background services below.",
+        );
     }
 
     /// Derives the Results-screen snapshot review model from the freshly read

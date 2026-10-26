@@ -1,0 +1,58 @@
+[recipe]
+id = "c-cpp-build-variants"
+name = "CLion, CMake & Meson Build Directories"
+# CLion defaults to cmake-build-debug / cmake-build-release; Meson creates
+# builddir or _build with meson-private inside. Every match requires an
+# in-directory build-system proof file so source directories never match.
+description = "CLion cmake-build-* variants and Meson build directories proven by build markers"
+category = "c-cpp"
+safety_level = "cautious"
+enabled = true
+priority = 52
+
+[match]
+directory_name = "cmake-build-debug"
+self_must_contain = ["CMakeCache.txt"]
+min_age_days = 14
+
+[[match.any_of]]
+directory_name = "cmake-build-release"
+self_must_contain = ["CMakeCache.txt"]
+min_age_days = 14
+
+[[match.any_of]]
+directory_name = "cmake-build-relwithdebinfo"
+self_must_contain = ["CMakeCache.txt"]
+min_age_days = 14
+
+[[match.any_of]]
+directory_name = "cmake-build-minsizerel"
+self_must_contain = ["CMakeCache.txt"]
+min_age_days = 14
+
+[[match.any_of]]
+directory_name = "_build"
+self_must_contain = ["CMakeCache.txt"]
+min_age_days = 14
+
+[[match.any_of]]
+directory_name = "builddir"
+self_must_contain = ["meson-private"]
+min_age_days = 14
+
+[[match.any_of]]
+directory_name = "build"
+self_must_contain = ["meson-private"]
+min_age_days = 14
+
+[action]
+type = "trash"
+prompt = "Move {size} of CMake/CLion/Meson build directories to Trash?"
+
+[test]
+should_match = [
+    "projects/engine/cmake-build-debug",
+    "projects/engine/cmake-build-release",
+    "projects/gtk-app/builddir",
+]
+should_not_match = ["projects/engine/src", "loose/cmake-build-debug", "loose/builddir"]

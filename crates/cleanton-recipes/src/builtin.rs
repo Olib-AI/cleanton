@@ -20,12 +20,28 @@ pub(crate) const BUILTIN_RECIPES: &[(&str, &str)] = &[
         include_str!("../../../recipes/rust-cargo-registry-src.toml"),
     ),
     (
+        "recipes/rust-cargo-registry-index.toml",
+        include_str!("../../../recipes/rust-cargo-registry-index.toml"),
+    ),
+    (
         "recipes/rust-incremental-cache.toml",
         include_str!("../../../recipes/rust-incremental-cache.toml"),
     ),
     (
         "recipes/rust-sccache.toml",
         include_str!("../../../recipes/rust-sccache.toml"),
+    ),
+    (
+        "recipes/python-ruff-cache.toml",
+        include_str!("../../../recipes/python-ruff-cache.toml"),
+    ),
+    (
+        "recipes/python-precommit-cache.toml",
+        include_str!("../../../recipes/python-precommit-cache.toml"),
+    ),
+    (
+        "recipes/node-corepack-cache.toml",
+        include_str!("../../../recipes/node-corepack-cache.toml"),
     ),
     (
         "recipes/rust-rustup-toolchains.toml",
@@ -224,6 +240,10 @@ pub(crate) const BUILTIN_RECIPES: &[(&str, &str)] = &[
         include_str!("../../../recipes/ai-claude-code-worktrees.toml"),
     ),
     (
+        "recipes/ai-opencode-cache.toml",
+        include_str!("../../../recipes/ai-opencode-cache.toml"),
+    ),
+    (
         "recipes/ai-cursor-cache.toml",
         include_str!("../../../recipes/ai-cursor-cache.toml"),
     ),
@@ -280,6 +300,10 @@ pub(crate) const BUILTIN_RECIPES: &[(&str, &str)] = &[
         include_str!("../../../recipes/go-mod-cache.toml"),
     ),
     (
+        "recipes/go-module-cache.toml",
+        include_str!("../../../recipes/go-module-cache.toml"),
+    ),
+    (
         "recipes/jvm-gradle-caches.toml",
         include_str!("../../../recipes/jvm-gradle-caches.toml"),
     ),
@@ -294,6 +318,10 @@ pub(crate) const BUILTIN_RECIPES: &[(&str, &str)] = &[
     (
         "recipes/jvm-gradle-build-dirs.toml",
         include_str!("../../../recipes/jvm-gradle-build-dirs.toml"),
+    ),
+    (
+        "recipes/jvm-sbt-cache.toml",
+        include_str!("../../../recipes/jvm-sbt-cache.toml"),
     ),
     (
         "recipes/jvm-maven-repository.toml",
@@ -334,6 +362,10 @@ pub(crate) const BUILTIN_RECIPES: &[(&str, &str)] = &[
     (
         "recipes/node-puppeteer-cache.toml",
         include_str!("../../../recipes/node-puppeteer-cache.toml"),
+    ),
+    (
+        "recipes/node-bundler-caches.toml",
+        include_str!("../../../recipes/node-bundler-caches.toml"),
     ),
     (
         "recipes/node-cypress-cache.toml",
@@ -400,6 +432,14 @@ pub(crate) const BUILTIN_RECIPES: &[(&str, &str)] = &[
         include_str!("../../../recipes/cmake-build-dirs.toml"),
     ),
     (
+        "recipes/c-cpp-ccache.toml",
+        include_str!("../../../recipes/c-cpp-ccache.toml"),
+    ),
+    (
+        "recipes/c-cpp-conan-cache.toml",
+        include_str!("../../../recipes/c-cpp-conan-cache.toml"),
+    ),
+    (
         "recipes/ruby-bundler-cache.toml",
         include_str!("../../../recipes/ruby-bundler-cache.toml"),
     ),
@@ -446,6 +486,10 @@ pub(crate) const BUILTIN_RECIPES: &[(&str, &str)] = &[
     (
         "recipes/apps-spotify-cache.toml",
         include_str!("../../../recipes/apps-spotify-cache.toml"),
+    ),
+    (
+        "recipes/apps-slack-cache.toml",
+        include_str!("../../../recipes/apps-slack-cache.toml"),
     ),
     (
         "recipes/apps-ios-device-updates.toml",
@@ -516,7 +560,127 @@ pub(crate) const BUILTIN_RECIPES: &[(&str, &str)] = &[
         include_str!("../../../recipes/browser-firefox-profile-cache.toml"),
     ),
     (
+        "recipes/browser-safari-cache.toml",
+        include_str!("../../../recipes/browser-safari-cache.toml"),
+    ),
+    (
+        "recipes/browser-edge-http-cache.toml",
+        include_str!("../../../recipes/browser-edge-http-cache.toml"),
+    ),
+    (
+        "recipes/browser-brave-http-cache.toml",
+        include_str!("../../../recipes/browser-brave-http-cache.toml"),
+    ),
+    (
+        "recipes/browser-vivaldi-http-cache.toml",
+        include_str!("../../../recipes/browser-vivaldi-http-cache.toml"),
+    ),
+    (
         "recipes/apps-steam-shader-cache.toml",
         include_str!("../../../recipes/apps-steam-shader-cache.toml"),
+    ),
+    (
+        "recipes/apps-discord-cache.toml",
+        include_str!("../../../recipes/apps-discord-cache.toml"),
+    ),
+    (
+        "recipes/system-thumbnail-cache.toml",
+        include_str!("../../../recipes/system-thumbnail-cache.toml"),
+    ),
+    (
+        "recipes/system-security-scanner-caches.toml",
+        include_str!("../../../recipes/system-security-scanner-caches.toml"),
+    ),
+    (
+        "recipes/system-package-manager-caches.toml",
+        include_str!("../../../recipes/system-package-manager-caches.toml"),
+    ),
+    (
+        "recipes/helm-kubernetes-caches.toml",
+        include_str!("../../../recipes/helm-kubernetes-caches.toml"),
+    ),
+    (
+        "recipes/firebase-emulator-cache.toml",
+        include_str!("../../../recipes/firebase-emulator-cache.toml"),
+    ),
+    (
+        "recipes/nim-cache.toml",
+        include_str!("../../../recipes/nim-cache.toml"),
+    ),
+    (
+        "recipes/ocaml-dune-cache.toml",
+        include_str!("../../../recipes/ocaml-dune-cache.toml"),
+    ),
+    (
+        "recipes/dotnet-obj-dirs.toml",
+        include_str!("../../../recipes/dotnet-obj-dirs.toml"),
+    ),
+    (
+        "recipes/dotnet-http-cache.toml",
+        include_str!("../../../recipes/dotnet-http-cache.toml"),
+    ),
+    (
+        "recipes/jvm-maven-target-dirs.toml",
+        include_str!("../../../recipes/jvm-maven-target-dirs.toml"),
+    ),
+    (
+        "recipes/jvm-project-gradle-dirs.toml",
+        include_str!("../../../recipes/jvm-project-gradle-dirs.toml"),
+    ),
+    (
+        "recipes/jvm-scala-build-dirs.toml",
+        include_str!("../../../recipes/jvm-scala-build-dirs.toml"),
+    ),
+    (
+        "recipes/clojure-build-caches.toml",
+        include_str!("../../../recipes/clojure-build-caches.toml"),
+    ),
+    (
+        "recipes/node-modern-framework-dirs.toml",
+        include_str!("../../../recipes/node-modern-framework-dirs.toml"),
+    ),
+    (
+        "recipes/node-nx-cache-dirs.toml",
+        include_str!("../../../recipes/node-nx-cache-dirs.toml"),
+    ),
+    (
+        "recipes/c-cpp-build-variants.toml",
+        include_str!("../../../recipes/c-cpp-build-variants.toml"),
+    ),
+    (
+        "recipes/c-cpp-vcpkg-cache.toml",
+        include_str!("../../../recipes/c-cpp-vcpkg-cache.toml"),
+    ),
+    (
+        "recipes/dart-tool-build-dirs.toml",
+        include_str!("../../../recipes/dart-tool-build-dirs.toml"),
+    ),
+    (
+        "recipes/haskell-cabal-build-dirs.toml",
+        include_str!("../../../recipes/haskell-cabal-build-dirs.toml"),
+    ),
+    (
+        "recipes/ocaml-dune-build-dirs.toml",
+        include_str!("../../../recipes/ocaml-dune-build-dirs.toml"),
+    ),
+    (
+        "recipes/android-build-caches.toml",
+        include_str!("../../../recipes/android-build-caches.toml"),
+    ),
+    (
+        "recipes/godot-import-cache.toml",
+        include_str!("../../../recipes/godot-import-cache.toml"),
+    ),
+    (
+        "recipes/php-tool-caches.toml",
+        include_str!("../../../recipes/php-tool-caches.toml"),
+    ),
+    (
+        "recipes/ide-vscode-extension-vsixs.toml",
+        include_str!("../../../recipes/ide-vscode-extension-vsixs.toml"),
+    ),
+    (
+        "recipes/ide-editor-caches.toml",
+        include_str!("../../../recipes/ide-editor-caches.toml"),
     ),
 ];

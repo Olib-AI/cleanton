@@ -50,23 +50,47 @@ export component Panel inherits Rectangle {
 export component Badge inherits Rectangle {
     in property <string> label;
     in property <brush> badge-color: Theme.palette.accent;
+    // Small pill (table Safety / status columns). A full-size 22px badge in a
+    // narrow table column reads as a coloured block, not a label.
+    in property <bool> compact: false;
 
-    height: 22px;
-    min-width: 50px;
+    // A layout sizes children from their min/max and ignores `height`, so the
+    // pill's height is pinned there (Slint rejects `height` next to min/max).
+    // Callers centre it vertically with nested layouts, not with `y`.
+    min-height: root.compact ? 18px : 22px;
+    max-height: root.compact ? 18px : 22px;
+    min-width: root.compact ? 0px : 50px;
     border-radius: Theme.radius-sm;
     background: badge-color.with-alpha(0.12);
 
     HorizontalLayout {
         alignment: center;
-        padding-left: Theme.spacing-sm;
-        padding-right: Theme.spacing-sm;
+        padding-left: root.compact ? Theme.spacing-xs : Theme.spacing-sm;
+        padding-right: root.compact ? Theme.spacing-xs : Theme.spacing-sm;
 
         Text {
             text: root.label;
             color: badge-color;
-            font-size: Theme.font-size-xs;
+            font-size: root.compact ? 10px : Theme.font-size-xs;
             font-weight: 600;
             vertical-alignment: center;
+        }
+    }
+}
+
+// Centres a Badge on both axes inside a fixed-width table cell. A bare Badge
+// placed in a Rectangle stretches to fill the cell (the tall coloured pillars
+// seen in the Packages/Results lists); this wrapper lets it hug its label and
+// sit in the middle of the row instead.
+export component CenteredBadge inherits Rectangle {
+    in property <string> label;
+    in property <brush> badge-color: Theme.palette.accent;
+    in property <bool> compact: false;
+    VerticalLayout {
+        alignment: center;
+        HorizontalLayout {
+            alignment: center;
+            Badge { label: root.label; badge-color: root.badge-color; compact: root.compact; }
         }
     }
 }
@@ -94,6 +118,84 @@ export component ProgressBar inherits Rectangle {
         font-size: Theme.font-size-xs;
         horizontal-alignment: center;
         vertical-alignment: center;
+    }
+}
+
+// A small rotating activity indicator.
+//
+// Slint has neither a built-in spinner nor an infinite `animate`, so a `Timer`
+// advances the glyph's rotation by a fixed step. The timer only runs while
+// `running` is true, so an idle screen costs nothing.
+export component Spinner inherits Rectangle {
+    in property <bool> running: false;
+    in property <brush> spinner-color: Theme.palette.accent;
+    in property <length> spinner-size: 14px;
+    property <angle> phase: 0deg;
+
+    // Collapse to zero width when idle and never stretch horizontally inside a
+    // `HorizontalLayout`, while stretching vertically across row height so the
+    // rotating glyph centres itself via `y` without wrapper layouts.
+    min-width: root.running ? root.spinner-size : 0px;
+    max-width: root.running ? root.spinner-size : 0px;
+    min-height: root.spinner-size;
+    horizontal-stretch: 0;
+    background: transparent;
+    visible: root.running;
+
+    Timer {
+        interval: 90ms;
+        running: root.running;
+        triggered => {
+            root.phase += 40deg;
+            if (root.phase >= 360deg) {
+                root.phase -= 360deg;
+            }
+        }
+    }
+
+    FaIcon {
+        glyph: "\u{f110}";
+        icon-color: root.spinner-color;
+        icon-size: root.spinner-size;
+        transform-rotation: root.phase;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+    }
+}
+
+// Indeterminate progress strip: a bar sweeping left to right. Used while a long
+// operation runs (checking for updates, updating, uninstalling) so the screen
+// never looks frozen. Takes zero height when not running.
+export component ActivityBar inherits Rectangle {
+    in property <bool> running: false;
+    in property <brush> bar-color: Theme.palette.accent;
+    property <float> phase: 0.0;
+
+    visible: root.running;
+    min-height: root.running ? 4px : 0px;
+    max-height: root.running ? 4px : 0px;
+    vertical-stretch: 0;
+    background: Theme.palette.surface-elevated;
+    border-radius: 2px;
+    clip: true;
+
+    Timer {
+        interval: 30ms;
+        running: root.running;
+        triggered => {
+            root.phase += 0.012;
+            if (root.phase > 1.0) {
+                root.phase = 0.0;
+            }
+        }
+    }
+
+    Rectangle {
+        width: parent.width * 0.3;
+        height: parent.height;
+        x: (parent.width - self.width) * root.phase;
+        background: root.bar-color;
+        border-radius: 2px;
     }
 }
 
@@ -177,6 +279,10 @@ export component ActionButton inherits Rectangle {
     in property <brush> button-color: Theme.palette.accent;
     in property <bool> primary: true;
     in property <bool> enabled: true;
+    // Destructive actions (removals, confirmations) read as danger even in the
+    // outlined style: the label, icon and outline are tinted, so a two-step
+    // removal is never mistaken for an ordinary secondary button.
+    in property <bool> danger: false;
 
     callback clicked();
 
@@ -185,7 +291,9 @@ export component ActionButton inherits Rectangle {
     // primary white-on-light-gray that was invisible. Enabled look is unchanged.
     property <brush> content-color: !root.enabled
         ? Theme.palette.text-muted
-        : (root.primary ? #FFFFFF : Theme.palette.text-secondary);
+        : (root.primary
+            ? #FFFFFF
+            : (root.danger ? Theme.palette.danger : Theme.palette.text-secondary));
 
     height: 38px;
     min-width: 118px;
@@ -194,7 +302,9 @@ export component ActionButton inherits Rectangle {
     // A disabled button keeps a visible outline so it still reads as a control
     // on the light theme's pale elevated surface.
     border-width: !enabled ? 1px : (primary ? 0 : 1px);
-    border-color: Theme.palette.border;
+    border-color: root.danger && root.enabled
+        ? Theme.palette.danger.with-alpha(0.55)
+        : Theme.palette.border;
     opacity: enabled ? 1.0 : 0.9;
 
     animate background { duration: Theme.anim-fast; }
@@ -236,8 +346,20 @@ export component Toggle inherits Rectangle {
     callback toggled(bool);
 
     width: 46px;
-    height: 26px;
-    border-radius: self.height / 2;
+    // Pinned min/max: inside a layout the `height` property is ignored, and a
+    // stretched toggle track no longer lines up with the label beside it.
+    // Slint rejects `height` alongside min/max, so the pin is the height.
+    min-height: 26px;
+    max-height: 26px;
+    // A literal radius, not `self.height / 2`: the switch reads as a capsule in
+    // every theme, and the knob never renders as a square.
+    //
+    // NOTE (Slint 1.17): the 26px track cannot be stretched, so a default
+    // (cross-axis `stretch`) parent pins it to the TOP of a taller row. Callers
+    // centre it with `cross-axis-alignment: center` on the row (see
+    // `SettingsField`); `cross-axis-self-alignment` would let the component do
+    // it itself but only arrives in Slint 1.18.
+    border-radius: 13px;
     background: root.checked ? Theme.palette.accent : Theme.palette.surface-elevated;
     border-width: 1px;
     border-color: root.checked ? Theme.palette.accent : Theme.palette.border;
@@ -257,12 +379,15 @@ export component Toggle inherits Rectangle {
     Rectangle {
         width: 20px;
         height: 20px;
-        border-radius: self.height / 2;
+        border-radius: 10px;
         y: (parent.height - self.height) / 2;
         x: root.checked ? parent.width - self.width - 3px : 3px;
         background: #FFFFFF;
         border-width: 1px;
-        border-color: #00000022;
+        // A white knob on the pale elevated track is invisible in the light
+        // theme without an outline, so the border is the theme's own border
+        // colour when the switch is off.
+        border-color: root.checked ? #00000022 : Theme.palette.border;
 
         animate x { duration: Theme.anim-fast; easing: ease-out; }
     }
@@ -290,13 +415,14 @@ export component SidebarItem inherits Rectangle {
         padding-left: Theme.spacing-sm;
         padding-right: Theme.spacing-sm;
         spacing: Theme.spacing-sm;
+        cross-axis-alignment: center;
 
         Rectangle {
             width: 3px;
-            height: 18px;
+            min-height: 18px;
+            max-height: 18px;
             border-radius: 2px;
             background: active ? Theme.palette.accent : transparent;
-            y: (parent.height - self.height) / 2;
         }
 
         FaIcon {
@@ -373,7 +499,7 @@ export component PlanListRow inherits Rectangle {
     property <bool> is-note: root.kind == 2;
     property <length> row-h: root.is-group ? 42px : (root.is-note ? 28px : 38px);
 
-    // A layout governs height via min/max, NOT the `height` property — so to fully
+    // A layout governs height via min/max, NOT the `height` property, so to fully
     // collapse a hidden row (no reserved space) we pin min/max to 0.
     min-height: root.row-visible ? root.row-h : 0px;
     max-height: root.row-visible ? root.row-h : 0px;
@@ -470,17 +596,15 @@ export component PlanListRow inherits Rectangle {
             min-width: RowColumns.size-col;
         }
 
-        Rectangle {
+        if root.is-group: CenteredBadge {
             width: RowColumns.safety-col;
-            if root.is-group: Badge {
-                label: root.safety;
-                badge-color: root.safety == "safe" ? Theme.palette.success :
-                             root.safety == "cautious" ? Theme.palette.warning :
-                             Theme.palette.danger;
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2;
-            }
+            label: root.safety;
+            compact: true;
+            badge-color: root.safety == "safe" ? Theme.palette.success :
+                         root.safety == "cautious" ? Theme.palette.warning :
+                         Theme.palette.danger;
         }
+        if !root.is-group: Rectangle { width: RowColumns.safety-col; }
     }
 }
 
@@ -491,7 +615,7 @@ export global RowColumns {
     out property <length> icon-col: 22px;
     out property <length> items-col: 92px;
     out property <length> size-col: 96px;
-    out property <length> safety-col: 104px;
+    out property <length> safety-col: 88px;
 }
 
 // One row in a results/held/suggestions list. Columns are fixed-width and align
@@ -562,12 +686,11 @@ export component FileRow inherits Rectangle {
                 font-weight: 600;
                 overflow: elide;
             }
-            Text {
+            if root.detail != "": Text {
                 text: root.detail;
                 color: Theme.palette.text-muted;
                 font-size: Theme.font-size-xs;
                 overflow: elide;
-                visible: root.detail != "";
             }
         }
 
@@ -590,17 +713,15 @@ export component FileRow inherits Rectangle {
             min-width: RowColumns.size-col;
         }
 
-        Rectangle {
+        if root.show-safety: CenteredBadge {
             width: RowColumns.safety-col;
-            if root.show-safety: Badge {
-                label: root.safety;
-                badge-color: root.safety == "safe" ? Theme.palette.success :
-                             root.safety == "cautious" ? Theme.palette.warning :
-                             Theme.palette.danger;
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2;
-            }
+            label: root.safety;
+            compact: true;
+            badge-color: root.safety == "safe" ? Theme.palette.success :
+                         root.safety == "cautious" ? Theme.palette.warning :
+                         Theme.palette.danger;
         }
+        if !root.show-safety: Rectangle { width: RowColumns.safety-col; }
     }
 }
 
@@ -609,6 +730,10 @@ export component FileRow inherits Rectangle {
 // a two-step "Trash" affordance moves the item to the Trash after the user
 // clicks it a second time to confirm.
 export component SuggestionListRow inherits Rectangle {
+    // 0 = an individual item (the default), 1 = a duplicate-set header,
+    // 2 = a muted note. Headers and notes are labels, so they render without
+    // the Reveal / Trash affordances of an item row.
+    in property <int> kind: 0;
     in property <string> title;
     in property <string> detail;
     in property <string> size;
@@ -619,16 +744,74 @@ export component SuggestionListRow inherits Rectangle {
     callback arm-delete();
     callback confirm-delete();
 
-    height: 52px;
-    background: ta.has-hover ? Theme.palette.surface-elevated : transparent;
+    // A header is a section label: shorter than an item row and never hovered
+    // as a clickable target. Pinned via min/max, which is what a layout reads.
+    min-height: root.kind == 0 ? 52px : 34px;
+    max-height: root.kind == 0 ? 52px : 34px;
+    background: root.kind == 0 && ta.has-hover ? Theme.palette.surface-elevated : transparent;
     border-radius: Theme.radius-sm;
 
     ta := TouchArea {
-        mouse-cursor: pointer;
+        enabled: root.kind == 0;
+        mouse-cursor: root.kind == 0 ? pointer : default;
         clicked => { root.reveal(); }
     }
 
-    HorizontalLayout {
+    // Duplicate-set header: one line naming the set and what collapsing it
+    // would free. The copies follow as individual item rows beneath it.
+    if root.kind == 1: HorizontalLayout {
+        padding-left: Theme.spacing-md;
+        padding-right: Theme.spacing-md;
+        spacing: Theme.spacing-sm;
+
+        Rectangle {
+            width: RowColumns.icon-col;
+            FaIcon {
+                glyph: root.icon-glyph;
+                icon-color: Theme.palette.text-secondary;
+                icon-size: Theme.font-size-sm;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+            }
+        }
+
+        Text {
+            text: root.title;
+            color: Theme.palette.text-secondary;
+            font-size: Theme.font-size-xs;
+            font-weight: 700;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+        }
+
+        Text {
+            text: root.size;
+            color: Theme.palette.text-secondary;
+            font-size: Theme.font-size-xs;
+            font-weight: 700;
+            vertical-alignment: center;
+            horizontal-alignment: right;
+            min-width: RowColumns.size-col;
+        }
+    }
+
+    // Muted note, for example "+3 more copies not listed".
+    if root.kind == 2: HorizontalLayout {
+        padding-left: Theme.spacing-md;
+        padding-right: Theme.spacing-md;
+
+        Text {
+            text: root.title;
+            color: Theme.palette.text-muted;
+            font-size: Theme.font-size-xs;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+        }
+    }
+
+    if root.kind == 0: HorizontalLayout {
         padding-left: Theme.spacing-md;
         padding-right: Theme.spacing-md;
         spacing: Theme.spacing-sm;
@@ -668,45 +851,49 @@ export component SuggestionListRow inherits Rectangle {
             HorizontalLayout {
                 alignment: end;
                 spacing: Theme.spacing-xs;
+                cross-axis-alignment: center;
                 Text { text: "Reveal"; color: Theme.palette.accent; font-size: Theme.font-size-xs; font-weight: 600; vertical-alignment: center; }
-                FaIcon { glyph: "\u{f35d}"; icon-color: Theme.palette.accent; icon-size: Theme.font-size-xs; width: 12px; y: (parent.height - self.height) / 2; }
+                FaIcon { glyph: "\u{f35d}"; icon-color: Theme.palette.accent; icon-size: Theme.font-size-xs; width: 12px; }
             }
         }
 
         // Two-step Trash affordance for deletable suggestions.
         Rectangle {
             width: 84px;
-            if root.deletable: HorizontalLayout {
-                alignment: end;
-                Rectangle {
-                    width: 78px;
-                    height: 28px;
-                    y: (parent.height - self.height) / 2;
-                    border-radius: Theme.radius-sm;
-                    background: root.armed-delete
-                        ? Theme.palette.danger
-                        : (del-ta.has-hover ? Theme.palette.surface-elevated : transparent);
-                    border-width: 1px;
-                    border-color: root.armed-delete ? Theme.palette.danger : Theme.palette.border;
-                    animate background, border-color { duration: Theme.anim-fast; }
+            if root.deletable: VerticalLayout {
+                alignment: center;
+                HorizontalLayout {
+                    alignment: end;
+                    Rectangle {
+                        width: 78px;
+                        min-height: 28px;
+                        max-height: 28px;
+                        border-radius: Theme.radius-sm;
+                        background: root.armed-delete
+                            ? Theme.palette.danger
+                            : (del-ta.has-hover ? Theme.palette.surface-elevated : transparent);
+                        border-width: 1px;
+                        border-color: root.armed-delete ? Theme.palette.danger : Theme.palette.border;
+                        animate background, border-color { duration: Theme.anim-fast; }
 
-                    del-ta := TouchArea {
-                        mouse-cursor: pointer;
-                        clicked => {
-                            if root.armed-delete {
-                                root.confirm-delete();
-                            } else {
-                                root.arm-delete();
+                        del-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                if root.armed-delete {
+                                    root.confirm-delete();
+                                } else {
+                                    root.arm-delete();
+                                }
                             }
                         }
-                    }
-                    Text {
-                        text: root.armed-delete ? "Confirm" : "Trash";
-                        color: root.armed-delete ? #FFFFFF : Theme.palette.text-secondary;
-                        font-size: Theme.font-size-xs;
-                        font-weight: 650;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
+                        Text {
+                            text: root.armed-delete ? "Confirm" : "Trash";
+                            color: root.armed-delete ? #FFFFFF : Theme.palette.text-secondary;
+                            font-size: Theme.font-size-xs;
+                            font-weight: 650;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
                     }
                 }
             }
@@ -731,7 +918,10 @@ export component PackageListRow inherits Rectangle {
     callback toggle-keep();
     callback update-now();
 
-    height: 54px;
+    // Pin via min/max: a plain `height` is ignored inside a VerticalLayout,
+    // which let rows (and the status pill inside them) stretch unpredictably.
+    min-height: 54px;
+    max-height: 54px;
     background: ta.has-hover ? Theme.palette.surface-elevated : transparent;
     border-radius: Theme.radius-sm;
 
@@ -792,28 +982,15 @@ export component PackageListRow inherits Rectangle {
             }
         }
 
-        // Status chip — shown for every row so the keep/remove model is legible:
+        // Status chip, shown for every row so the keep/remove model is legible:
         // kept (green) / removable (danger) / kept-as-dependency (muted).
-        Rectangle {
+        CenteredBadge {
             width: 116px;
-            if root.state == 0: Badge {
-                label: "keep";
-                badge-color: Theme.palette.success;
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2;
-            }
-            if root.state == 1: Badge {
-                label: "remove";
-                badge-color: Theme.palette.danger;
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2;
-            }
-            if root.state == 2: Badge {
-                label: "needed (dep)";
-                badge-color: Theme.palette.text-muted;
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2;
-            }
+            compact: true;
+            label: root.state == 0 ? "keep" : (root.state == 1 ? "remove" : "needed (dep)");
+            badge-color: root.state == 0 ? Theme.palette.success :
+                         root.state == 1 ? Theme.palette.danger :
+                         Theme.palette.text-muted;
         }
 
         Text {
@@ -828,7 +1005,7 @@ export component PackageListRow inherits Rectangle {
     }
 }
 
-// One row in the Services control panel. Quiet by default — the running status
+// One row in the Services control panel. Quiet by default; the running status
 // dot is the only colour until the destructive Disable action is armed, at
 // which point it becomes an unmistakable red "Confirm". Protected rows read as
 // locked (lock icon + "Protected"), never as a greyed-out disabled control.
@@ -849,6 +1026,8 @@ export component ServiceListRow inherits Rectangle {
     in property <string> pending-disable-id;
     // Same, for the orphaned-item Remove action.
     in property <string> pending-remove-id;
+    // Same, for deleting a stopped, unprotected service (two-step arm/confirm).
+    in property <string> pending-delete-id;
 
     // First click arms this row; clicking the armed "Confirm" disables it.
     callback arm-disable(string);
@@ -856,11 +1035,15 @@ export component ServiceListRow inherits Rectangle {
     // Orphaned-item removal (two-step arm/confirm, like disable).
     callback arm-remove(string);
     callback confirm-remove(string);
+    // Delete a stopped/disabled, unprotected service's startup item (two-step).
+    callback arm-delete(string);
+    callback confirm-delete(string);
     // Enable a stopped/disabled service (non-destructive, single click).
     callback enable(string);
 
     property <bool> armed: root.id != "" && root.id == root.pending-disable-id;
     property <bool> armed-remove: root.id != "" && root.id == root.pending-remove-id;
+    property <bool> armed-delete: root.id != "" && root.id == root.pending-delete-id;
 
     height: 56px;
     background: ta.has-hover ? Theme.palette.surface-elevated : transparent;
@@ -898,150 +1081,201 @@ export component ServiceListRow inherits Rectangle {
         // hugs its own text (a bare Badge would fill the cell and let a long
         // label like "System agent" spill past the pill). The type cell is wide
         // enough for the longest kind ("System agent").
+        // Each badge cell centres its pill on BOTH axes: a layout never centres
+        // along its main axis unless `alignment` asks for it, and stretching a
+        // 22px pill over a 56px row is exactly what made these badges sit high.
+        // The outer VerticalLayout (alignment: center) gives the inner row its
+        // natural height and centres it; `x`/`y` are ignored on layout children.
         Rectangle {
             width: 104px;
-            HorizontalLayout {
+            VerticalLayout {
                 alignment: center;
-                Badge {
-                    label: root.kind;
-                    badge-color: Theme.palette.info;
+                HorizontalLayout {
+                    alignment: center;
+                    Badge {
+                        label: root.kind;
+                        badge-color: Theme.palette.info;
+                    }
                 }
             }
         }
         Rectangle {
             width: 104px;
-            HorizontalLayout {
+            VerticalLayout {
                 alignment: center;
-                Badge {
-                    label: root.status;
-                    badge-color: root.running ? Theme.palette.success : Theme.palette.text-muted;
+                HorizontalLayout {
+                    alignment: center;
+                    Badge {
+                        label: root.status;
+                        badge-color: root.running ? Theme.palette.success : Theme.palette.text-muted;
+                    }
                 }
             }
         }
 
         // ACTION column. Protected rows read as locked. Orphaned startup items
         // get a red two-step "Remove" (delete the leftover plist). Otherwise a
-        // running service shows a two-step "Disable" and a stopped one a calm
-        // single-click "Enable".
+        // running service shows a two-step "Disable", and a stopped one a calm
+        // single-click "Enable" next to a two-step "Delete" that removes the
+        // disabled startup item entirely.
         Rectangle {
-            width: 100px;
+            width: 168px;
 
-            if root.protected-service: HorizontalLayout {
-                alignment: end;
-                spacing: Theme.spacing-xs;
-                FaIcon {
-                    glyph: "\u{f023}";
-                    icon-color: Theme.palette.warning;
-                    icon-size: Theme.font-size-xs;
-                    width: 14px;
-                    y: (parent.height - self.height) / 2;
+            VerticalLayout {
+                alignment: center;
+
+                if root.protected-service: HorizontalLayout {
+                    alignment: end;
+                    spacing: Theme.spacing-xs;
+                    cross-axis-alignment: center;
+                    FaIcon {
+                        glyph: "\u{f023}";
+                        icon-color: Theme.palette.warning;
+                        icon-size: Theme.font-size-xs;
+                        width: 14px;
+                    }
+                    Text {
+                        text: "Protected";
+                        color: Theme.palette.text-muted;
+                        font-size: Theme.font-size-xs;
+                        vertical-alignment: center;
+                    }
                 }
-                Text {
-                    text: "Protected";
-                    color: Theme.palette.text-muted;
-                    font-size: Theme.font-size-xs;
-                    vertical-alignment: center;
-                }
-            }
 
-            // Orphaned leftover: destructive Remove (two-step).
-            if !root.protected-service && root.orphaned: HorizontalLayout {
-                alignment: end;
-                Rectangle {
-                    width: 92px;
-                    height: 30px;
-                    y: (parent.height - self.height) / 2;
-                    border-radius: Theme.radius-sm;
-                    background: root.armed-remove
-                        ? Theme.palette.danger
-                        : (rm-ta.has-hover ? Theme.palette.surface-elevated : transparent);
-                    border-width: 1px;
-                    border-color: root.armed-remove ? Theme.palette.danger : Theme.palette.border;
-                    animate background, border-color { duration: Theme.anim-fast; }
+                // Orphaned leftover: destructive Remove (two-step).
+                if !root.protected-service && root.orphaned: HorizontalLayout {
+                    alignment: end;
+                    Rectangle {
+                        width: 92px;
+                        min-height: 30px;
+                        max-height: 30px;
+                        border-radius: Theme.radius-sm;
+                        background: root.armed-remove
+                            ? Theme.palette.danger
+                            : (rm-ta.has-hover ? Theme.palette.surface-elevated : transparent);
+                        border-width: 1px;
+                        border-color: root.armed-remove ? Theme.palette.danger : Theme.palette.border;
+                        animate background, border-color { duration: Theme.anim-fast; }
 
-                    rm-ta := TouchArea {
-                        mouse-cursor: pointer;
-                        clicked => {
-                            if root.armed-remove {
-                                root.confirm-remove(root.id);
-                            } else {
-                                root.arm-remove(root.id);
+                        rm-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                if root.armed-remove {
+                                    root.confirm-remove(root.id);
+                                } else {
+                                    root.arm-remove(root.id);
+                                }
                             }
                         }
-                    }
-                    Text {
-                        text: root.armed-remove ? "Confirm" : "Remove";
-                        color: root.armed-remove ? #FFFFFF : Theme.palette.text-secondary;
-                        font-size: Theme.font-size-xs;
-                        font-weight: 650;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
+                        Text {
+                            text: root.armed-remove ? "Confirm" : "Remove";
+                            color: root.armed-remove ? #FFFFFF : Theme.palette.text-secondary;
+                            font-size: Theme.font-size-xs;
+                            font-weight: 650;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
                     }
                 }
-            }
 
-            // Running service: two-step Disable.
-            if !root.protected-service && !root.orphaned && root.running: HorizontalLayout {
-                alignment: end;
+                // Running service: two-step Disable.
+                if !root.protected-service && !root.orphaned && root.running: HorizontalLayout {
+                    alignment: end;
 
-                Rectangle {
-                    width: 92px;
-                    height: 30px;
-                    y: (parent.height - self.height) / 2;
-                    border-radius: Theme.radius-sm;
-                    background: root.armed
-                        ? Theme.palette.danger
-                        : (btn-ta.has-hover ? Theme.palette.surface-elevated : transparent);
-                    border-width: 1px;
-                    border-color: root.armed ? Theme.palette.danger : Theme.palette.border;
+                    Rectangle {
+                        width: 92px;
+                        min-height: 30px;
+                        max-height: 30px;
+                        border-radius: Theme.radius-sm;
+                        background: root.armed
+                            ? Theme.palette.danger
+                            : (btn-ta.has-hover ? Theme.palette.surface-elevated : transparent);
+                        border-width: 1px;
+                        border-color: root.armed ? Theme.palette.danger : Theme.palette.border;
 
-                    animate background, border-color { duration: Theme.anim-fast; }
+                        animate background, border-color { duration: Theme.anim-fast; }
 
-                    btn-ta := TouchArea {
-                        mouse-cursor: pointer;
-                        clicked => {
-                            if root.armed {
-                                root.confirm-disable(root.id);
-                            } else {
-                                root.arm-disable(root.id);
+                        btn-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                if root.armed {
+                                    root.confirm-disable(root.id);
+                                } else {
+                                    root.arm-disable(root.id);
+                                }
                             }
+                        }
+
+                        Text {
+                            text: root.armed ? "Confirm" : "Disable";
+                            color: root.armed ? #FFFFFF : Theme.palette.text-secondary;
+                            font-size: Theme.font-size-xs;
+                            font-weight: 650;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                // Stopped/disabled service: single-click Enable, plus a two-step
+                // Delete that removes the disabled startup item for good.
+                if !root.protected-service && !root.orphaned && !root.running: HorizontalLayout {
+                    alignment: end;
+                    spacing: Theme.spacing-xs;
+
+                    Rectangle {
+                        width: 76px;
+                        min-height: 30px;
+                        max-height: 30px;
+                        border-radius: Theme.radius-sm;
+                        background: en-ta.has-hover ? Theme.palette.surface-elevated : transparent;
+                        border-width: 1px;
+                        border-color: Theme.palette.border;
+
+                        en-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.enable(root.id); }
+                        }
+                        Text {
+                            text: "Enable";
+                            color: Theme.palette.accent;
+                            font-size: Theme.font-size-xs;
+                            font-weight: 650;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
                         }
                     }
 
-                    Text {
-                        text: root.armed ? "Confirm" : "Disable";
-                        color: root.armed ? #FFFFFF : Theme.palette.text-secondary;
-                        font-size: Theme.font-size-xs;
-                        font-weight: 650;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                    }
-                }
-            }
+                    Rectangle {
+                        width: 76px;
+                        min-height: 30px;
+                        max-height: 30px;
+                        border-radius: Theme.radius-sm;
+                        background: root.armed-delete
+                            ? Theme.palette.danger
+                            : (del-ta.has-hover ? Theme.palette.surface-elevated : transparent);
+                        border-width: 1px;
+                        border-color: root.armed-delete ? Theme.palette.danger : Theme.palette.border;
+                        animate background, border-color { duration: Theme.anim-fast; }
 
-            // Stopped/disabled service: single-click Enable.
-            if !root.protected-service && !root.orphaned && !root.running: HorizontalLayout {
-                alignment: end;
-                Rectangle {
-                    width: 92px;
-                    height: 30px;
-                    y: (parent.height - self.height) / 2;
-                    border-radius: Theme.radius-sm;
-                    background: en-ta.has-hover ? Theme.palette.surface-elevated : transparent;
-                    border-width: 1px;
-                    border-color: Theme.palette.border;
-
-                    en-ta := TouchArea {
-                        mouse-cursor: pointer;
-                        clicked => { root.enable(root.id); }
-                    }
-                    Text {
-                        text: "Enable";
-                        color: Theme.palette.accent;
-                        font-size: Theme.font-size-xs;
-                        font-weight: 650;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
+                        del-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                if root.armed-delete {
+                                    root.confirm-delete(root.id);
+                                } else {
+                                    root.arm-delete(root.id);
+                                }
+                            }
+                        }
+                        Text {
+                            text: root.armed-delete ? "Confirm" : "Delete";
+                            color: root.armed-delete ? #FFFFFF : Theme.palette.danger;
+                            font-size: Theme.font-size-xs;
+                            font-weight: 650;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
                     }
                 }
             }

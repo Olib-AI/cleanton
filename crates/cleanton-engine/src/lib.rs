@@ -1,5 +1,8 @@
+mod advisories;
 mod analyzer;
+pub mod background;
 mod docker;
+mod elevated_trash;
 mod events;
 mod executor;
 mod ml;
@@ -12,12 +15,20 @@ mod snapshots;
 mod suggestions;
 mod uninstall;
 
+pub use advisories::{
+    Advisory, AdvisoryDatabase, AdvisoryMatch, AffectedRange, Ecosystem, PackageSubject,
+    compare_versions,
+};
 pub use analyzer::AnalyzedPlan;
+pub use background::{
+    CleanupOffer, DiskReliefCandidate, MemoryProcessCandidate, PackageWatcher, ResourceKind,
+    ResourceStatus, WatchEvent, WatchOptions, snapshot_resource_status,
+};
 pub use docker::{
     BuildCacheInfo, ContainerInfo, DockerAnalysis, DockerCleaner, DockerCleanupPlan,
     DockerCleanupResult, ImageInfo, VolumeInfo,
 };
-pub use events::EngineEvent;
+pub use events::{EngineEvent, ScanSummary};
 pub use ml::{
     ActionAnnotation, AnnotatedAction, DEFAULT_ML_CONFIDENCE_THRESHOLD, FileClassifier,
     MlAdjustment,
@@ -25,9 +36,9 @@ pub use ml::{
 pub use orchestrator::{AnalyzedFull, Orchestrator, PipelineResult};
 pub use orphans::{DEFAULT_ORPHAN_MIN_AGE_DAYS, ORPHAN_CATEGORY};
 pub use security::{
-    Assessment, ChangeKind, PackageReport, SecurityFinding, SecurityProgress, SecurityReport,
-    SecurityScanOptions, SecurityTarget, SecurityTargetKind, SeverityCounts, assess,
-    change_kind_label, discover_targets, is_benign_context, is_install_context,
+    Assessment, ChangeKind, PackageReport, SecurityFinding, SecurityProgress, SecurityRemoval,
+    SecurityReport, SecurityScanOptions, SecurityTarget, SecurityTargetKind, SeverityCounts,
+    assess, change_kind_label, discover_targets, is_benign_context, is_install_context,
     lifecycle_script_paths, review_packages, run_security_scan, run_security_scan_with_options,
     scan_targets, scan_targets_with_options, verdict_corroborated,
 };

@@ -266,7 +266,7 @@ impl WormPropagationEngine {
                         "PyPI/twine publish invoked from npm lifecycle hook (WORM-05)",
                         "Calling `twine upload` or referencing TWINE_PASSWORD/.pypirc inside an \
                          npm lifecycle script is the cross-ecosystem worm propagation step used by \
-                         CanisterSprawl — the first documented npm→PyPI worm. An npm package has \
+                         CanisterSprawl: the first documented npm→PyPI worm. An npm package has \
                          no legitimate reason to publish to PyPI.",
                     )
                     .with_rule_id("WORM_CROSS_ECOSYSTEM_TWINE")
@@ -435,7 +435,7 @@ impl WormPropagationEngine {
                     ThreatCategory::SupplyChain,
                     Severity::Critical,
                     Confidence::High,
-                    "Token harvest + npm publish combo — worm propagation fingerprint (WORM-04)",
+                    "Token harvest + npm publish combo: worm propagation fingerprint (WORM-04)",
                     "The lifecycle script BOTH reads npm auth tokens (.npmrc/NPM_TOKEN) AND calls \
                      `npm publish`. This combination is the exact harvest-then-republish worm \
                      propagation loop; zero legitimate packages need both. Definitive indicator of \
@@ -454,7 +454,7 @@ impl WormPropagationEngine {
                     ThreatCategory::SupplyChain,
                     Severity::Critical,
                     Confidence::High,
-                    "Cross-ecosystem credential sweep (npm + PyPI) — CanisterSprawl pattern (WORM-05 combo)",
+                    "Cross-ecosystem credential sweep (npm + PyPI): CanisterSprawl pattern (WORM-05 combo)",
                     "The lifecycle script reads BOTH npm credentials and PyPI credentials in the \
                      same execution context. This is definitively the CanisterSprawl cross-ecosystem \
                      worm signature: a single npm install hook sweeping credentials for \
@@ -562,7 +562,7 @@ impl WormPropagationEngine {
                             Confidence::High,
                             "npm maintainer package enumeration in script (WORM-03)",
                             "Querying /-/v1/search?text=maintainer:{user} enumerates all packages \
-                             accessible to a stolen token — the prerequisite step for worm \
+                             accessible to a stolen token: the prerequisite step for worm \
                              propagation. Zero false-positive rate: no package legitimately \
                              enumerates the full package portfolio of the authenticated user at \
                              install time. Identical call present in all five npm worm families.",
@@ -642,7 +642,7 @@ impl WormPropagationEngine {
                             Confidence::High,
                             "GitHub Actions secret dump pattern in script (WORM-13)",
                             "The file contains `toJSON(secrets)` or references `github.event.discussion.body` \
-                             without sanitization — used to inject a GitHub Actions workflow that \
+                             without sanitization: used to inject a GitHub Actions workflow that \
                              serializes all CI secrets. Seen in Shai-Hulud v1/v2, SANDWORM_MODE, \
                              Miasma/@redhat.",
                         )
@@ -693,7 +693,7 @@ impl WormPropagationEngine {
                             Severity::High,
                             Confidence::High,
                             "TruffleHog secret scanner referenced in bundled script (WORM-08)",
-                            "A bundled script references TruffleHog — used by Shai-Hulud v1/v2 to \
+                            "A bundled script references TruffleHog: used by Shai-Hulud v1/v2 to \
                              scan the developer's machine for 800+ secret types and then delete \
                              the binary to cover tracks.",
                         )
@@ -744,7 +744,7 @@ impl WormPropagationEngine {
                             Confidence::High,
                             "AI coding assistant MCP config path in bundled script (WORM-15)",
                             "A bundled script references ~/.claude/settings.json, ~/.cursor/mcp.json, \
-                             ~/.continue/config.json, ~/.windsurf/mcp.json, or ~/.dev-utils — paths \
+                             ~/.continue/config.json, ~/.windsurf/mcp.json, or ~/.dev-utils: paths \
                              targeted by SANDWORM_MODE's MCP server injection to weaponize AI \
                              coding assistants as persistent credential exfiltrators.",
                         )
@@ -908,7 +908,7 @@ impl WormPropagationEngine {
                     ThreatCategory::SupplyChain,
                     Severity::Critical,
                     Confidence::High,
-                    "Token harvest + npm publish in same script — worm propagation (WORM-04 combo)",
+                    "Token harvest + npm publish in same script: worm propagation (WORM-04 combo)",
                     "The same bundled script file reads npm credentials AND calls npm publish. \
                      This is the exact harvest-then-republish fingerprint of the npm worm class \
                      (Shai-Hulud, SANDWORM_MODE, CanisterWorm, Phantom Gyp). Zero legitimate \

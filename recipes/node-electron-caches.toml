@@ -11,10 +11,28 @@ priority = 50
 path_glob = "~/Library/Caches/electron*/**"
 min_age_days = 30
 
+# Linux (XDG): Electron's downloaded release archives.
+[[match.any_of]]
+min_age_days = 30
+path_glob = "~/.cache/electron/**"
+
+# Linux (XDG): electron-builder's fpm/nsis caches.
+[[match.any_of]]
+min_age_days = 30
+path_glob = "~/.cache/electron-builder/**"
+
 [action]
 type = "trash"
 prompt = "Move {size} of Electron build caches to Trash?"
 
 [test]
-should_match = ["~/Library/Caches/electron/electron-v31.0.0-darwin-arm64.zip", "~/Library/Caches/electron-builder/nsis/nsis-3.0.4.1.7z"]
-should_not_match = ["~/Library/Caches/Yarn"]
+should_match = [
+    "~/Library/Caches/electron/electron-v31.0.0-darwin-arm64.zip",
+    "~/Library/Caches/electron-builder/nsis/nsis-3.0.4.1.7z",
+    "~/.cache/electron/abc.zip",
+    "~/.cache/electron-builder/fpm/fpm",
+]
+should_not_match = [
+    "~/Library/Caches/Yarn",
+    "~/.cache/other/foo",
+]

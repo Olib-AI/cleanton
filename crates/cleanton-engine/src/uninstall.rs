@@ -35,6 +35,11 @@ pub struct InstalledApp {
     pub bytes: u64,
     /// Apple/system application: listed for completeness, never uninstallable.
     pub protected: bool,
+    /// Installed from the Mac App Store (the bundle carries a MAS receipt).
+    /// Those bundles are normally root-owned, so trashing them needs admin
+    /// rights; the UIs surface the source so the uninstall outcome is not
+    /// surprising.
+    pub app_store: bool,
 }
 
 /// Where a leftover was found; drives grouping and labels in the UIs.
@@ -271,6 +276,7 @@ fn collect_app_identities(dir: &Path, depth: usize, out: &mut Vec<InstalledApp>)
                 out.push(InstalledApp {
                     name: name.to_owned(),
                     path: path.clone(),
+                    app_store: has_app_store_receipt(&path),
                     bundle_id,
                     version: None,
                     bytes: 0,
@@ -326,10 +332,22 @@ fn read_app(path: &Path, system_root: bool) -> Option<InstalledApp> {
         name,
         bytes: bounded_size(path),
         protected: system_root || apple,
+        app_store: has_app_store_receipt(path),
         bundle_id,
         version,
         path: path.to_path_buf(),
     })
+}
+
+/// True when the bundle was delivered by the Mac App Store: MAS installs carry
+/// `Contents/_MASReceipt/receipt`. A single `stat` per app, so it is cheap
+/// enough to run for the whole inventory.
+fn has_app_store_receipt(app_path: &Path) -> bool {
+    app_path
+        .join("Contents")
+        .join("_MASReceipt")
+        .join("receipt")
+        .exists()
 }
 
 fn info_plist(app_path: &Path) -> Option<plist::Dictionary> {
@@ -864,6 +882,7 @@ mod tests {
             version: Some("1.2.3".to_owned()),
             bytes: 0,
             protected: false,
+            app_store: false,
         }
     }
 
@@ -1018,6 +1037,7 @@ mod tests {
             version: Some("0.5.0".to_owned()),
             bytes: 0,
             protected: false,
+            app_store: false,
         };
         touch_dir(&home.join(".ollama/models"));
         touch_dir(&home.join(".cache/ollama"));
@@ -1058,6 +1078,7 @@ mod tests {
             version: None,
             bytes: 0,
             protected: false,
+            app_store: false,
         };
         touch_dir(&home.join(".lmstudio/models"));
         touch_dir(&home.join(".cache/lm-studio"));
@@ -1086,6 +1107,7 @@ mod tests {
             version: None,
             bytes: 0,
             protected: false,
+            app_store: false,
         };
         let ollama = InstalledApp {
             name: "Ollama".to_owned(),
@@ -1094,6 +1116,7 @@ mod tests {
             version: None,
             bytes: 0,
             protected: false,
+            app_store: false,
         };
         let tokens = vec![
             "lm-studio".to_owned(),
@@ -1111,6 +1134,7 @@ mod tests {
             version: None,
             bytes: 0,
             protected: false,
+            app_store: false,
         };
         assert_eq!(cask_token_for(&other, &tokens), None);
     }
@@ -1153,6 +1177,7 @@ mod tests {
             version: None,
             bytes: 0,
             protected: false,
+            app_store: false,
         };
         touch_dir(&home.join("Library/Application Support/com.x.ghosted"));
         touch_dir(&home.join(".ghosted"));
@@ -1185,6 +1210,7 @@ mod tests {
             version: None,
             bytes: 0,
             protected: true,
+            app_store: false,
         };
         assert!(find_leftovers(&app).is_none());
     }

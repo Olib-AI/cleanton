@@ -54,6 +54,7 @@ pub use cleanton_antivirus::{
 use cleanton_common::Result;
 use serde::{Deserialize, Serialize};
 
+use crate::advisories::{Advisory, AdvisoryDatabase, Ecosystem, PackageSubject};
 use crate::security_baseline::{self, BaselineEntry, SecurityBaseline};
 
 /// Cap on the per-package findings retained in the report, worst-first. The
@@ -88,6 +89,28 @@ pub enum SecurityTargetKind {
     /// An editor extension directory (`~/.vscode/extensions`,
     /// `~/.cursor/extensions`) — npm-style packages and a real attack vector.
     EditorExtensions,
+    /// Installed gems (`~/.gem/ruby/<abi>/gems`, Homebrew's gem tree).
+    ///
+    /// Version-only: gem trees are large and the installed-version question
+    /// ("is this release known-bad?") is answerable from metadata alone, so
+    /// these packages are matched against the advisory database and never
+    /// content-scanned unless a version matches.
+    RubyGems,
+    /// Crate sources in the Cargo registry cache (`~/.cargo/registry/src/*`).
+    /// Version-only, for the same reason as [`Self::RubyGems`].
+    CargoRegistry,
+    /// Extracted modules in the Go module cache (`~/go/pkg/mod`).
+    /// Version-only.
+    GoModuleCache,
+    /// The machine's own persistence surface: per-user launchd jobs, shell
+    /// startup files, cron drops, and systemd user units.
+    ///
+    /// Not a package tree. These are the files whose only job is to run
+    /// something again later, and they are where a worm's second half lives
+    /// after its payload has been cleaned up. Each file becomes its own
+    /// candidate so a flagged `.zshrc` is attributed to `.zshrc` rather than to
+    /// the home directory.
+    HostPersistence,
 }
 
 impl SecurityTargetKind {
@@ -99,7 +122,21 @@ impl SecurityTargetKind {
             Self::NodeProject => "project node_modules",
             Self::PythonSitePackages => "Python site-packages",
             Self::EditorExtensions => "editor extensions",
+            Self::RubyGems => "installed gems",
+            Self::CargoRegistry => "Cargo registry cache",
+            Self::GoModuleCache => "Go module cache",
+            Self::HostPersistence => "host persistence files",
         }
+    }
+
+    /// Whether this target is matched by version only (advisory database) and
+    /// never handed to the content scanner.
+    #[must_use]
+    pub fn is_version_only(self) -> bool {
+        matches!(
+            self,
+            Self::RubyGems | Self::CargoRegistry | Self::GoModuleCache
+        )
     }
 }
 
@@ -108,6 +145,48 @@ impl SecurityTargetKind {
 pub struct SecurityTarget {
     pub kind: SecurityTargetKind,
     pub root: PathBuf,
+}
+
+/// How Cleanton may remove a flagged package, if at all.
+///
+/// A removal is always user-initiated and always two-step (arm, then confirm).
+/// This enum is the SHARED policy behind that control, so the Slint app and the
+/// TUI offer exactly the same action with the same wording and the same guard
+/// rails, and neither one can invent a removal path of its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SecurityRemoval {
+    /// Uninstall through npm's own CLI, which keeps npm's metadata consistent.
+    Npm,
+    /// Uninstall through pip's own CLI, for the same reason.
+    Pip,
+    /// No package manager owns it: move the package directory to the Trash
+    /// through the executor's reviewed trash path.
+    Trash,
+    /// Cleanton must not remove it. A host persistence file is the user's own
+    /// file, and the remedy is to delete one line, not the file.
+    NotRemovable,
+}
+
+impl SecurityRemoval {
+    /// The button verb for this removal (`"Uninstall"` / `"Remove"`).
+    #[must_use]
+    pub const fn verb(self) -> &'static str {
+        match self {
+            Self::Npm | Self::Pip => "Uninstall",
+            Self::Trash | Self::NotRemovable => "Remove",
+        }
+    }
+
+    /// The command this removal runs, advisory copy shown to the user before
+    /// they confirm. `None` for a Trash move, which is not a shell command.
+    #[must_use]
+    pub fn command(self, name: &str) -> Option<String> {
+        match self {
+            Self::Npm => Some(format!("npm uninstall -g {name}")),
+            Self::Pip => Some(format!("pip uninstall -y {name}")),
+            Self::Trash | Self::NotRemovable => None,
+        }
+    }
 }
 
 // ── Report model ─────────────────────────────────────────────────────────────
@@ -640,6 +719,49 @@ impl PackageReport {
         }
     }
 
+    /// How Cleanton may remove this package. See [`SecurityRemoval`].
+    #[must_use]
+    pub fn removal(&self) -> SecurityRemoval {
+        match self.source {
+            SecurityTargetKind::NodeGlobal => SecurityRemoval::Npm,
+            SecurityTargetKind::PythonSitePackages => SecurityRemoval::Pip,
+            SecurityTargetKind::HostPersistence => SecurityRemoval::NotRemovable,
+            SecurityTargetKind::NodeProject
+            | SecurityTargetKind::EditorExtensions
+            | SecurityTargetKind::RubyGems
+            | SecurityTargetKind::CargoRegistry
+            | SecurityTargetKind::GoModuleCache => SecurityRemoval::Trash,
+        }
+    }
+
+    /// Whether this row may offer a Remove control at all. Persistence files are
+    /// the user's own files, so they are deliberately excluded.
+    #[must_use]
+    pub fn is_removable(&self) -> bool {
+        !matches!(self.removal(), SecurityRemoval::NotRemovable)
+    }
+
+    /// What the armed removal will actually do, spelled out for the confirmation
+    /// panel before the user commits. Shared so both UIs say the same thing.
+    #[must_use]
+    pub fn removal_explanation(&self) -> String {
+        let name = self.name.as_str();
+        let version = self.version.as_deref().unwrap_or("");
+        let path = self.path.display();
+        match self.removal() {
+            SecurityRemoval::Npm => format!(
+                "Run `npm uninstall -g {name}` to remove it (version {version}). npm removes the package directory itself."
+            ),
+            SecurityRemoval::Pip => format!(
+                "Run `pip uninstall -y {name}` to remove it (version {version}). pip removes the package directory itself."
+            ),
+            SecurityRemoval::Trash => format!(
+                "No installed package manager owns this package, so {path} will be moved to the Trash. Recover it from the Trash until you empty it."
+            ),
+            SecurityRemoval::NotRemovable => String::new(),
+        }
+    }
+
     /// A copy-pasteable command the USER can run in their own shell to remove
     /// (alerts) or reinstall from a trusted source (tampers) this package with
     /// its package manager. ADVISORY ONLY — Cleanton never runs it. `None`
@@ -692,6 +814,24 @@ impl PackageReport {
                     format!("{editor} --uninstall-extension {id}")
                 }
             }
+            SecurityTargetKind::RubyGems => {
+                let name = shell_single_quote(&self.name);
+                if reinstall {
+                    format!("gem pristine {name}")
+                } else {
+                    format!("gem uninstall {name}")
+                }
+            }
+            // Neither of these has a manager Cleanton can hand the removal to:
+            // a registry cache entry is not installed software, and a
+            // persistence file is the user's own file, where trashing a
+            // `.zshrc` to fix one line would be the wrong remedy. Both are
+            // surfaced and left to the user.
+            SecurityTargetKind::CargoRegistry
+            | SecurityTargetKind::GoModuleCache
+            | SecurityTargetKind::HostPersistence => {
+                return None;
+            }
         };
         Some(cmd)
     }
@@ -742,6 +882,8 @@ impl PackageReport {
             lines.push("Reinstall from a trusted source to restore known-good bytes:".to_owned());
             if let Some(cmd) = self.suggested_command() {
                 lines.push(format!("$ {cmd}"));
+            } else if self.source == SecurityTargetKind::HostPersistence {
+                lines.push(PERSISTENCE_REMEDY.to_owned());
             }
         } else if self.is_alert() {
             lines.push(
@@ -751,10 +893,15 @@ impl PackageReport {
             if let Some(file) = self.primary_evidence_file() {
                 lines.push(format!("Inspect first: {}", join_rel(&self.path, file)));
             }
-            lines
-                .push("If you did not expect this, remove it with its package manager:".to_owned());
-            if let Some(cmd) = self.suggested_command() {
-                lines.push(format!("$ {cmd}"));
+            if self.source == SecurityTargetKind::HostPersistence {
+                lines.push(PERSISTENCE_REMEDY.to_owned());
+            } else {
+                lines.push(
+                    "If you did not expect this, remove it with its package manager:".to_owned(),
+                );
+                if let Some(cmd) = self.suggested_command() {
+                    lines.push(format!("$ {cmd}"));
+                }
             }
         } else {
             lines.push(
@@ -1413,7 +1560,73 @@ pub fn discover_default_targets() -> Vec<SecurityTarget> {
         home.join(".cursor/extensions"),
     );
 
+    // Version-only ecosystems. A gem tree, the Cargo registry cache, and the
+    // Go module cache together hold tens of thousands of directories; running
+    // the content scanner over all of them would dominate a scan for very
+    // little extra signal (their source is public and reviewed). They are
+    // matched against the advisory database by version instead, which answers
+    // the question that actually matters for them: is this release known-bad?
+    for version_dir in subdirs(&home.join(".gem/ruby")) {
+        push_if_dir(
+            &mut targets,
+            SecurityTargetKind::RubyGems,
+            version_dir.join("gems"),
+        );
+    }
+    for prefix in ["/opt/homebrew/lib/ruby/gems", "/usr/local/lib/ruby/gems"] {
+        for version_dir in subdirs(Path::new(prefix)) {
+            push_if_dir(
+                &mut targets,
+                SecurityTargetKind::RubyGems,
+                version_dir.join("gems"),
+            );
+        }
+    }
+    for registry in subdirs(&home.join(".cargo/registry/src")) {
+        push_if_dir(&mut targets, SecurityTargetKind::CargoRegistry, registry);
+    }
+    push_if_dir(
+        &mut targets,
+        SecurityTargetKind::GoModuleCache,
+        home.join("go/pkg/mod"),
+    );
+
+    push_host_persistence_targets(&mut targets, &home);
+
     targets
+}
+
+/// The machine's own persistence surface. Unlike the entries above these are
+/// FILE targets: the roots are scanned for persistence-shaped files by
+/// `enumerate_host_persistence`, never walked as package trees. `$HOME` is one
+/// of the roots because that is where the shell startup files live; only the
+/// handful of names in [`PERSISTENCE_FILE_NAMES`] is picked out of it.
+fn push_host_persistence_targets(targets: &mut Vec<SecurityTarget>, home: &Path) {
+    push_if_dir(
+        targets,
+        SecurityTargetKind::HostPersistence,
+        home.join("Library/LaunchAgents"),
+    );
+    push_if_dir(
+        targets,
+        SecurityTargetKind::HostPersistence,
+        home.join(".config/systemd/user"),
+    );
+    push_if_dir(
+        targets,
+        SecurityTargetKind::HostPersistence,
+        home.join(".config/autostart"),
+    );
+    push_if_dir(
+        targets,
+        SecurityTargetKind::HostPersistence,
+        home.join(".config/fish"),
+    );
+    push_if_dir(
+        targets,
+        SecurityTargetKind::HostPersistence,
+        home.to_path_buf(),
+    );
 }
 
 /// Locate `node_modules` and virtualenv `site-packages` trees under a
@@ -1484,11 +1697,13 @@ struct PackageCandidate {
     /// Path handed to the scanner (symlinks resolved, e.g. pnpm globals).
     scan_path: PathBuf,
     source: SecurityTargetKind,
+    /// Ecosystem used for advisory (known-vulnerable-version) matching.
+    ecosystem: Option<Ecosystem>,
 }
 
 /// Parse `name`/`version` from a `package.json` next to `dir`, falling back to
 /// the directory name.
-fn npm_manifest(dir: &Path, fallback: &str) -> (String, Option<String>) {
+pub(crate) fn npm_manifest(dir: &Path, fallback: &str) -> (String, Option<String>) {
     let manifest = dir.join("package.json");
     let Ok(bytes) = std::fs::read(&manifest) else {
         return (fallback.to_owned(), None);
@@ -1509,7 +1724,7 @@ fn npm_manifest(dir: &Path, fallback: &str) -> (String, Option<String>) {
 
 /// Best-effort version for a site-packages dir `name` from a sibling
 /// `<name>-<version>.dist-info` directory (PEP 376 normalized comparison).
-fn python_dist_info_version(site_packages: &Path, package: &str) -> Option<String> {
+pub(crate) fn python_dist_info_version(site_packages: &Path, package: &str) -> Option<String> {
     let normalized = package.to_lowercase().replace('-', "_");
     for dir in subdirs(site_packages) {
         let Some(file_name) = dir.file_name().map(|n| n.to_string_lossy().into_owned()) else {
@@ -1578,6 +1793,7 @@ fn push_node_package(target: &SecurityTarget, dir: &Path, out: &mut Vec<PackageC
         display_path: dir.to_path_buf(),
         scan_path,
         source: target.kind,
+        ecosystem: Some(Ecosystem::Npm),
     });
 }
 
@@ -1594,6 +1810,27 @@ fn enumerate_python_packages(target: &SecurityTarget, out: &mut Vec<PackageCandi
         .map(|entry| entry.path())
         .collect();
     paths.sort();
+
+    // Index `<name>-<version>.dist-info` directories once per `site-packages`
+    // root instead of re-reading the directory for every package.
+    let mut dist_versions: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    for path in &paths {
+        if !path.is_dir() {
+            continue;
+        }
+        let Some(file_name) = path.file_name().map(|n| n.to_string_lossy().into_owned()) else {
+            continue;
+        };
+        if let Some(stem) = file_name.strip_suffix(".dist-info")
+            && let Some((dist_name, version)) = stem.rsplit_once('-')
+        {
+            dist_versions
+                .entry(dist_name.to_lowercase().replace('-', "_"))
+                .or_insert_with(|| version.to_owned());
+        }
+    }
+
     for path in paths {
         let Some(file_name) = path.file_name().map(|n| n.to_string_lossy().into_owned()) else {
             continue;
@@ -1622,7 +1859,8 @@ fn enumerate_python_packages(target: &SecurityTarget, out: &mut Vec<PackageCandi
         if !is_package {
             continue;
         }
-        let version = python_dist_info_version(&target.root, &name);
+        let normalized = name.to_lowercase().replace('-', "_");
+        let version = dist_versions.get(&normalized).cloned();
         let scan_path = std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
         out.push(PackageCandidate {
             name,
@@ -1630,8 +1868,285 @@ fn enumerate_python_packages(target: &SecurityTarget, out: &mut Vec<PackageCandi
             display_path: path,
             scan_path,
             source: target.kind,
+            ecosystem: Some(Ecosystem::PyPI),
         });
     }
+}
+
+/// One `field = "value"` lookup in a `.gemspec` (lines look like
+/// `s.name = "rack".freeze` or `s.version = "2.2.8"`).
+fn gemspec_field(text: &str, field: &str) -> Option<String> {
+    let needle = format!(".{field}");
+    for line in text.lines() {
+        let line = line.trim();
+        if !line.contains(needle.as_str()) {
+            continue;
+        }
+        let Some((_, value)) = line.split_once('=') else {
+            continue;
+        };
+        let value = value.trim();
+        let Some(quoted) = value.strip_prefix('"') else {
+            continue;
+        };
+        if let Some((inner, _)) = quoted.split_once('"') {
+            return Some(inner.to_owned());
+        }
+    }
+    None
+}
+
+/// Read `name`/`version` from the gemspec inside an installed gem directory.
+pub(crate) fn gem_identity(dir: &Path, fallback: &str) -> (String, Option<String>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return (fallback.to_owned(), None);
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path
+            .extension()
+            .is_none_or(|extension| extension != "gemspec")
+        {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        if let (Some(name), version) = (
+            gemspec_field(&text, "name"),
+            gemspec_field(&text, "version"),
+        ) {
+            return (name, version);
+        }
+    }
+    (fallback.to_owned(), None)
+}
+
+/// Read `package.name`/`package.version` from a crate's `Cargo.toml`.
+pub(crate) fn cargo_identity(dir: &Path, fallback: &str) -> (String, Option<String>) {
+    let Ok(text) = std::fs::read_to_string(dir.join("Cargo.toml")) else {
+        return (fallback.to_owned(), None);
+    };
+    let Ok(value) = toml::from_str::<toml::Value>(&text) else {
+        return (fallback.to_owned(), None);
+    };
+    let Some(package) = value.get("package") else {
+        return (fallback.to_owned(), None);
+    };
+    let name = package
+        .get("name")
+        .and_then(toml::Value::as_str)
+        .unwrap_or(fallback)
+        .to_owned();
+    let version = package
+        .get("version")
+        .and_then(toml::Value::as_str)
+        .map(str::to_owned);
+    (name, version)
+}
+
+/// Split a cache entry name into `(name, version)`, e.g. `rack-2.2.8` or
+/// `github.com/foo/bar@v1.2.3`.
+pub(crate) fn split_versioned_dir_name(name: &str) -> Option<(String, String)> {
+    if let Some((package, version)) = name.rsplit_once('@')
+        && !package.is_empty()
+        && !version.is_empty()
+    {
+        return Some((package.to_owned(), version.to_owned()));
+    }
+    // `name-1.2.3`: split at the last `-` that is followed by a digit.
+    let mut indices = name
+        .char_indices()
+        .filter(|(index, character)| {
+            *character == '-'
+                && name
+                    .get(index.saturating_add(1)..)
+                    .and_then(|rest| rest.chars().next())
+                    .is_some_and(|next| next.is_ascii_digit())
+        })
+        .map(|(index, _)| index);
+    let split = indices.next_back()?;
+    let package = name.get(..split)?;
+    let version = name.get(split.saturating_add(1)..)?;
+    Some((package.to_owned(), version.to_owned()))
+}
+
+/// Version-only enumeration of installed gems. These are matched against the
+/// advisory database and never handed to the content scanner: a gem tree is
+/// large, and "is this release known-bad?" is a metadata question.
+fn enumerate_ruby_packages(target: &SecurityTarget, out: &mut Vec<PackageCandidate>) {
+    for dir in subdirs(&target.root) {
+        let fallback = dir.file_name().map_or_else(
+            || dir.display().to_string(),
+            |name| name.to_string_lossy().into_owned(),
+        );
+        let (name, version) = gem_identity(&dir, &fallback);
+        out.push(PackageCandidate {
+            name,
+            version,
+            display_path: dir.clone(),
+            scan_path: dir,
+            source: target.kind,
+            ecosystem: Some(Ecosystem::RubyGems),
+        });
+    }
+}
+
+/// Version-only enumeration of the Cargo registry source cache.
+fn enumerate_cargo_packages(target: &SecurityTarget, out: &mut Vec<PackageCandidate>) {
+    for dir in subdirs(&target.root) {
+        let fallback = dir.file_name().map_or_else(
+            || dir.display().to_string(),
+            |name| name.to_string_lossy().into_owned(),
+        );
+        let (name, version) = cargo_identity(&dir, &fallback);
+        out.push(PackageCandidate {
+            name,
+            version,
+            display_path: dir.clone(),
+            scan_path: dir,
+            source: target.kind,
+            ecosystem: Some(Ecosystem::CratesIo),
+        });
+    }
+}
+
+/// Version-only enumeration of the Go module cache (`module@version` dirs,
+/// sometimes nested one level inside a module path).
+fn enumerate_go_packages(target: &SecurityTarget, out: &mut Vec<PackageCandidate>) {
+    for dir in subdirs(&target.root) {
+        if dir.file_name().is_some_and(|name| name == "cache") {
+            continue;
+        }
+        let name = dir
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        if name.contains('@') {
+            push_go_package(&dir, out);
+            continue;
+        }
+        // One nesting level: `github.com/foo/bar@v1.2.3`.
+        for nested in subdirs(&dir) {
+            push_go_package(&nested, out);
+        }
+    }
+}
+
+fn push_go_package(dir: &Path, out: &mut Vec<PackageCandidate>) {
+    let Some(name) = dir
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+    else {
+        return;
+    };
+    let Some((package, version)) = split_versioned_dir_name(&name) else {
+        return;
+    };
+    out.push(PackageCandidate {
+        name: package,
+        version: Some(version),
+        display_path: dir.to_path_buf(),
+        scan_path: dir.to_path_buf(),
+        source: SecurityTargetKind::GoModuleCache,
+        ecosystem: Some(Ecosystem::Go),
+    });
+}
+
+/// Advice shown instead of a package-manager command when a *persistence file*
+/// is flagged. There is nothing to uninstall: the file is the user's own, and
+/// the fix is to delete the one line that was added, not the file.
+const PERSISTENCE_REMEDY: &str = "This file is yours, not a package: open it, delete the flagged line, and \
+     mark it reviewed. Do not delete the whole file.";
+
+/// Shell startup files whose basename marks them as per-login/per-shell hooks.
+/// Kept in step with the antivirus persistence engine, which is what recognises
+/// the same paths inside a scanned package.
+const PERSISTENCE_FILE_NAMES: &[&str] = &[
+    ".zshrc",
+    ".zprofile",
+    ".zlogin",
+    ".zshenv",
+    ".bashrc",
+    ".bash_profile",
+    ".bash_login",
+    ".profile",
+    ".login",
+];
+
+/// Which flavour of persistence file a `HostPersistence` root holds, decided by
+/// the root itself rather than by the files in it. That is what keeps the
+/// home-directory root from turning into a home-directory scan: `~` yields only
+/// the shell startup files, `~/Library/LaunchAgents` only its job definitions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PersistenceRoot {
+    /// `~/Library/LaunchAgents` — every `*.plist` is a job definition.
+    LaunchAgents,
+    /// `~/.config/systemd/user` — every `*.service` is a unit.
+    SystemdUser,
+    /// `~/.config/autostart` — every `*.desktop` is a login autostart entry.
+    DesktopAutostart,
+    /// `~/.config/fish` — `config.fish` startup script.
+    FishStartup,
+    /// `$HOME` — only the startup files in [`PERSISTENCE_FILE_NAMES`].
+    ShellStartup,
+}
+
+impl PersistenceRoot {
+    fn of(root: &Path) -> Self {
+        let lower = root.to_string_lossy().to_ascii_lowercase();
+        if lower.contains("library/launchagents") || lower.contains("library/launchdaemons") {
+            Self::LaunchAgents
+        } else if lower.contains("systemd/user") {
+            Self::SystemdUser
+        } else if lower.ends_with("/.config/autostart") || lower.ends_with("\\.config\\autostart") {
+            Self::DesktopAutostart
+        } else if lower.ends_with("/.config/fish") || lower.ends_with("\\.config\\fish") {
+            Self::FishStartup
+        } else {
+            Self::ShellStartup
+        }
+    }
+}
+
+/// Enumerate the persistence files directly inside a `HostPersistence` target
+/// root. The roots are shallow by construction, so this is a single
+/// non-recursive read: at most a few dozen entries for the launchd and systemd
+/// roots, and only the ten names in [`PERSISTENCE_FILE_NAMES`] for `$HOME`.
+fn enumerate_host_persistence(target: &SecurityTarget, out: &mut Vec<PackageCandidate>) {
+    let kind = PersistenceRoot::of(&target.root);
+    let Ok(entries) = std::fs::read_dir(&target.root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().map(|n| n.to_string_lossy().into_owned()) else {
+            continue;
+        };
+        let lower = name.to_ascii_lowercase();
+        let extension = path
+            .extension()
+            .map(|extension| extension.to_string_lossy().to_ascii_lowercase());
+        let wanted = match kind {
+            PersistenceRoot::LaunchAgents => extension.as_deref() == Some("plist"),
+            PersistenceRoot::SystemdUser => extension.as_deref() == Some("service"),
+            PersistenceRoot::DesktopAutostart => extension.as_deref() == Some("desktop"),
+            PersistenceRoot::FishStartup => lower == "config.fish",
+            PersistenceRoot::ShellStartup => PERSISTENCE_FILE_NAMES.contains(&lower.as_str()),
+        };
+        if !wanted || !path.is_file() {
+            continue;
+        }
+        out.push(PackageCandidate {
+            name,
+            version: None,
+            display_path: path.clone(),
+            scan_path: path,
+            source: SecurityTargetKind::HostPersistence,
+            ecosystem: None,
+        });
+    }
+    out.sort_by(|a, b| a.display_path.cmp(&b.display_path));
 }
 
 /// All distinct packages across the targets. Identical resolved paths (e.g. a
@@ -1648,6 +2163,12 @@ fn enumerate_packages(targets: &[SecurityTarget]) -> Vec<PackageCandidate> {
             SecurityTargetKind::PythonSitePackages => {
                 enumerate_python_packages(target, &mut packages);
             }
+            SecurityTargetKind::RubyGems => enumerate_ruby_packages(target, &mut packages),
+            SecurityTargetKind::CargoRegistry => enumerate_cargo_packages(target, &mut packages),
+            SecurityTargetKind::GoModuleCache => enumerate_go_packages(target, &mut packages),
+            SecurityTargetKind::HostPersistence => {
+                enumerate_host_persistence(target, &mut packages);
+            }
         }
     }
     let mut seen: HashSet<PathBuf> = HashSet::new();
@@ -1662,6 +2183,18 @@ fn enumerate_packages(targets: &[SecurityTarget]) -> Vec<PackageCandidate> {
 /// following inside a package).
 fn scan_config() -> ScanConfig {
     ScanConfig::default()
+}
+
+/// Advisory matches for a candidate, when both its ecosystem and version are
+/// known. An unknown version is `None` here rather than a guess: a false
+/// "vulnerable" claim is worse than silence.
+fn advisory_matches(database: &AdvisoryDatabase, candidate: &PackageCandidate) -> Vec<Advisory> {
+    let (Some(ecosystem), Some(version)) = (candidate.ecosystem, candidate.version.as_deref())
+    else {
+        return Vec::new();
+    };
+    let subject = PackageSubject::new(ecosystem, candidate.name.clone(), version);
+    database.matches(&subject)
 }
 
 /// How a scan interprets its results against the trusted baseline.
@@ -1751,17 +2284,85 @@ fn finding_in_benign_context(finding: &Finding) -> bool {
         .is_some_and(|location| is_benign_context(&location.path))
 }
 
+/// Project advisories into report findings. Hard facts, so they lead the list
+/// and are never demoted by the benign-context heuristic.
+fn advisory_findings(advisories: &[Advisory]) -> Vec<SecurityFinding> {
+    advisories
+        .iter()
+        .map(|advisory| SecurityFinding {
+            severity: advisory.severity,
+            confidence: Confidence::High,
+            category: ThreatCategory::SupplyChain,
+            title: sanitize_display(&format!(
+                "Vulnerable version: {} ({})",
+                advisory.id, advisory.summary
+            )),
+            description: sanitize_display(&format!(
+                "{} {} is inside a published affected range. {}",
+                advisory.package,
+                advisory
+                    .ranges
+                    .iter()
+                    .map(crate::advisories::AffectedRange::display)
+                    .collect::<Vec<_>>()
+                    .join(" or "),
+                advisory.remediation()
+            )),
+            file: None,
+            evidence: advisory.references.first().cloned(),
+        })
+        .collect()
+}
+
+/// Does an advisory hit justify a red assessment on its own?
+///
+/// Yes, and unlike the content heuristics it needs no corroboration: a
+/// published advisory naming the exact installed version is a fact, not a
+/// guess, so it takes the same route as a known-malware signature instead of
+/// the "notice" route an uncorroborated heuristic verdict takes.
+fn advisory_escalates(advisories: &[Advisory]) -> bool {
+    advisories
+        .iter()
+        .any(|advisory| matches!(advisory.severity, Severity::Critical | Severity::High))
+}
+
+fn advisory_verdict(advisories: &[Advisory]) -> AvVerdict {
+    if advisories.iter().any(|advisory| advisory.malicious) {
+        AvVerdict::Malicious
+    } else {
+        AvVerdict::Suspicious
+    }
+}
+
+/// Score floor for a version-only package, so a critical advisory cannot look
+/// quieter than a weak content heuristic.
+fn advisory_score(advisories: &[Advisory]) -> u32 {
+    advisories
+        .iter()
+        .map(|advisory| match advisory.severity {
+            Severity::Critical => 92,
+            Severity::High => 74,
+            Severity::Medium => 48,
+            Severity::Low => 22,
+            Severity::Info => 8,
+        })
+        .max()
+        .unwrap_or(0)
+}
+
 fn build_package_report(
     candidate: &PackageCandidate,
     report: &cleanton_antivirus::ScanReport,
     fingerprint: String,
+    advisories: &[Advisory],
 ) -> PackageReport {
     // Corroboration is computed over the FULL finding list (top_findings is
     // a display cap, not a policy input) and is change-kind independent; the
     // assessment is re-derived once the baseline diff assigns a change kind.
     // The install/lifecycle anchor comes from the package's own manifest.
     let lifecycle_scripts = lifecycle_script_paths(&candidate.scan_path);
-    let corroborated = verdict_corroborated(&report.findings, &lifecycle_scripts);
+    let corroborated = verdict_corroborated(&report.findings, &lifecycle_scripts)
+        || advisory_escalates(advisories);
     let mut findings: Vec<&Finding> = report.findings.iter().collect();
     // Benign-context evidence (CI workflows, tests, fixtures, docs) is
     // deprioritized for display — still shown when nothing else exists.
@@ -1771,38 +2372,81 @@ fn build_package_report(
             .then_with(|| b.severity.cmp(&a.severity))
             .then_with(|| b.confidence.cmp(&a.confidence))
     });
-    let top_findings = findings
-        .iter()
-        .take(TOP_FINDINGS_PER_PACKAGE)
-        .map(|finding| SecurityFinding {
-            severity: finding.severity,
-            confidence: finding.confidence,
-            category: finding.category,
-            title: sanitize_display(&finding.title),
-            description: sanitize_display(&finding.description),
-            file: finding.location.as_ref().map(|loc| loc.path.clone()),
-            evidence: finding.evidence.as_ref().map(|snippet| {
-                let mut end = snippet.len().min(EVIDENCE_SNIPPET_MAX);
-                while end > 0 && !snippet.is_char_boundary(end) {
-                    end = end.saturating_sub(1);
-                }
-                sanitize_display(snippet.get(..end).unwrap_or_default())
+    // Advisory matches lead: they are facts about the installed version, and
+    // they must survive the display cap even when the content engines also
+    // produced something.
+    let mut top_findings = advisory_findings(advisories);
+    let remaining = TOP_FINDINGS_PER_PACKAGE.saturating_sub(top_findings.len());
+    top_findings.extend(
+        findings
+            .iter()
+            .take(remaining)
+            .map(|finding| SecurityFinding {
+                severity: finding.severity,
+                confidence: finding.confidence,
+                category: finding.category,
+                title: sanitize_display(&finding.title),
+                description: sanitize_display(&finding.description),
+                file: finding.location.as_ref().map(|loc| loc.path.clone()),
+                evidence: finding.evidence.as_ref().map(|snippet| {
+                    let mut end = snippet.len().min(EVIDENCE_SNIPPET_MAX);
+                    while end > 0 && !snippet.is_char_boundary(end) {
+                        end = end.saturating_sub(1);
+                    }
+                    sanitize_display(snippet.get(..end).unwrap_or_default())
+                }),
             }),
-        })
-        .collect();
+    );
+    let verdict = if advisories.is_empty() {
+        report.verdict
+    } else {
+        let from_advisories = advisory_verdict(advisories);
+        if verdict_rank(from_advisories) > verdict_rank(report.verdict) {
+            from_advisories
+        } else {
+            report.verdict
+        }
+    };
     PackageReport {
         name: candidate.name.clone(),
         version: candidate.version.clone(),
         path: candidate.display_path.clone(),
         source: candidate.source,
-        verdict: report.verdict,
+        verdict,
         change: ChangeKind::Uncompared,
-        assessment: assess(ChangeKind::Uncompared, report.verdict, corroborated),
+        assessment: assess(ChangeKind::Uncompared, verdict, corroborated),
         corroborated,
         fingerprint,
-        score: report.score,
+        score: advisory_score(advisories).max(report.score),
         top_findings,
-        finding_count: report.findings.len(),
+        finding_count: report.findings.len().saturating_add(advisories.len()),
+    }
+}
+
+/// Report for a version-only package that matched at least one advisory. These
+/// are never content-scanned, so there is no AV evidence and no fingerprint;
+/// the advisory itself is the finding, and the empty fingerprint makes the
+/// baseline diff surface it every run (a known-vulnerable version must not be
+/// suppressed by having been seen before).
+fn build_advisory_only_report(
+    candidate: &PackageCandidate,
+    advisories: &[Advisory],
+) -> PackageReport {
+    let verdict = advisory_verdict(advisories);
+    let top_findings = advisory_findings(advisories);
+    PackageReport {
+        name: candidate.name.clone(),
+        version: candidate.version.clone(),
+        path: candidate.display_path.clone(),
+        source: candidate.source,
+        verdict,
+        change: ChangeKind::Uncompared,
+        assessment: assess(ChangeKind::Uncompared, verdict, true),
+        corroborated: true,
+        fingerprint: String::new(),
+        score: advisory_score(advisories),
+        finding_count: top_findings.len(),
+        top_findings,
     }
 }
 
@@ -1820,6 +2464,7 @@ fn build_package_report(
 /// never establishes a baseline (a partial package set must not become the
 /// trusted reference).
 #[must_use]
+#[allow(clippy::too_many_lines)]
 pub fn scan_targets_with_options(
     targets: Vec<SecurityTarget>,
     options: &SecurityScanOptions,
@@ -1827,9 +2472,26 @@ pub fn scan_targets_with_options(
     progress: &(dyn Fn(SecurityProgress) + Sync),
 ) -> SecurityReport {
     let started = Instant::now();
-    let packages = enumerate_packages(&targets);
+    let all_candidates = enumerate_packages(&targets);
+    // Version-only ecosystems are answered from metadata: no file reads beyond
+    // the manifest already parsed during enumeration, so they cost nothing and
+    // are resolved here rather than in the worker pool.
+    let database = AdvisoryDatabase::load();
+    let (packages, version_only): (Vec<PackageCandidate>, Vec<PackageCandidate>) = all_candidates
+        .into_iter()
+        .partition(|candidate| !candidate.source.is_version_only());
     let total = packages.len();
     progress(SecurityProgress { scanned: 0, total });
+
+    let preloaded_baseline = options
+        .baseline_path
+        .as_deref()
+        .map(security_baseline::load);
+    let skip_unchanged_av = !options.establish_baseline
+        && !options.include_unchanged
+        && preloaded_baseline
+            .as_ref()
+            .is_some_and(|baseline| !baseline.is_empty());
 
     let scanner = Scanner::with_default_engines(scan_config());
     let next = AtomicUsize::new(0);
@@ -1874,10 +2536,57 @@ pub fn scan_targets_with_options(
                                 String::new()
                             }
                         };
+                    let advisories = advisory_matches(&database, candidate);
+
+                    // Fast path in diff mode: when a package is byte-identical to
+                    // its trusted baseline entry and matches no advisories, skip
+                    // running all 11 content engines on its tree.
+                    if skip_unchanged_av
+                        && advisories.is_empty()
+                        && !fingerprint.is_empty()
+                        && let Some(baseline) = preloaded_baseline.as_ref()
+                        && let Some(entry) = baseline.entries.get(&security_baseline::identity_key(
+                            candidate.source,
+                            &candidate.name,
+                        ))
+                        && entry.fingerprint == fingerprint
+                    {
+                        let verdict = match entry.verdict_at_baseline.as_str() {
+                            "malicious" => AvVerdict::Malicious,
+                            "suspicious" => AvVerdict::Suspicious,
+                            _ => AvVerdict::Clean,
+                        };
+                        let package_report = PackageReport {
+                            name: candidate.name.clone(),
+                            version: candidate.version.clone(),
+                            path: candidate.display_path.clone(),
+                            source: candidate.source,
+                            verdict,
+                            change: ChangeKind::Uncompared,
+                            assessment: assess(ChangeKind::Uncompared, verdict, false),
+                            corroborated: false,
+                            fingerprint,
+                            score: 0,
+                            top_findings: Vec::new(),
+                            finding_count: 0,
+                        };
+                        let mut guard = match results.lock() {
+                            Ok(guard) => guard,
+                            Err(poisoned) => poisoned.into_inner(),
+                        };
+                        guard.push(package_report);
+                        let done = done_count.fetch_add(1, Ordering::Relaxed).saturating_add(1);
+                        progress(SecurityProgress {
+                            scanned: done,
+                            total,
+                        });
+                        continue;
+                    }
+
                     match scanner.scan_path(&candidate.scan_path) {
                         Ok(report) => {
                             let package_report =
-                                build_package_report(candidate, &report, fingerprint);
+                                build_package_report(candidate, &report, fingerprint, &advisories);
                             let mut guard = match results.lock() {
                                 Ok(guard) => guard,
                                 Err(poisoned) => poisoned.into_inner(),
@@ -1902,7 +2611,7 @@ pub fn scan_targets_with_options(
         }
     });
 
-    let results = match results.into_inner() {
+    let mut results = match results.into_inner() {
         Ok(results) => results,
         Err(poisoned) => poisoned.into_inner(),
     };
@@ -1911,6 +2620,16 @@ pub fn scan_targets_with_options(
         Err(poisoned) => poisoned.into_inner(),
     };
     errors.sort();
+
+    // Version-only packages enter the report ONLY when an advisory matches:
+    // listing tens of thousands of healthy crates and gems as "clean" would
+    // bury the packages that matter.
+    for candidate in &version_only {
+        let advisories = advisory_matches(&database, candidate);
+        if !advisories.is_empty() {
+            results.push(build_advisory_only_report(candidate, &advisories));
+        }
+    }
 
     let mut report = SecurityReport {
         targets,
@@ -1924,7 +2643,7 @@ pub fn scan_targets_with_options(
         incomplete: cancelled.load(Ordering::Relaxed),
         ..SecurityReport::empty()
     };
-    apply_baseline(&mut report, results, options);
+    apply_baseline(&mut report, results, options, preloaded_baseline);
     report.duration = started.elapsed();
     report
 }
@@ -1935,6 +2654,7 @@ fn apply_baseline(
     report: &mut SecurityReport,
     scanned: Vec<PackageReport>,
     options: &SecurityScanOptions,
+    preloaded_baseline: Option<SecurityBaseline>,
 ) {
     let Some(baseline_path) = options.baseline_path.as_deref() else {
         // Raw mode (no baseline available): every non-clean AV verdict is
@@ -1952,7 +2672,7 @@ fn apply_baseline(
     };
 
     report.baseline_used = true;
-    let existing = security_baseline::load(baseline_path);
+    let existing = preloaded_baseline.unwrap_or_else(|| security_baseline::load(baseline_path));
     let establish = options.establish_baseline || existing.is_empty();
 
     if establish && !report.incomplete {
@@ -2099,6 +2819,56 @@ mod tests {
         write(
             &dir.join("index.js"),
             "module.exports = function add(a, b) { return a + b; };\n",
+        );
+    }
+
+    /// Advisory (known-vulnerable version) wiring, end to end: a pinned old
+    /// lodash must produce a vulnerable-version finding, and the fixed version
+    /// must not.
+    #[test]
+    fn advisory_hit_is_reported_for_a_known_vulnerable_version() {
+        let temp = tempfile::tempdir().unwrap();
+        let node_modules = temp.path().join("node_modules");
+        let vulnerable = node_modules.join("lodash");
+        write(
+            &vulnerable.join("package.json"),
+            r#"{ "name": "lodash", "version": "4.17.20", "main": "index.js" }"#,
+        );
+        write(&vulnerable.join("index.js"), "module.exports = {};\n");
+        let safe = node_modules.join("lodash-safe");
+        write(
+            &safe.join("package.json"),
+            r#"{ "name": "lodash", "version": "4.17.21", "main": "index.js" }"#,
+        );
+        write(&safe.join("index.js"), "module.exports = {};\n");
+
+        let targets = vec![SecurityTarget {
+            kind: SecurityTargetKind::NodeGlobal,
+            root: node_modules,
+        }];
+        let report = scan_targets(targets, None, &|_| {});
+
+        let hits = report
+            .flagged
+            .iter()
+            .filter(|package| {
+                package
+                    .top_findings
+                    .iter()
+                    .any(|finding| finding.title.contains("Vulnerable version"))
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(hits.len(), 1, "only the 4.17.20 copy is affected");
+        assert_eq!(hits[0].version.as_deref(), Some("4.17.20"));
+        assert!(
+            hits[0].top_findings.iter().any(|finding| {
+                finding.description.contains("Upgrade lodash")
+                    && matches!(
+                        finding.severity,
+                        Severity::High | Severity::Critical | Severity::Medium
+                    )
+            }),
+            "the finding must name the remedy and carry the advisory severity"
         );
     }
 
@@ -2712,6 +3482,7 @@ module.exports = token;
             display_path: PathBuf::from("/tmp/pkg"),
             scan_path: PathBuf::from("/tmp/pkg"),
             source: SecurityTargetKind::NodeGlobal,
+            ecosystem: Some(Ecosystem::Npm),
         };
         let mut finding = strong_finding(ThreatCategory::SupplyChain, "package.json");
         finding.title = "Token harvest \u{2014} \u{201C}quoted\u{201D}".to_owned();
@@ -2729,7 +3500,7 @@ module.exports = token;
             engine_stats: Vec::new(),
             errors: Vec::new(),
         };
-        let report = build_package_report(&candidate, &av_report, "fp".to_owned());
+        let report = build_package_report(&candidate, &av_report, "fp".to_owned(), &[]);
         let top = report.top_findings.first().expect("one finding retained");
         assert_eq!(top.title, "Token harvest - \"quoted\"");
         assert_eq!(top.description, "reads ~/.npmrc -> exfiltrates... - badly");
@@ -2933,6 +3704,7 @@ module.exports = token;
             display_path: PathBuf::from("/tmp/ext"),
             scan_path: PathBuf::from("/tmp/ext"),
             source: SecurityTargetKind::EditorExtensions,
+            ecosystem: Some(Ecosystem::Npm),
         };
         let av_report = cleanton_antivirus::ScanReport {
             target: "/tmp/ext".to_owned(),
@@ -2949,7 +3721,7 @@ module.exports = token;
             engine_stats: Vec::new(),
             errors: Vec::new(),
         };
-        let report = build_package_report(&candidate, &av_report, "fp".to_owned());
+        let report = build_package_report(&candidate, &av_report, "fp".to_owned(), &[]);
         assert!(
             !report.corroborated,
             "runtime-bundle-only evidence must not corroborate"
@@ -3099,6 +3871,7 @@ module.exports = token;
             display_path: PathBuf::from("/tmp/pkg"),
             scan_path: PathBuf::from("/tmp/pkg"),
             source: SecurityTargetKind::NodeProject,
+            ecosystem: Some(Ecosystem::Npm),
         };
         let av_report = cleanton_antivirus::ScanReport {
             target: "/tmp/pkg".to_owned(),
@@ -3123,7 +3896,7 @@ module.exports = token;
             engine_stats: Vec::new(),
             errors: Vec::new(),
         };
-        let report = build_package_report(&candidate, &av_report, "fp".to_owned());
+        let report = build_package_report(&candidate, &av_report, "fp".to_owned(), &[]);
         // The medium own-code finding outranks both critical benign-context
         // ones for display…
         assert_eq!(report.top_findings[0].title, "own-code capability");

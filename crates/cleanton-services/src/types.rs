@@ -34,6 +34,7 @@ pub enum ServiceType {
     SystemLaunchAgent,  // /Library/LaunchAgents
     SystemLaunchDaemon, // /Library/LaunchDaemons
     BrewService,        // Managed by brew services
+    SystemdUserService, // ~/.config/systemd/user/*.service
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

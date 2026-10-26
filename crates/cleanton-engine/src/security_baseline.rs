@@ -96,6 +96,13 @@ pub fn identity_key(source: SecurityTargetKind, name: &str) -> String {
         SecurityTargetKind::NodeProject => "node_project",
         SecurityTargetKind::PythonSitePackages => "python_site_packages",
         SecurityTargetKind::EditorExtensions => "editor_extensions",
+        SecurityTargetKind::RubyGems => "ruby_gems",
+        SecurityTargetKind::CargoRegistry => "cargo_registry",
+        SecurityTargetKind::GoModuleCache => "go_module_cache",
+        // A persistence file's identity is its own name (`.zshrc`, a launchd
+        // label), which is already unique on a machine, so it needs no prefix
+        // of its own beyond the shared source tag.
+        SecurityTargetKind::HostPersistence => "host_persistence",
     };
     format!("{source_key}:{name}")
 }
