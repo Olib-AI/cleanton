@@ -219,7 +219,7 @@ pub fn fingerprint_package(path: &Path) -> std::io::Result<String> {
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
         hash_file_record(&mut hasher, &name, path)?;
-        return Ok(format!("{:x}", hasher.finalize()));
+        return Ok(to_hex(&hasher.finalize()));
     }
 
     let walker = walkdir::WalkDir::new(path)
@@ -250,7 +250,17 @@ pub fn fingerprint_package(path: &Path) -> std::io::Result<String> {
         );
         hash_file_record(&mut hasher, &rel, entry.path())?;
     }
-    Ok(format!("{:x}", hasher.finalize()))
+    Ok(to_hex(&hasher.finalize()))
+}
+
+/// Lowercase hex encoding of a digest. `sha2` 0.11 digests no longer
+/// implement `LowerHex`, so format the bytes explicitly.
+fn to_hex(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+    bytes.iter().fold(String::with_capacity(bytes.len() * 2), |mut out, b| {
+        let _ = write!(out, "{b:02x}");
+        out
+    })
 }
 
 /// Feed one file record (relative path + content hash, NUL-delimited) into
@@ -258,7 +268,16 @@ pub fn fingerprint_package(path: &Path) -> std::io::Result<String> {
 fn hash_file_record(hasher: &mut Sha256, rel: &str, file: &Path) -> std::io::Result<()> {
     let mut content = Sha256::new();
     let mut reader = std::fs::File::open(file)?;
-    std::io::copy(&mut reader, &mut content)?;
+    // `sha2` 0.11 hashers no longer implement `std::io::Write`, so stream
+    // through a fixed buffer instead of `std::io::copy`.
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let n = std::io::Read::read(&mut reader, &mut buf)?;
+        if n == 0 {
+            break;
+        }
+        content.update(&buf[..n]);
+    }
     hasher.update(rel.as_bytes());
     hasher.update([0u8]);
     hasher.update(content.finalize());
