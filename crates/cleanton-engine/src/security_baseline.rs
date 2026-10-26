@@ -257,10 +257,12 @@ pub fn fingerprint_package(path: &Path) -> std::io::Result<String> {
 /// implement `LowerHex`, so format the bytes explicitly.
 fn to_hex(bytes: &[u8]) -> String {
     use std::fmt::Write as _;
-    bytes.iter().fold(String::with_capacity(bytes.len() * 2), |mut out, b| {
-        let _ = write!(out, "{b:02x}");
-        out
-    })
+    bytes
+        .iter()
+        .fold(String::with_capacity(bytes.len() * 2), |mut out, b| {
+            let _ = write!(out, "{b:02x}");
+            out
+        })
 }
 
 /// Feed one file record (relative path + content hash, NUL-delimited) into
