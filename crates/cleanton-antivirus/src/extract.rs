@@ -463,7 +463,18 @@ impl LoadState {
                 continue;
             }
 
-            let raw_name = entry.name().to_owned();
+            // `zip` 9 returns `Result<Cow<str>, ZipError>` from `name()`
+            // (the stored name may not be valid UTF-8).
+            let raw_name = match entry.name() {
+                Ok(name) => name.into_owned(),
+                Err(e) => {
+                    self.errors.push(format!(
+                        "bad zip entry name #{} in '{}': {}",
+                        i, archive_name, e
+                    ));
+                    continue;
+                }
+            };
 
             // Path traversal guard.
             if !is_safe_archive_path(&raw_name) {
@@ -1451,11 +1462,15 @@ mod tests {
             result.files.iter().all(|f| f.rel_path != "bomb.txt"),
             "oversize lying entry must not be retained"
         );
-        assert!(
-            result.errors.iter().any(|e| e.contains("exceeds limit")),
-            "skip must be recorded: {:?}",
-            result.errors
-        );
+        // `zip` 9 enforces the declared size itself and errors out with
+        // "File is larger than its declared uncompressed size"; older versions
+        // let the read run on and tripped our own "exceeds limit" check. Either
+        // way the skip must be recorded.
+        let recorded = result
+            .errors
+            .iter()
+            .any(|e| e.contains("exceeds limit") || e.contains("declared"));
+        assert!(recorded, "skip must be recorded: {:?}", result.errors);
     }
 
     /// A flood of crafted oversize (lying-size) entries must be bounded by the
@@ -1501,10 +1516,21 @@ mod tests {
             ..ScanConfig::default()
         };
         let result = Loader::load_bytes("flood.zip", &buf, &cfg);
-        assert!(
-            matches!(result, Err(AvError::LimitExceeded(_))),
-            "skipped-entry flood must trip the extracted-bytes budget: {result:?}"
-        );
+        // `zip` 9 rejects each lying entry as soon as it decompresses past its
+        // declared size, so the flood is cut short per entry instead of being
+        // charged against the budget. Accept either bounded outcome, but never
+        // a retained file.
+        match result {
+            Err(AvError::LimitExceeded(_)) => {}
+            Ok(loaded) => {
+                assert!(
+                    loaded.files.is_empty(),
+                    "lying-size entries must not be retained"
+                );
+                assert!(!loaded.errors.is_empty(), "rejections must be recorded");
+            }
+            other => panic!("flood must be bounded, got: {other:?}"),
+        }
     }
 
     #[test]
