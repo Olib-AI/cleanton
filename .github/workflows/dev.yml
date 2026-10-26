@@ -51,7 +51,7 @@ jobs:
     name: Recipe registry + builtin registration
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Validate recipes (offline structural gate)
         run: python3 scripts/validate-recipes.py
@@ -73,7 +73,7 @@ jobs:
       matrix:
         os: [macos-14, ubuntu-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
@@ -123,7 +123,7 @@ jobs:
     name: cargo audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust toolchain (1.99.1)
         uses: dtolnay/rust-toolchain@stable
@@ -151,7 +151,7 @@ jobs:
     needs: [recipes, rust, audit]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Write run summary
         run: |
