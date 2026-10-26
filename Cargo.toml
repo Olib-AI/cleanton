@@ -60,7 +60,7 @@ tempfile = "3"
 sha2 = "0.10"
 # cleanton-antivirus (vendored from rusted-batata rb-antivirus) additions:
 regex = "1"
-base64 = "0.22"
+base64 = "0.23"
 sha1 = "0.10"
 md-5 = "0.10"
 hex = "0.4"
